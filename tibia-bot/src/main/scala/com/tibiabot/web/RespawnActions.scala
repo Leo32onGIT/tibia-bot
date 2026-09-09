@@ -28,13 +28,51 @@ object RespawnActions {
   private def clock(when: java.time.ZonedDateTime): String =
     when.toInstant.toString
 
+  /** What a moderator is agreeing to when they stretch a live hunt past the next
+   *  booking, appended to the confirmation of the edit they just made.
+   *
+   *  A live hunt is allowed to overrun — see `SlotEdit` — so this is a warning on
+   *  a success, and it has to say what actually happens. "Cut short" did not: a
+   *  booking a hunt reaches is not shortened but cancelled outright, its owner put
+   *  in the queue and DM'd that their slot is taken, and a queue promotion runs
+   *  from when it is promoted rather than to the window they booked — so their
+   *  hunt then overruns whoever is booked after them.
+   *
+   *  The exception is a booking belonging to the holder themselves, which folds
+   *  into the hunt they are already having and costs nobody anything.
+   *
+   *  Compared by display name because that is all `SlotEdit.cutInto` carries, and
+   *  both sides of the comparison are built by the same `Names.plain`. Two members
+   *  sharing a nickname would get the milder sentence; nothing else rests on it.
+   *
+   *  Whose booking is deliberately not named — the grid beside the message already
+   *  says whose every block on it is. */
+  def overrunNote(cutInto: Option[String], owner: String): String =
+    cutInto.map { who =>
+      if (who == owner) " It now runs into their own next booking, which will fold into this hunt."
+      else " It now runs into the next booking, which will be cancelled and its owner put in the queue."
+    }.getOrElse("")
+
   def describe(outcome: ClaimOutcome): ActionResult = outcome match {
     case ClaimOutcome.Claimed(respawn, claim) =>
       ActionResult(ok = true, s"${respawn.displayName} is yours for ${minutes(claim.durationMinutes)}.")
 
-    case ClaimOutcome.Queued(respawn, _, position) =>
-      // Not a refusal: they asked for a spawn and got a place in line for it.
-      ActionResult(ok = true, s"${respawn.displayName} is taken — you are number $position in the queue.")
+    case ClaimOutcome.BookedNext(respawn, startsAt, booked) =>
+      // Not a refusal: they asked for a spawn and got the first window on it
+      // nobody else had. A time, not a place in a line — the whole reason this
+      // books rather than queues is that it can say exactly when.
+      ActionResult(ok = true,
+        s"${respawn.displayName} is taken — ${minutes(booked)} on it is booked for you from ${clock(startsAt)}.")
+
+    case ClaimOutcome.BookAsked(respawn, _, deadline) =>
+      // Also not a refusal: the same question a hand-picked booking over
+      // somebody's slot raises, and their answer decides it.
+      ActionResult(ok = true,
+        s"The next window on ${respawn.displayName} is somebody else's booking. They have been asked " +
+          s"whether they are hunting it, and have until ${clock(deadline)} to answer.")
+
+    case ClaimOutcome.BookRefused(respawn, reason) =>
+      ActionResult(ok = false, s"${respawn.displayName} is taken, and the window after it could not be booked: $reason")
 
     case ClaimOutcome.Shortened(respawn, claim, requested, reservedFrom) =>
       val until = reservedFrom.map(from => s" — booked from ${clock(from)}").getOrElse("")
@@ -51,9 +89,6 @@ object RespawnActions {
 
     case ClaimOutcome.AlreadyHolding(respawn, _) =>
       ActionResult(ok = false, s"You already hold ${respawn.displayName}.")
-
-    case ClaimOutcome.QueueFull(respawn, limit) =>
-      ActionResult(ok = false, s"The queue for ${respawn.displayName} is full at $limit.")
 
     case ClaimOutcome.NoStamina(respawn, needed, stamina, resetsAt) =>
       ActionResult(ok = false,

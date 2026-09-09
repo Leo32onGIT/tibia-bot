@@ -28,12 +28,14 @@ class WorldConfigRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
 
     repo.listWorlds(guildId).map(_.name) should contain("Itestworld")
 
-    // show_neutral_activity is absent from the table ensureWorldsTable creates,
-    // so this also covers listWorlds' ALTER migrating a world set up before the
-    // column existed — it has to land defaulted on rather than null.
-    repo.listWorlds(guildId).find(_.name == world).map(_.showNeutralActivity) shouldBe Some("true")
-    repo.updateWorldString(guildId, "Itestworld", "show_neutral_activity", "false")
-    repo.listWorlds(guildId).find(_.name == world).map(_.showNeutralActivity) shouldBe Some("false")
+    // online_allies_min is absent from the table ensureWorldsTable creates, so
+    // this also covers listWorlds' ALTER migrating a world set up before the
+    // column existed — it has to land defaulted rather than null. (This stood on
+    // show_neutral_activity until that setting was removed; the migration it
+    // guards is the same one.)
+    repo.listWorlds(guildId).find(_.name == world).map(_.onlineAlliesMin) shouldBe Some(0)
+    repo.updateWorldInt(guildId, "Itestworld", "online_allies_min", 200)
+    repo.listWorlds(guildId).find(_.name == world).map(_.onlineAlliesMin) shouldBe Some(200)
 
     // string + int field updates
     repo.updateWorldString(guildId, "Itestworld", "detect_hunteds", "off")

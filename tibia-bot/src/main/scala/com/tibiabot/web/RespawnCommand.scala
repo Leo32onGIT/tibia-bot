@@ -2,33 +2,26 @@ package com.tibiabot.web
 
 import spray.json._
 
-/** A write, addressed to whichever bot runs a guild's respawns.
+/** A write, addressed to whichever bot runs a guild's respawns. Only the identity
+ *  that built a guild's forum runs its lifecycle, so a dashboard served by another
+ *  bot writes the command to Redis and the owning process performs it.
  *
- *  Several bot identities can share a guild, and only the one that built its
- *  respawn forum runs the lifecycle — so a dashboard served by one bot cannot
- *  perform a write in a guild another owns. Rather than refusing, the write is
- *  written to Redis and the owning process performs it.
- *
- *  Deliberately a flat bag of strings rather than a typed hierarchy per action.
- *  This crosses a process boundary between two builds that may not match: a
- *  field a newer version adds is simply absent to an older one, which is the
- *  failure mode we want. A sealed hierarchy would refuse to decode instead.
+ *  Deliberately a flat bag of strings rather than a typed hierarchy per action:
+ *  this crosses a process boundary between builds that may not match, and a field
+ *  a newer version adds should simply be absent to an older one, where a sealed
+ *  hierarchy would refuse to decode.
  *
  *  ==Who decides permission==
- *  Whichever bot can actually see the person. For a guild the issuer is in,
- *  that is the issuer, and it has decided before writing anything here. For a
- *  guild it is not in — the case this relay exists for — it is the executor,
- *  which resolves `actorId` in the guild and refuses the command outright if
- *  they are not entitled to it (see [[RespawnCommand.requiredTier]]).
+ *  Whichever bot can actually see the person. For a guild the issuer is in, that
+ *  is the issuer, deciding before writing anything here. For a guild it is not in
+ *  — the case this relay exists for — it is the executor, which resolves `actorId`
+ *  and refuses outright if they are not entitled (see
+ *  [[RespawnCommand.requiredTier]]).
  *
- *  It used to be the issuer in both cases, which meant asking the executing bot
- *  "who is this person" over Redis, waiting a second for the answer, and only
- *  then sending the write to that same bot. Two round trips to one process for
- *  one button press, and the first of them was the one that failed: a page load
- *  that lost its race with the answer refused the write with a permission error
- *  for somebody who had every right to it. Asking the bot that already has to
- *  do the work is one message instead of two, and it cannot race with itself.
- */
+ *  It used to be the issuer in both cases: asking the executing bot "who is this
+ *  person" over Redis, waiting, then sending the write to that same bot. Two round
+ *  trips for one press, and the first was the one that failed — a page load losing
+ *  that race refused the write for somebody with every right to it. */
 final case class RespawnCommand(
   id: String,
   guildId: String,

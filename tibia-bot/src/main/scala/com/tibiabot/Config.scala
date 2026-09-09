@@ -39,6 +39,46 @@ object Config {
 
   val tibiaDataMaxInFlight: Int = discord.getInt("tibiadata-max-in-flight")
 
+  /** CipSoft's official fansite API, the bot's second source for character sheets
+   *  — see [[com.tibiabot.fansiteapi.FansiteApiClient]].
+   *
+   *  `mode` is both rollout gate and rollback: `off` stays on the TibiaData path,
+   *  `shadow` fetches both and compares without changing what is posted, `race`
+   *  runs them out of phase and takes the fresher sheet. A mode past `off` with no
+   *  token degrades to `off` rather than failing every fetch. */
+  object FansiteApi {
+    sealed trait Mode
+    case object Off extends Mode
+    case object Shadow extends Mode
+    case object Race extends Mode
+
+    private val fansite = discord.getConfig("fansite-api")
+    val token: String = fansite.getString("token").trim
+    val baseUrl: String = fansite.getString("base-url").stripSuffix("/")
+    val userAgent: String = fansite.getString("user-agent")
+    val maxInFlight: Int = fansite.getInt("max-in-flight")
+    val minRequestGap: FiniteDuration = fansite.getDuration("min-request-gap").toScala
+    val requestGapJitter: Double = fansite.getDouble("request-gap-jitter")
+    val burst: Int = fansite.getInt("burst")
+    val maxQueueDelay: FiniteDuration = fansite.getDuration("max-queue-delay").toScala
+    val phaseOffsetTicks: Int = fansite.getInt("phase-offset-ticks")
+    val circuitOpenFor: java.time.Duration = fansite.getDuration("circuit-open-for")
+    val secondaryGrace: FiniteDuration = fansite.getDuration("secondary-grace").toScala
+
+    private val requested: Mode = fansite.getString("mode").trim.toLowerCase match {
+      case "shadow" => Shadow
+      case "race"   => Race
+      case _        => Off
+    }
+
+    val mode: Mode = if (token.isEmpty) Off else requested
+    val enabled: Boolean = mode != Off
+    /** True when a missing token is the only reason this is disabled — worth a
+     *  startup warning, since it means a deploy asked for the feature and
+     *  quietly did not get it. */
+    val disabledForMissingToken: Boolean = requested != Off && token.isEmpty
+  }
+
   /** Settings for the character age cache — see
    *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]]. Separate from `Cache` above
    *  because it is not only durations, and because `enabled` is meant to be a
@@ -58,6 +98,44 @@ object Config {
     def settings(pollInterval: FiniteDuration): tibiadata.AgeCacheSettings =
       tibiadata.AgeCacheSettings(ttl, pollInterval, maxStale, canaryFraction, maxEntries)
   }
+  /** The highscores sweep — see [[com.tibiabot.highscores.HighscoreService]].
+   *
+   *  One switch, in the shape of the respawn system's own, and on by default for
+   *  the same reason: a feature that has finished rolling out should not need an
+   *  env var on every host to exist. On means every world this process tracks,
+   *  and it covers posting as well as sweeping — see
+   *  [[com.tibiabot.highscores.HighscoreFeed]], which runs on every bot rather
+   *  than the primary alone. There is deliberately no per-world allowlist, because
+   *  the pacing already scales with the world count — the gap between requests
+   *  is the window divided by the work, so seventy worlds is a longer walk
+   *  rather than a bigger burst, and a knob that only ever moves once is a knob
+   *  to get wrong later. */
+  object Highscores {
+    private val highscores = discord.getConfig("highscores")
+    private def dur(key: String): FiniteDuration = highscores.getDuration(key).toScala
+
+    val enabled: Boolean = highscores.getBoolean("enabled")
+    val probeInterval: FiniteDuration = dur("probe-interval")
+    val snapshotInterval: FiniteDuration = dur("snapshot-interval")
+    val windowFraction: Double = highscores.getDouble("window-fraction")
+    val workers: Int = math.max(1, highscores.getInt("workers"))
+    val minRequestGap: FiniteDuration = dur("min-request-gap")
+    val maxInFlight: Int = math.max(1, highscores.getInt("max-in-flight"))
+
+    val scoreRetention: FiniteDuration = dur("score-retention")
+    val eventRetention: FiniteDuration = dur("event-retention")
+    val experienceRawRetention: FiniteDuration = dur("experience-raw-retention")
+    val experienceDailyRetention: FiniteDuration = dur("experience-daily-retention")
+
+    /** The stretch of a snapshot the sweep may spread its requests over.
+     *  Clamped, because a fraction at or below zero would mean "fire it all at
+     *  once" and one above 1 would run the sweep into the next snapshot. */
+    val window: FiniteDuration = {
+      val fraction = math.max(0.05, math.min(1.0, windowFraction))
+      FiniteDuration((snapshotInterval.toMillis * fraction).toLong, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+  }
+
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
@@ -124,10 +202,25 @@ object Config {
  val masslogEmoji: String = discord.getString("masslog-emoji")
  val bountyEmoji: String = discord.getString("bounty-emoji")
  val dromeEmoji: String = discord.getString("drome-emoji")
+ // Skill advances — see com.tibiabot.presentation.SkillEmojis.
+ val swordEmoji: String = discord.getString("sword-emoji")
+ val clubEmoji: String = discord.getString("club-emoji")
+ val axeEmoji: String = discord.getString("axe-emoji")
+ val bowEmoji: String = discord.getString("bow-emoji")
+ val shieldEmoji: String = discord.getString("shield-emoji")
+ val fistEmoji: String = discord.getString("fist-emoji")
+ val mlvlEmoji: String = discord.getString("mlvl-emoji")
   // Rate limiting configuration
   val globalMessageDelayMs: Int = discord.getInt("global-message-delay-ms")
   val onlineListMessageDelayMs: Int = discord.getInt("online-list-message-delay-ms")
   val onlineListPerChannelMinGapMs: Long = discord.getLong("online-list-per-channel-min-gap-ms")
+  val onlineListRepostEnabled: Boolean = discord.getBoolean("online-list-repost-enabled")
+  val onlineListRepostDirtyFraction: Double = discord.getDouble("online-list-repost-dirty-fraction")
+  val onlineListRepostQueueDepth: Int = discord.getInt("online-list-repost-queue-depth")
+  val onlineListRepostCooldownMs: Long = discord.getLong("online-list-repost-cooldown-ms")
+  val onlineListRepostUrgentQueueDepth: Int = discord.getInt("online-list-repost-urgent-queue-depth")
+  val onlineListRepostUrgentCooldownMs: Long = discord.getLong("online-list-repost-urgent-cooldown-ms")
+  val onlineListFooterMaxStaleMs: Long = discord.getLong("online-list-footer-max-stale-ms")
 
   /** Monitoring dashboard: Discord OAuth2 + session signing + reverse-proxy domain. */
   object Web {
@@ -137,33 +230,24 @@ object Config {
     val statusDomain: String = web.getString("status-domain")
     val statusPort: Int = web.getInt("status-port")
 
-    /** Where a browser actually reaches this bot, as a scheme and authority
-     *  with no trailing slash — the origin the OAuth redirect URI is built on.
-     *
-     *  Derived from `status-domain` unless overridden, so production needs no
-     *  new setting and gets exactly the string it had before. The override
-     *  exists for local runs: there the bot is reached through a plain-HTTP
-     *  port forward on localhost, and an `https://` redirect URI is one Discord
-     *  will send a browser to and the browser cannot load. Discord allows
-     *  `http://` redirect URIs for localhost specifically, which is what makes
-     *  signing in locally possible at all. */
+    /** Where a browser actually reaches this bot — scheme and authority, no
+     *  trailing slash — the origin the OAuth redirect URI is built on. Derived
+     *  from `status-domain` unless overridden, so production needs no new setting.
+     *  The override is for local runs behind a plain-HTTP port forward, where an
+     *  `https://` redirect URI is one the browser cannot load; Discord allows
+     *  `http://` for localhost specifically. */
     val baseUrl: String = {
       if (configuredBaseUrl.nonEmpty) configuredBaseUrl else s"https://$statusDomain"
     }
 
     private def configuredBaseUrl: String = web.getString("base-url").trim.stripSuffix("/")
 
-    /** Where members are sent to use the dashboard, which is not always
-     *  somewhere this bot serves.
-     *
-     *  [[baseUrl]] answers "where is *this* bot reached", and on a bot that runs
-     *  no dashboard the honest answer is nowhere — it has no `status-domain`, so
-     *  that origin comes out as a bare `https://`. This one answers the
-     *  different question the respawn board asks: where does the person reading
-     *  this post go to use the dashboard. There is one dashboard serving every
-     *  guild whichever bot runs them, so its address has a default here instead
-     *  of being something each bot has to be told, and a bot that does serve its
-     *  own still links to itself. */
+    /** Where members are sent to use the dashboard, which is not always somewhere
+     *  this bot serves. [[baseUrl]] answers "where is *this* bot reached", which
+     *  on a bot running no dashboard is a bare `https://`. This answers what the
+     *  respawn board asks instead: where the reader goes to use the dashboard.
+     *  One dashboard serves every guild, so its address defaults here rather than
+     *  being told to each bot; a bot serving its own still links to itself. */
     val dashboardOrigin: String =
       com.tibiabot.web.Origin.of(configuredBaseUrl, statusDomain, web.getString("dashboard-domain"))
 
@@ -208,12 +292,10 @@ object Config {
     val refreshToken: String = patreonApi.getString("refresh-token")
     val campaignId: String = patreonApi.getString("campaign-id")
     val syncInterval: FiniteDuration = patreonApi.getDuration("sync-interval").toScala
-    /** `/setup` kicks off its own sync before the subscription check, so
-     *  someone who subscribed minutes ago doesn't have to wait out
-     *  `sync-interval` — this is the shortest gap allowed between two syncs,
-     *  so a run of `/setup`s can't turn into a run of Patreon fetches. Shared
-     *  with the periodic sync: one that just ran counts, and `/setup` reuses
-     *  what it wrote. See BotApp.syncPatreonMembersForSetup. */
+    /** `/setup` syncs before its subscription check so a new supporter need not
+     *  wait out `sync-interval`. This is the shortest gap between two syncs, so a
+     *  run of `/setup`s cannot become a run of Patreon fetches. Shared with the
+     *  periodic sync — one that just ran counts. */
     val setupSyncCooldown: FiniteDuration = patreonApi.getDuration("setup-sync-cooldown").toScala
     /** How long `/setup` will wait on that sync before giving up on it and
      *  answering from the previous snapshot. The sync itself is left running;
@@ -237,28 +319,45 @@ object Config {
       case _ => Disabled
     }
     val sharingEnabled: Boolean = current != Disabled
+
+    /** A secondary waits for the primary's sheets rather than fetching its
+     *  own — see [[com.tibiabot.tibiadata.PrimaryPresence]] for why this is
+     *  safe to default on. */
+    val secondaryConsumeOnly: Boolean = discord.getBoolean("secondary-consume-only")
+
+    /** A primary polls worlds only a secondary serves, purely to publish them
+     *  — see [[com.tibiabot.app.UnionFetchReconciler]]. */
+    val primaryFetchesFleetWorlds: Boolean = discord.getBoolean("primary-fetches-fleet-worlds")
+
+    val heartbeatInterval: FiniteDuration = discord.getDuration("primary-heartbeat-interval").toScala
+
+    /** Longer than the interval, so one missed beat is not read as a death. */
+    val heartbeatTtl: FiniteDuration = heartbeatInterval * 3
+
+    /** Consume-only applies only where there is a primary to consume from. */
+    val consumeOnlyActive: Boolean = current == Secondary && secondaryConsumeOnly
+    val fleetFetchActive: Boolean = current == Primary && primaryFetchesFleetWorlds
+
+    /** How wide a fleet-fetch poll fans out. Narrower than a real world
+     *  stream's 32: these worlds are somebody else's, nothing here is waiting
+     *  on the result, and the point is to fill a cache rather than to detect a
+     *  death a moment sooner. Being gentler with the upstreams is worth more
+     *  than the speed. */
+    val fleetFetchFanOut: Int = discord.getInt("fleet-fetch-fan-out")
   }
 
   /** The respawn claim system (the `📅・sᴘᴀᴡɴs` forum, plus `/stamina` and
    *  `/bookings`).
    *
-   *  `enabled` was the feature's rollout gate, defaulting to false so that the
-   *  first deploy of the branch couldn't start creating forum channels in every
-   *  guild that had run `/setup` — prod and DEV run the same image. The feature
-   *  has since been live in prod, so the default is now **true** and matches
-   *  what actually runs; `RESPAWN_ENABLED` no longer has to be set to turn on a
-   *  shipped feature.
+   *  `enabled` was the rollout gate and now defaults to **true**, matching what
+   *  prod runs. False is still a clean withdrawal rather than a broken state:
+   *  neither command is registered and `/setup`/`/repair` skip the forum — worth
+   *  keeping for a local run that shouldn't touch a guild's forums.
    *
-   *  Setting it false is still a clean withdrawal rather than a broken state:
-   *  neither command is registered with Discord and `/setup`/`/repair` skip the
-   *  forum entirely. Worth keeping for a local run that shouldn't touch a
-   *  guild's forums.
-   *
-   *  The duration/queue/stamina values here are *defaults for a guild's first
-   *  setup*. They're copied into that guild's `respawn_settings` row at creation
-   *  and read from there afterwards, so retuning the bot's defaults later never
-   *  silently changes the rules under a guild that is already using it.
-   */
+   *  The duration/queue/stamina values are *defaults for a guild's first setup*,
+   *  copied into its `respawn_settings` row at creation and read from there
+   *  afterwards, so retuning the bot's defaults never changes the rules under a
+   *  guild already using it. */
   object Respawn {
     private val respawn = discord.getConfig("respawn")
     val enabled: Boolean = respawn.getBoolean("enabled")

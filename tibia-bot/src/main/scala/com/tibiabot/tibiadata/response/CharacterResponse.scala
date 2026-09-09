@@ -18,7 +18,24 @@ case class Character(
     houses: Option[List[Houses]],
     guild: Option[Guild],
     last_login: Option[String],
-    account_status: String
+    account_status: String,
+    /** Whether the character was traded in the last six months.
+     *
+     *  Absent from the payload rather than false when it does not apply -
+     *  TibiaData marks it `omitempty` - so it is optional here, and None and
+     *  Some(false) mean the same thing. It decays: TibiaData reads it off the
+     *  " (traded)" suffix tibia.com puts on the name, which goes when the new
+     *  owner renames the character or six months pass. Anything that needs to
+     *  know whether a character *was* traded at some past moment has to have
+     *  recorded it then - it cannot be asked for afterwards. */
+    traded: Option[Boolean],
+    /** When the character is due to be deleted, if it has been scheduled.
+     *
+     *  Absent for the overwhelming majority, like `traded` — TibiaData marks it
+     *  `omitempty` too. Positive evidence, and worth far more than inferring
+     *  deletion from a name that stopped resolving: a name resolving to nothing
+     *  says only that nobody answers to it, which a rename does as well. */
+    deletion_date: Option[String]
 )
 case class Killers(name: String, player: Boolean, traded: Boolean, summon: String)
 case class Deaths(time: String, level: Double, killers: List[Killers], assists: List[Killers], reason: String)

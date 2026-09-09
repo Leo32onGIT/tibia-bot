@@ -45,6 +45,38 @@ final class StreamState {
   def worldsData: Map[String, List[Worlds]] = _worlds
   def activityCommandBlocker: Map[String, Boolean] = _activityBlocker
 
+  /** Every hunted name any discord tracking `world` has asked about, lowercased
+   *  — named outright, or reached through a hunted guild.
+   *
+   *  Unioned across discords rather than kept per discord because what reads it
+   *  is per world: two discords watching the same world and hunting the same
+   *  character are one character to fetch, not two.
+   *
+   *  Guild members come from `_activity` because nothing cheaper knows them:
+   *  the online list carries no guild, and the character sheet that does is the
+   *  thing being decided about. That map holds allied guilds too, so it is
+   *  filtered by guild name rather than taken whole, and it makes membership
+   *  lag by a poll — someone who joins a hunted guild appears here only once a
+   *  fetch has noticed, and someone who left lingers until one notices that.
+   *  Neither costs anything but freshness: the only reader is
+   *  [[com.tibiabot.fansiteapi.FansiteRoster]], and a character missing from
+   *  this set is still fetched from TibiaData on the poll's own schedule. */
+  def huntedNamesForWorld(world: String): Set[String] = {
+    val hunted = _huntedPlayers
+    val guilds = _huntedGuilds
+    val activity = _activity
+    _worlds.iterator.collect {
+      case (guildId, worlds) if worlds.exists(_.name.equalsIgnoreCase(world)) =>
+        val guildNames = guilds.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+        val members =
+          if (guildNames.isEmpty) Iterator.empty[String]
+          else activity.getOrElse(guildId, Nil).iterator.collect {
+            case player if guildNames.contains(player.guild.toLowerCase) => player.name.toLowerCase
+          }
+        hunted.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase) ++ members
+    }.flatten.toSet
+  }
+
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     lock.synchronized { _activity = f(_activity) }
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =

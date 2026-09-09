@@ -228,9 +228,110 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE UNIQUE INDEX IF NOT EXISTS unique_bounty_subscription
            |ON bounty_notifications (guildid, world, userid, LOWER(character_name));""".stripMargin
 
+      // What each character's standing in each highscore list was at the last
+      // snapshot, so the next one can tell an advance from a character simply
+      // entering a list only a thousand deep. World-scoped like deaths and
+      // levels above: the answer is a fact about the world, not about any one
+      // discord, and blue and red share this database.
+      //
+      // `score`/`char_level` rather than `value`/`level` — both natural names
+      // are Postgres keywords that happen to work unquoted, and neither is
+      // worth a migration if that ever stops being true.
+      val createHighscoreValueTable =
+        s"""CREATE TABLE IF NOT EXISTS highscore_value (
+           |world VARCHAR(255) NOT NULL,
+           |category VARCHAR(32) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |score BIGINT NOT NULL,
+           |last_seen TIMESTAMP NOT NULL,
+           |PRIMARY KEY (world, category, name)
+           |);""".stripMargin
+
+      // Advances that were detected, for audit and the dashboard. Deliberately
+      // not what stops a repost — the stored score does that — so this can be
+      // pruned as hard as the disk wants without anything being announced twice.
+      val createHighscoreEventsTable =
+        s"""CREATE TABLE IF NOT EXISTS highscore_events (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |world VARCHAR(255) NOT NULL,
+           |category VARCHAR(32) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |previous_score BIGINT NOT NULL,
+           |score BIGINT NOT NULL,
+           |observed TIMESTAMP NOT NULL
+           |);""".stripMargin
+
+      // How far through the advances each bot has posted. Per bot, not per
+      // world: the sweep runs on the primary alone, but every bot is a
+      // different Discord user in its own guilds and can only post to those, so
+      // each reads the shared events table at its own pace.
+      val createHighscoreFeedCursorTable =
+        s"""CREATE TABLE IF NOT EXISTS highscore_feed_cursor (
+           |bot_id VARCHAR(255) NOT NULL,
+           |last_event_id BIGINT NOT NULL,
+           |PRIMARY KEY (bot_id)
+           |);""".stripMargin
+
+      val createHighscoreEventsIndex =
+        s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
+           |ON highscore_events (world, observed);""".stripMargin
+
+      // Experience history, which posts nothing and exists for the statistics
+      // channel to read later. Two tables because the honest hourly reading and
+      // the thing worth keeping for a year are different sizes: raw readings are
+      // 1.63M rows a day across 68 worlds, so they live a week, while the rollup
+      // carries one row per character per server-save day at a fortieth of that.
+      val createExperienceReadingTable =
+        s"""CREATE TABLE IF NOT EXISTS experience_reading (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |observed TIMESTAMP NOT NULL,
+           |char_level INT NOT NULL,
+           |experience BIGINT NOT NULL,
+           |PRIMARY KEY (world, name, observed)
+           |);""".stripMargin
+
+      val createExperienceDailyTable =
+        s"""CREATE TABLE IF NOT EXISTS experience_daily (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |experience BIGINT NOT NULL,
+           |PRIMARY KEY (world, name, save_day)
+           |);""".stripMargin
+
+      // The prunes delete by time across every world, and neither primary key
+      // leads with the column they filter on.
+      val createExperienceReadingIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_reading_observed
+           |ON experience_reading (observed);""".stripMargin
+
+      val createExperienceDailyIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_daily_save_day
+           |ON experience_daily (save_day);""".stripMargin
+
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
+
+      newStatement.executeUpdate(createHighscoreValueTable)
+      newStatement.executeUpdate(createHighscoreEventsTable)
+      newStatement.executeUpdate(createHighscoreEventsIndex)
+      newStatement.executeUpdate(createHighscoreFeedCursorTable)
+
+      newStatement.executeUpdate(createExperienceReadingTable)
+      newStatement.executeUpdate(createExperienceDailyTable)
+      newStatement.executeUpdate(createExperienceReadingIndex)
+      newStatement.executeUpdate(createExperienceDailyIndex)
 
       newStatement.close()
     }
@@ -273,6 +374,10 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
              |reason VARCHAR(255) NOT NULL,
              |reason_text VARCHAR(255) NOT NULL,
              |added_by VARCHAR(255) NOT NULL,
+             |traded_when_added VARCHAR(255) NOT NULL DEFAULT 'false',
+             |flagged_reason VARCHAR(255) NOT NULL DEFAULT '',
+             |flagged_at VARCHAR(255) NOT NULL DEFAULT '',
+             |tag VARCHAR(255) NOT NULL DEFAULT '',
              |PRIMARY KEY (name)
              |);""".stripMargin
 
@@ -291,6 +396,10 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
              |reason VARCHAR(255) NOT NULL,
              |reason_text VARCHAR(255) NOT NULL,
              |added_by VARCHAR(255) NOT NULL,
+             |traded_when_added VARCHAR(255) NOT NULL DEFAULT 'false',
+             |flagged_reason VARCHAR(255) NOT NULL DEFAULT '',
+             |flagged_at VARCHAR(255) NOT NULL DEFAULT '',
+             |tag VARCHAR(255) NOT NULL DEFAULT '',
              |PRIMARY KEY (name)
              |);""".stripMargin
 
@@ -331,7 +440,9 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |deaths_min INT NOT NULL,
               |exiva_list VARCHAR(255) NOT NULL,
               |online_combined VARCHAR(255) NOT NULL,
-              |show_neutral_activity VARCHAR(255) NOT NULL DEFAULT 'true',
+              |online_allies_min INT NOT NULL DEFAULT 0,
+              |online_enemies_min INT NOT NULL DEFAULT 0,
+              |online_neutrals_min INT NOT NULL DEFAULT 0,
               |PRIMARY KEY (name)
               |);""".stripMargin
 

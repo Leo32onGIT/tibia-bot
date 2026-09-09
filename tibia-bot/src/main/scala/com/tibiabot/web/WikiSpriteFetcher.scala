@@ -1,8 +1,8 @@
 package com.tibiabot.web
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes, Uri}
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes, Uri}
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -17,7 +17,7 @@ final class WikiSpriteFetcher(baseUrl: String = WikiSpriteFetcher.DefaultBaseUrl
                              (implicit system: ActorSystem, ec: ExecutionContext) extends StrictLogging {
 
   /** `Special:Redirect/file/X.gif` answers with a 302 to the real file, and
-   *  akka-http does not follow redirects on its own — left unhandled this would
+   *  pekko-http does not follow redirects on its own — left unhandled this would
    *  quietly cache nothing at all, since a 302 is not a success and carries no
    *  image. Bounded so a redirect loop cannot spin. */
   private val MaxRedirects = 4
@@ -34,7 +34,7 @@ final class WikiSpriteFetcher(baseUrl: String = WikiSpriteFetcher.DefaultBaseUrl
   private def follow(uri: Uri, redirectsLeft: Int): Future[Option[Array[Byte]]] =
     Http().singleRequest(HttpRequest(uri = uri)).flatMap { response =>
       if (response.status.isRedirection()) {
-        response.header[akka.http.scaladsl.model.headers.Location] match {
+        response.header[org.apache.pekko.http.scaladsl.model.headers.Location] match {
           case Some(location) if redirectsLeft > 0 =>
             response.discardEntityBytes()
             // Resolved against the current uri, so a relative Location works.

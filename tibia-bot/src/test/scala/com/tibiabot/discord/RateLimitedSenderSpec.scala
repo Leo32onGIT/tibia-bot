@@ -210,4 +210,35 @@ class RateLimitedSenderSpec extends AnyFunSuite with Matchers {
     ticker.tick(); ticker.tick()
     sent.toList shouldBe List("a", "b")
   }
+
+  test("cancelGroup drops that group's pending items and nothing else") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    val sent = ListBuffer.empty[String]
+
+    sender.enqueue("edit", Some("chan-1:0"), Some("chan-1"))(() => sent += "a0")
+    sender.enqueue("edit", Some("chan-1:1"), Some("chan-1"))(() => sent += "a1")
+    sender.enqueue("edit", Some("chan-2:0"), Some("chan-2"))(() => sent += "b0")
+
+    sender.cancelGroup("chan-1") shouldBe 2
+    sender.queueDepth shouldBe 1
+    ticker.tick()
+    sent.toList shouldBe List("b0")
+  }
+
+  test("cancelGroup on a group with nothing queued is a no-op") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    sender.enqueue("edit", Some("chan-1:0"), Some("chan-1"))(() => ())
+    sender.cancelGroup("chan-2") shouldBe 0
+    sender.queueDepth shouldBe 1
+  }
+
+  test("cancelGroup leaves ungrouped items alone") {
+    val ticker = new ManualTicker
+    val sender = new RateLimitedSender(ticker.start)
+    sender.enqueue("death")(() => ())
+    sender.cancelGroup("chan-1") shouldBe 0
+    sender.queueDepth shouldBe 1
+  }
 }

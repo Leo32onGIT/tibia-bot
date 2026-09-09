@@ -1,6 +1,6 @@
 package com.tibiabot.web
 
-import akka.actor.Scheduler
+import org.apache.pekko.actor.Scheduler
 import com.tibiabot.persistence.RedisCache
 import com.typesafe.scalalogging.StrictLogging
 
@@ -55,7 +55,7 @@ final class RelayedRespawnActions(
           RelayedRespawnActions.Unclear
         })
       case None if System.nanoTime() < deadline =>
-        akka.pattern.after(pollEvery, scheduler)(awaitReply(id, deadline))
+        org.apache.pekko.pattern.after(pollEvery, scheduler)(awaitReply(id, deadline))
       case None =>
         // Timing out says nothing about whether it happened: the other process
         // may be slow rather than absent, and the command is still sitting there

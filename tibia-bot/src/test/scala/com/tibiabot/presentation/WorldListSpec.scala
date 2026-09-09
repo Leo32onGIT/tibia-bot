@@ -6,28 +6,50 @@ import org.scalatest.matchers.should.Matchers
 /** Pins the multi-world list formatting used by the allies/hunted list output. */
 class WorldListSpec extends AnyFunSuite with Matchers {
 
-  test("each world's players are prefixed by a world header") {
+  test("each world's players are prefixed by a markdown world heading") {
     val out = WorldList.format(Map("Antica" -> List("a", "b")))
-    out shouldBe List(":globe_with_meridians: **Antica** :globe_with_meridians:", "a", "b")
+    out shouldBe List("## Antica", "a", "b")
   }
 
   test("worlds are ordered alphabetically") {
     val out = WorldList.format(Map("Bona" -> List("b"), "Antica" -> List("a")))
-    out.filter(_.contains(":globe_with_meridians:")) shouldBe List(
-      ":globe_with_meridians: **Antica** :globe_with_meridians:",
-      ":globe_with_meridians: **Bona** :globe_with_meridians:"
-    )
-    out.indexWhere(_.contains("Antica")) should be < out.indexWhere(_.contains("Bona"))
+    out.filter(_.startsWith("## ")) shouldBe List("## Antica", "## Bona")
+    out.indexOf("## Antica") should be < out.indexOf("## Bona")
   }
 
-  test("the 'Character does not exist' bucket is pushed to the end") {
+  /** Both synthetic buckets say "we could not place this player on a world",
+   *  which is the least interesting thing the list can say — so they follow
+   *  every real world rather than sorting in among them by first letter. */
+  test("the synthetic buckets are pushed to the end, contents and all") {
+    val out = WorldList.format(Map(
+      "Not checked yet" -> List("unknown"),
+      "Antica" -> List("a"),
+      "Zuna" -> List("z")
+    ))
+    out.last shouldBe "unknown"
+    out.indexOf("## Not checked yet") should be > out.indexOf("## Zuna")
+  }
+
+  test("'Character does not exist' sorts last for the same reason") {
     val out = WorldList.format(Map(
       "Character does not exist" -> List("ghost"),
       "Antica" -> List("a"),
       "Bona" -> List("b")
     ))
     out.last shouldBe "ghost"
-    out.indexWhere(_.contains("Character does not exist")) should be > out.indexWhere(_.contains("Bona"))
+    out.indexOf("## Character does not exist") should be > out.indexOf("## Bona")
+  }
+
+  /** Ordering between the two synthetic buckets is alphabetical like any other,
+   *  but both must still follow every real world. */
+  test("both synthetic buckets follow every real world") {
+    val out = WorldList.format(Map(
+      "Not checked yet" -> List("unknown"),
+      "Character does not exist" -> List("ghost"),
+      "Zuna" -> List("z")
+    ))
+    out.indexOf("## Zuna") should be < out.indexOf("## Character does not exist")
+    out.indexOf("## Zuna") should be < out.indexOf("## Not checked yet")
   }
 
   test("an empty map yields an empty list") {

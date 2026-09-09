@@ -8,6 +8,8 @@ import com.tibiabot.tracking.MasslogDetector
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.entities.User
+import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
+import net.dv8tion.jda.api.requests.ErrorResponse
 
 import java.time.Instant
 import scala.collection.concurrent.TrieMap
@@ -16,19 +18,15 @@ import scala.collection.concurrent.TrieMap
  *  DMs themselves.
  *
  *  ==Why the subscriptions are cached==
- *  The online-list sweep asks "does anyone here care?" every fifteen seconds for
- *  every guild on a world, and the honest answer is almost always no. Reading
- *  that from Postgres each time would be a query per guild per sweep to learn
- *  nothing, so the whole (small) set is loaded once at startup and written
- *  through from there. Writes go to the database first and to the cache after,
- *  so a failed write can't leave the cache claiming a subscription that isn't
- *  stored.
+ *  The online-list sweep asks "does anyone here care?" every fifteen seconds per
+ *  guild per world, and the answer is almost always no — a query per guild per
+ *  sweep to learn nothing. The whole (small) set is loaded at startup and written
+ *  through: database first, cache after, so a failed write cannot leave the cache
+ *  claiming a subscription that is not stored.
  *
  *  ==Concurrency==
- *  Reads come from each world's sweep thread; writes come from JDA's interaction
- *  pool. TrieMap rather than a plain mutable map for exactly that reason — see
- *  BotListener's pendingScreenshots for the same choice.
- */
+ *  Reads come from each world's sweep thread, writes from JDA's interaction pool —
+ *  hence TrieMap rather than a plain mutable map. */
 final class NotifyService(
   repository: NotifyRepository,
   discordGateway: DiscordGateway,
@@ -134,6 +132,60 @@ final class NotifyService(
       updated
     }
 
+  /** Stop watching one character. Returns the row that went, so the caller can
+   *  say whose alerts have just stopped — after this it is nowhere to be read.
+   *
+   *  Database first, cache after, like every other write here: a delete that
+   *  fails must leave the subscription still firing rather than leave the sweep
+   *  and the stored rows disagreeing until the next restart. */
+  def removeBounty(id: Long): Option[BountySub] =
+    bountySubs.get(id).flatMap { _ =>
+      try {
+        repository.deleteBounty(id)
+        bountySubs.remove(id)
+      } catch {
+        case ex: Throwable =>
+          logger.warn(s"Failed to delete bounty subscription $id", ex)
+          None
+      }
+    }
+
+  /** Same contract as [[removeBounty]], for the one mass-log subscription a user
+   *  holds on a world. Deleted rather than switched off, so that "I do not want
+   *  this" leaves nothing behind claiming otherwise — the role comes off with it
+   *  and the DM offers the way back. */
+  def removeMasslog(id: Long): Option[MasslogSub] =
+    masslogSubs.get(id).flatMap { _ =>
+      try {
+        repository.deleteMasslog(id)
+        masslogSubs.remove(id)
+      } catch {
+        case ex: Throwable =>
+          logger.warn(s"Failed to delete mass-log subscription $id", ex)
+          None
+      }
+    }
+
+  /** Drop everything one user holds in one guild, for a user who has left it.
+   *
+   *  Everything rather than the one subscription whose DM failed: leaving takes
+   *  all of them out of reach at once, and dropping them one failed alert at a
+   *  time would keep trying the rest for as long as the guild kept generating
+   *  alerts they can no longer be told about. */
+  def forgetUser(guildId: String, userId: String): Unit = {
+    try repository.deleteUser(guildId, userId)
+    catch {
+      case ex: Throwable =>
+        logger.warn(s"Failed to delete notification subscriptions for user '$userId' in guild '$guildId'", ex)
+        return
+    }
+    val dropped = masslogSubs.count { case (_, s) => s.guildId == guildId && s.userId == userId } +
+      bountySubs.count { case (_, s) => s.guildId == guildId && s.userId == userId }
+    masslogSubs.filterInPlace((_, sub) => !(sub.guildId == guildId && sub.userId == userId))
+    bountySubs.filterInPlace((_, sub) => !(sub.guildId == guildId && sub.userId == userId))
+    if (dropped > 0) logger.info(s"Dropped $dropped notification subscription(s) for '$userId', who has left guild '$guildId'")
+  }
+
   def forgetGuild(guildId: String): Unit = {
     try repository.deleteGuild(guildId)
     catch { case ex: Throwable => logger.warn(s"Failed to delete notification subscriptions for guild '$guildId'", ex) }
@@ -164,6 +216,7 @@ final class NotifyService(
         markMasslogNotified(sub, now)
         send(
           sub.userId,
+          sub.guildId,
           NotifyEmbeds.masslogDm(world, guildName, zapCount, enemiesOnline, sub.threshold),
           NotifyEmbeds.masslogControls(sub.copy(lastNotified = Some(now)))
         )
@@ -182,6 +235,7 @@ final class NotifyService(
           markBountyNotified(sub, now)
           send(
             sub.userId,
+            sub.guildId,
             NotifyEmbeds.bountyDm(world, guildName, character, level, vocation),
             NotifyEmbeds.bountyControls(sub.copy(lastNotified = Some(now)))
           )
@@ -208,21 +262,60 @@ final class NotifyService(
    *  server-save DMs use — these are per-user messages that must never compete
    *  with deaths or online-list edits for REST budget.
    *
-   *  A failure is logged and dropped rather than counted towards giving up on
-   *  the subscription: unlike the boosted list, these rows belong to a guild
-   *  this bot is certainly in, so a failure means closed DMs, and closed DMs are
-   *  the user's business to reopen. */
-  private def send(userId: String, embed: net.dv8tion.jda.api.entities.MessageEmbed, controls: ActionRow): Unit =
+   *  A failure is not counted towards giving up, the way the boosted list counts
+   *  its own: a run of failures cannot tell "has closed their DMs" from "is no
+   *  longer here", and those want opposite answers. Closed DMs are the user's
+   *  business to reopen and the subscription should wait for them; a user who has
+   *  left the guild can never be told anything by it again.
+   *
+   *  So the failure asks instead of counting — see [[dropIfGone]]. The question
+   *  has a definitive answer on the first failure, which is why no strike count
+   *  is stored anywhere. */
+  private def send(userId: String, guildId: String, embed: net.dv8tion.jda.api.entities.MessageEmbed, controls: ActionRow): Unit =
     outboundSender.enqueue("notify-dm") { () =>
       val user: User = discordGateway.retrieveUser(userId)
       if (user != null) {
         user.openPrivateChannel().queue(
           channel => channel.sendMessageEmbeds(embed).setComponents(controls).queue(
             _ => (),
-            (ex: Throwable) => logger.debug(s"Could not deliver notification DM to '$userId': ${ex.getMessage}")
+            (ex: Throwable) => {
+              logger.debug(s"Could not deliver notification DM to '$userId': ${ex.getMessage}")
+              dropIfGone(guildId, userId)
+            }
           ),
-          (ex: Throwable) => logger.debug(s"Could not open a DM channel with '$userId': ${ex.getMessage}")
+          (ex: Throwable) => {
+            logger.debug(s"Could not open a DM channel with '$userId': ${ex.getMessage}")
+            dropIfGone(guildId, userId)
+          }
         )
       }
+    }
+
+  /** After a DM fails: is this someone who cannot be written to, or someone who
+   *  is no longer here?
+   *
+   *  Discord refuses a DM to a user sharing no guild with the bot, and it refuses
+   *  one to a user who has closed them — the same 50007 either way, which is why
+   *  the answer has to be asked for rather than read off the failure.
+   *
+   *  `retrieveMemberById` is a REST lookup, so it works without the privileged
+   *  members intent this bot deliberately does not enable — `syncRole` already
+   *  depends on that. Only UNKNOWN_MEMBER drops anything: every other failure,
+   *  including a plain outage, leaves the subscription alone, because a wrongly
+   *  dropped one is silent and the user would have no idea to set it up again. */
+  private def dropIfGone(guildId: String, userId: String): Unit =
+    try {
+      Option(discordGateway.guildById(guildId)).foreach { guild =>
+        guild.retrieveMemberById(userId).queue(
+          _ => (),
+          new ErrorHandler().handle(
+            ErrorResponse.UNKNOWN_MEMBER,
+            new java.util.function.Consumer[ErrorResponseException] {
+              def accept(ex: ErrorResponseException): Unit = forgetUser(guildId, userId)
+            })
+        )
+      }
+    } catch {
+      case ex: Throwable => logger.debug(s"Could not check membership of '$userId' in '$guildId': ${ex.getMessage}")
     }
 }

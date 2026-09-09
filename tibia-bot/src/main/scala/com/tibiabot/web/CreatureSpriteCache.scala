@@ -11,22 +11,15 @@ import scala.util.control.NonFatal
 /** Creature sprites, fetched once from the wiki and served from our own domain
  *  thereafter.
  *
- *  The point is not only to stop leaning on a third party. tibiawiki geoblocks
- *  some regions, so a page that hotlinks it simply has no art for those
- *  visitors — while the VPS the bot runs on can reach it perfectly well. Moving
- *  the fetch server-side turns "broken for some people" into "works for
- *  everyone", which is a different kind of win from the one the BattlEye icons
- *  were vendored for. A board also shows dozens of sprites at once rather than
- *  one thumbnail per Discord post, so the request volume is nothing we should
- *  be sending somebody else's way.
+ *  Not only about leaning on a third party: tibiawiki geoblocks some regions, so a
+ *  hotlinking page has no art at all for those visitors while the VPS reaches it
+ *  fine. A board also shows dozens of sprites at once rather than one thumbnail
+ *  per Discord post, so the volume is not somebody else's to carry.
  *
- *  Misses never block the page. A sprite that isn't on disk yet is reported
- *  absent and fetched in the background, so the first viewer sees the
- *  placeholder and everybody after them sees the real thing. That keeps a slow
- *  or unreachable wiki from turning into a slow dashboard.
- *
- *  `fetch` is injected so the whole thing can be exercised without network.
- */
+ *  Misses never block the page: a sprite not yet on disk is reported absent and
+ *  fetched in the background, so the first viewer sees the placeholder and
+ *  everybody after sees the real thing. `fetch` is injected so this can be
+ *  exercised without network. */
 final class CreatureSpriteCache(
   directory: Path,
   fetch: String => Future[Option[Array[Byte]]]
@@ -44,11 +37,8 @@ final class CreatureSpriteCache(
   private val known404 = ConcurrentHashMap.newKeySet[String]()
 
   /** What each cached sprite measured, by file name. [[SpriteNudge.None]] means
-   *  measured and not worth shifting, which is true of a good half of them.
-   *
-   *  Held rather than recomputed because the answer belongs to the file and the
-   *  files never change: a sprite is fetched once and served from disk forever
-   *  after, so this is measured once and read for the life of the process. */
+   *  measured and not worth shifting, true of about half. Held rather than
+   *  recomputed because the answer belongs to the file and files never change. */
   private val nudges = new ConcurrentHashMap[String, SpriteNudge]()
 
   /** Measurements under way, so a board asking about the same unmeasured sprite

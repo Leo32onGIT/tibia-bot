@@ -19,9 +19,23 @@ trait CacheRepository {
 
   def getList(world: String): List[ListCache]
   def addToList(name: String, formerNames: List[String], world: String, formerWorlds: List[String],
-                guild: String, level: String, vocation: String, lastLogin: String, updatedTime: ZonedDateTime): Unit
-  /** Delete list rows older than 7 days relative to `now`. */
-  def removeExpiredList(now: ZonedDateTime): Unit
+                guild: String, level: String, vocation: String, lastLogin: String,
+                updatedTime: ZonedDateTime): Unit
+
+  /** Drop cached sheets for players no list references any more.
+   *
+   *  Not an age cut, which is what this used to be. Nothing else reads this
+   *  table — it exists to draw the hunted and allied lists — and a sheet does
+   *  not go stale sitting still: level and vocation cannot change while a
+   *  character is offline, so a row written a year ago for somebody who never
+   *  logs in is exactly as right as the day it was written. Deleting it only
+   *  meant the list had nothing to show for them.
+   *
+   *  What does need collecting is a player nobody lists any longer, which is
+   *  what this removes. Bounded the same way the old sweep was, without ever
+   *  losing a row something still wants.
+   */
+  def pruneList(keep: Set[String]): Int
 
   /** Read `botId`'s own boosted boss/creature row (creating the table, the
    *  bot_id column and that bot's row if needed).

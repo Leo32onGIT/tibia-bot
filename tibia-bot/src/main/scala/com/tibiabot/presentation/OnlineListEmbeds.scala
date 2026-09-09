@@ -68,36 +68,261 @@ object OnlineListEmbeds {
     s"$world$spacer$allies$enemies"
   }
 
-  /** Pack online-list lines into the descriptions of one or more embeds, since a
-   *  Discord embed description caps near 4096 characters. Lines accumulate
-   *  (newline-joined) into the current embed until:
-   *    - adding the line would reach 4060 chars, or reach 3850 with the line a
-   *      guild header ("### ["), in which case the line starts a fresh embed; or
-   *    - the line is a section header ("### " not followed by "["), which starts
-   *      a fresh embed unless the current one is still empty.
+  /** How much embed text one message may carry. Discord caps the summed text of
+   *  every embed on a message (title + description + field text + footer) at
+   *  6000; this leaves room for the "Last updated" footer and a little slack. */
+  private val MessageBudget = 5900
+
+  /** How much one embed's description may carry. Half the message budget, so two
+   *  full embeds fit one message — which is the whole point of packing at two
+   *  levels. Well under Discord's own 4096-per-description cap, and nothing is
+   *  lost to the smaller figure: the message budget is what binds, and two
+   *  embeds of this size saturate it exactly. */
+  private val EmbedBudget = MessageBudget / 2
+
+  /** Headroom below `EmbedBudget` at which an incoming guild header starts a
+   *  fresh embed rather than being stranded above a line or two. Carried over
+   *  verbatim from the single-level packing (4060 - 3850), where it bought the
+   *  same thing at a whole message's cost; here an extra embed is free. */
+  private val HeaderHeadroom = 210
+
+  /** Discord's cap on embeds per message. */
+  private val MaxEmbedsPerMessage = 10
+
+  /** Would this line take the current embed past what it may hold? A guild
+   *  header ("### [") breaks `HeaderHeadroom` early rather than being stranded
+   *  above a line or two. */
+  private def embedFull(currentField: String, line: String): Boolean =
+    currentField.length >= EmbedBudget ||
+      (currentField.length >= EmbedBudget - HeaderHeadroom && line.startsWith("### ["))
+
+  /** "### " not followed by "[" — the allies/enemies/others section headings, as
+   *  opposed to a guild's own header — or a "## " world heading.
    *
-   *  Always returns at least one element (the trailing embed), so an empty input
-   *  yields one empty description — matching the original, which always emitted a
-   *  final embed. Extracted verbatim from TibiaBot.updateMultiFields. */
-  def packFields(values: List[String]): List[String] = {
-    val fields = scala.collection.mutable.ListBuffer.empty[String]
+   *  The hunted and allies lists reuse this packer, and head each world with
+   *  "## ". They have no equivalent of a guild header, so every heading they
+   *  emit is a section heading and each one opens a fresh embed. */
+  private def isSectionHeader(line: String): Boolean =
+    (line.startsWith("### ") && !line.startsWith("### [")) || line.startsWith("## ")
+
+  /** Any heading, guild or section. A heading only means anything with the rows
+   *  it introduces underneath it, so wherever one can be separated from them,
+   *  both kinds have to be asked about. */
+  private def isHeader(line: String): Boolean = line.startsWith("### ") || line.startsWith("## ")
+
+  /** Pack online-list lines into messages, each holding one or more embed
+   *  descriptions.
+   *
+   *  Two levels, because Discord bounds both: a description caps near 4096, but
+   *  the summed text of a message's embeds caps at 6000. One embed per message
+   *  therefore wastes roughly a third of every message, and messages are the
+   *  unit Discord rate-limits edits on. Packing to the message budget and
+   *  splitting into embeds inside it cuts the message count by about the same
+   *  third, so a refresh spends that many fewer PATCHes.
+   *
+   *  Lines accumulate (newline-joined) into the current embed. A line starts a
+   *  fresh embed when it would take the current one to `EmbedBudget` (or to
+   *  within `HeaderHeadroom` of it, when the line is a guild header "### ["),
+   *  or when it is a section header ("### " not followed by "[") and the current
+   *  embed is not still empty. A fresh embed rolls over to a fresh message only
+   *  when this one has no room left for it — so the section and guild-header
+   *  breaks, which used to cost a whole message each, now usually cost nothing.
+   *
+   *  Always returns at least one message holding at least one description, so an
+   *  empty input yields one empty description — as the single-level packing did,
+   *  which always emitted a final embed. */
+  def packMessages(values: List[String]): List[List[String]] = {
+    val messages = scala.collection.mutable.ListBuffer.empty[List[String]]
+    var embeds = scala.collection.mutable.ListBuffer.empty[String]
     var field = ""
-    values.foreach { v =>
+    // Text already committed to closed embeds on the message being built; the
+    // live total is this plus `field`.
+    var messageUsed = 0
+
+    def closeMessage(): Unit = {
+      messages += embeds.toList
+      embeds = scala.collection.mutable.ListBuffer.empty[String]
+      messageUsed = 0
+    }
+
+    // Close the current embed and open a new one holding `line`, rolling over to
+    // a new message when this one cannot hold that line *and* whatever `line`
+    // must keep with it (see `follows`).
+    def startEmbed(line: String, keepsWith: Int): Unit = {
+      embeds += field
+      messageUsed += field.length
+      if (embeds.size >= MaxEmbedsPerMessage || messageUsed + line.length + keepsWith >= MessageBudget) closeMessage()
+      field = line
+    }
+
+    // What each heading must be able to keep on its own message: the headings
+    // that follow it, if any, and the first row underneath them. Rows keep
+    // nothing, so this is 0 for them.
+    //
+    // Without it a heading that merely fits is placed, the row it introduces
+    // trips the message budget on the very next line, and the reader is left
+    // with a guild name at the bottom of one message and its players at the top
+    // of the next. `embedFull` already buys the same thing at the embed
+    // boundary; unbought here, the failure simply happened one level up.
+    //
+    // Measured rather than a fixed allowance, because a heading is only stranded
+    // by the row that actually follows it, and rounding that up to a constant
+    // would roll headings onto a new message that had room for them.
+    val follows = new Array[Int](values.size)
+    var keeps = 0
+    values.zipWithIndex.reverse.foreach { case (line, index) =>
+      follows(index) = if (isHeader(line)) keeps else 0
+      keeps = if (isHeader(line)) keeps + line.length + 1 else line.length + 1
+    }
+
+    values.zipWithIndex.foreach { case (v, index) =>
       val currentField = field + "\n" + v
-      if (currentField.length >= 4060 || (currentField.length >= 3850 && v.startsWith("### ["))) {
-        fields += field
-        field = v
-      } else if (v.matches("### [^\\[].*")) {
+      val keepsWith = follows(index)
+      if (messageUsed + currentField.length + keepsWith >= MessageBudget || embedFull(currentField, v)) startEmbed(v, keepsWith)
+      else if (isSectionHeader(v)) {
         if (field == "") field = currentField
-        else {
-          fields += field
-          field = v
-        }
-      } else {
-        field = currentField
+        else startEmbed(v, keepsWith)
+      } else field = currentField
+    }
+    embeds += field
+    messages += embeds.toList
+    messages.toList
+  }
+
+  /** Pack lines into embed descriptions only, for a set of lines already known
+   *  to fit one message. Same break rules as [[packMessages]] without the
+   *  message budget, since the caller has already decided what goes together.
+   *
+   *  @param leadingNewline whether the first description opens with a newline.
+   *         [[packMessages]] gives one only to the very first message — it starts
+   *         accumulating from an empty string, while every later message starts
+   *         from the line that would not fit on the one before. Reproduced rather
+   *         than tidied away so a channel repacked this way is not rewritten
+   *         wholesale the first time. */
+  private def packEmbeds(lines: List[String], leadingNewline: Boolean): List[String] = {
+    val embeds = scala.collection.mutable.ListBuffer.empty[String]
+    var field = ""
+    var started = false
+    lines.foreach { v =>
+      val currentField = if (started || leadingNewline) field + "\n" + v else v
+      if (started && (embedFull(currentField, v) || isSectionHeader(v))) {
+        embeds += field
+        field = v
+      } else field = currentField
+      started = true
+    }
+    embeds += field
+    embeds.toList
+  }
+
+  /** The message this packing would put `lines` on, and whether that message is
+   *  over what Discord allows. */
+  private def overfull(embeds: List[String]): Boolean =
+    embeds.map(_.length).sum > MessageBudget || embeds.size > MaxEmbedsPerMessage
+
+  /** Pack lines into messages the way [[packMessages]] does, but keeping every
+   *  line on the message it is already posted on.
+   *
+   *  [[packMessages]] fills each message in turn, so inserting one line shifts
+   *  every boundary after it by about a line and every message from there down
+   *  has to be rewritten — one login costs roughly half the channel's messages.
+   *  Here a line that is already posted stays where it is, a new line joins the
+   *  message its neighbour is on, and a line that has gone simply leaves a
+   *  smaller message behind. Nothing is pulled backwards to fill that gap, so
+   *  the room a logout leaves is what the next login into that message uses: the
+   *  slack is earned by churn rather than reserved up front, which is why this
+   *  costs almost no extra messages.
+   *
+   *  Only a message that would pass the budget spills, and it spills one line at
+   *  a time into the next message, stopping at the first one with room.
+   *
+   *  The layout does drift — messages sit a little emptier than a fresh packing,
+   *  and a levelled-up character whose row has moved backwards is dragged forward
+   *  to keep the order. Both are bounded by packing from scratch periodically,
+   *  which the 6-hourly purge already does.
+   *
+   *  @param previous the embed descriptions currently posted, message by message.
+   *                  Matched against `values` with durations masked out (see
+   *                  [[withoutDurations]]), or every line would look new each
+   *                  time its duration ticked. */
+  def packMessagesStable(values: List[String], previous: List[List[String]]): List[List[String]] = {
+    // With nothing to stay put on, every line would land on message 0 and be
+    // spilled forward one at a time to reach the layout packMessages reaches
+    // directly.
+    if (previous.isEmpty) packMessages(values)
+    else packStable(values, previous)
+  }
+
+  private def packStable(values: List[String], previous: List[List[String]]): List[List[String]] = {
+    val where = scala.collection.mutable.Map.empty[String, Int]
+    previous.zipWithIndex.foreach { case (descriptions, index) =>
+      descriptions.foreach(_.split("\n").filter(_.nonEmpty).foreach { line =>
+        where.getOrElseUpdate(withoutDurations(line), index)
+      })
+    }
+
+    // What each line's position should follow. A row follows itself, as
+    // everything did before; a heading follows the first row underneath it,
+    // because a heading's place in the channel is decided entirely by where its
+    // rows are. Staying put is what this whole function is for, but a heading
+    // that stays put while its rows move is the one case where staying put is
+    // the wrong answer — and, since both sides then keep the positions they are
+    // being read from, the one case that never recovers on its own. Anchoring
+    // pulls such a heading forward to its rows on the next cycle instead of
+    // waiting for the 6-hourly purge to repack.
+    val anchors = new Array[String](values.size)
+    var nextRow: String = null
+    values.zipWithIndex.reverse.foreach { case (line, index) =>
+      if (isHeader(line)) anchors(index) = nextRow
+      else {
+        nextRow = withoutDurations(line)
+        anchors(index) = nextRow
       }
     }
-    fields += field
-    fields.toList
+
+    // Walk the new list, keeping each line on its own message. An index that
+    // would go backwards is clamped forward, so the messages stay in order
+    // whatever has moved.
+    val runs = scala.collection.mutable.ListBuffer.empty[scala.collection.mutable.ListBuffer[String]]
+    var current = scala.collection.mutable.ListBuffer.empty[String]
+    var currentIndex = 0
+    values.zipWithIndex.foreach { case (line, index) =>
+      // A heading with no rows after it at all has nothing to follow, so it
+      // keeps its own place.
+      val anchor = Option(anchors(index)).getOrElse(withoutDurations(line))
+      val wanted = math.max(where.getOrElse(anchor, currentIndex), currentIndex)
+      if (wanted != currentIndex && current.nonEmpty) {
+        runs += current
+        current = scala.collection.mutable.ListBuffer.empty[String]
+      }
+      currentIndex = wanted
+      current += line
+    }
+    if (current.nonEmpty) runs += current
+
+    // Spill only what does not fit, and only as far as it takes to find room.
+    var i = 0
+    while (i < runs.size) {
+      def spill(): Unit = {
+        if (i + 1 == runs.size) runs += scala.collection.mutable.ListBuffer.empty[String]
+        runs(i + 1).prepend(runs(i).remove(runs(i).size - 1))
+      }
+      while (runs(i).nonEmpty && overfull(packEmbeds(runs(i).toList, i == 0))) {
+        spill()
+        // Whatever a spill leaves exposed at the end goes with it. Moving rows
+        // one at a time off the end of a full message will otherwise take the
+        // last of a guild's players and leave the guild's name behind — the
+        // same separation as above, arrived at from the other direction, and
+        // then pinned in place by `where` on every cycle after it.
+        while (runs(i).nonEmpty && isHeader(runs(i).last)) spill()
+      }
+      i += 1
+    }
+
+    val packed = runs.toList.filter(_.nonEmpty).zipWithIndex.map {
+      case (run, index) => packEmbeds(run.toList, index == 0)
+    }
+    // An empty roster still owes Discord one message, as packMessages does.
+    if (packed.isEmpty) packMessages(values) else packed
   }
 }

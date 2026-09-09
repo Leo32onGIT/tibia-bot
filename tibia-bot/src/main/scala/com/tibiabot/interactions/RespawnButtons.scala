@@ -9,27 +9,21 @@ import net.dv8tion.jda.api.entities.{Guild, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 import com.tibiabot.presentation.Names
 
-/** The buttons on a respawn's forum post, its board, and the DMs the system
- *  sends: Claim, Next, Leave, Config, and the handover Claim/Cancel pair.
+/** The buttons on a respawn's forum post, its board, and the DMs the system sends:
+ *  Claim, Next, Leave, Config, and the handover Claim/Cancel pair.
  *
- *  Separated from [[ButtonHandler]]'s if/else chain rather than adding a branch
- *  per button — this family shares an id format and a permission model, so
- *  routing on the `respawn:` prefix keeps that chain at one branch however many
- *  buttons the feature grows.
- *
- *  Every reply is ephemeral: a spawn post is a shared card, and one person's
- *  click shouldn't add noise the whole thread has to scroll past. The card and
- *  the DMs are updated by the service itself.
+ *  Separated from [[ButtonHandler]]'s if/else chain rather than a branch per
+ *  button — this family shares an id format and a permission model, so routing on
+ *  the `respawn:` prefix keeps that chain at one branch however many buttons the
+ *  feature grows. Every reply is ephemeral: a spawn post is a shared card, and the
+ *  service updates the card and the DMs itself.
  *
  *  ==Acknowledging in time==
- *  Discord drops an interaction that isn't acknowledged within three seconds,
- *  and most of these handlers do database work and blocking JDA calls (creating
- *  or reviving a forum thread, sending a DM) before they have anything to say.
- *  So anything answering with a *message* defers first and replies through the
- *  hook. Branches that open a *modal* cannot defer — `replyModal` has to be the
- *  first response to an interaction — so they answer directly and keep their
- *  pre-modal work to a lookup or two.
- */
+ *  Discord drops an interaction unacknowledged for three seconds, and most of
+ *  these handlers do database work and blocking JDA calls first. So anything
+ *  answering with a *message* defers and replies through the hook. Branches
+ *  opening a *modal* cannot defer — `replyModal` must be the first response — so
+ *  they answer directly and keep their pre-modal work to a lookup or two. */
 object RespawnButtons extends StrictLogging {
 
   def handles(componentId: String): Boolean = RespawnButtonId.handles(componentId)
@@ -102,8 +96,8 @@ object RespawnButtons extends StrictLogging {
               case None => respond.text(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
               case Some(respawn) => action match {
                 case "leave" =>
-                  respond.text(renderRelease(
-                    BotApp.respawnService.release(dmGuild, event.getUser.getId, Some(respawn.code))))
+                  respondRelease(respond,
+                    BotApp.respawnService.release(dmGuild, event.getUser.getId, Some(respawn.code)))
                 case other =>
                   logger.warn(s"Unknown respawn DM button action '$other' in guild '$guildId'")
                   respond.text(s"${Config.noEmoji} That button doesn't do anything.")
@@ -247,17 +241,13 @@ object RespawnButtons extends StrictLogging {
   }
 
   /** A page of the claim log, opened from a moderator panel or turned by its own
-   *  Newer/Older buttons.
+   *  buttons. Rewrites the message it was pressed on rather than stacking a fresh
+   *  ephemeral log per click — hence `deferEdit` (see RespawnButtonId.ackFor) and
+   *  `editOriginal` for every answer, refusals included.
    *
-   *  Rewrites the message it was pressed on rather than sending a new one, so
-   *  paging turns the page instead of stacking a fresh ephemeral log per click
-   *  — which is why BotListener acknowledges these with `deferEdit` (see
-   *  RespawnButtonId.ackFor) and why every answer here goes through
-   *  `editOriginal`, including the refusals.
-   *
-   *  Moderator-only, re-checked here rather than trusted from the panel that
-   *  offered it: an ephemeral message persists, and the role can be taken away
-   *  while it sits open. */
+   *  Moderator-only, re-checked here rather than trusted from the panel: an
+   *  ephemeral message persists, and the role can be taken away while it sits
+   *  open. */
   private def handleLogButton(event: ButtonInteractionEvent, scope: LogScope, page: Int): Unit = {
     val guild = event.getGuild
     def refuse(text: String): Unit =
@@ -523,7 +513,7 @@ object RespawnButtons extends StrictLogging {
                 }
 
               case "leave" | "release" =>
-                respond.text(renderRelease(service.release(guild, user.getId, Some(respawn.code))))
+                respondRelease(respond, service.release(guild, user.getId, Some(respawn.code)))
 
               case other =>
                 logger.warn(s"Unknown respawn button action '$other' in guild '$guildId'")
@@ -582,9 +572,20 @@ object RespawnButtons extends StrictLogging {
         val ends = claim.endsAt.map(e => s"<t:${e.toInstant.getEpochSecond}:R>").getOrElse("soon")
         s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours until $ends."
 
-      case ClaimOutcome.Queued(respawn, _, position) =>
-        s"${Config.yesEmoji} You're **#$position** in the queue for ${RespawnEmbeds.spawnLink(respawn)}. " +
-          "I'll DM you when it's your turn."
+      case ClaimOutcome.BookedNext(respawn, startsAt, booked) =>
+        s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is taken, so the next " +
+          s"**${RespawnEmbeds.humanDuration(booked)}** on it is booked for you from " +
+          s"<t:${startsAt.toInstant.getEpochSecond}:t> (<t:${startsAt.toInstant.getEpochSecond}:R>). " +
+          "I'll DM you before it starts."
+
+      case ClaimOutcome.BookAsked(respawn, _, deadline) =>
+        s"${Config.yesEmoji} The next window on ${RespawnEmbeds.spawnLink(respawn)} is somebody else's " +
+          s"booking. I've asked whether they're hunting it — they have until " +
+          s"<t:${deadline.toInstant.getEpochSecond}:R> to answer, and I'll DM you either way."
+
+      case ClaimOutcome.BookRefused(respawn, reason) =>
+        s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} is taken, and I couldn't book the " +
+          s"window after it: $reason"
 
       case ClaimOutcome.AlreadyHolding(respawn, claim) =>
         if (claim.isActive) s"${Config.noEmoji} You're already on ${RespawnEmbeds.spawnLink(respawn)}."
@@ -605,14 +606,11 @@ object RespawnButtons extends StrictLogging {
       case ClaimOutcome.Reserved(respawn, from) =>
         s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} is booked from " +
           s"<t:${from.toInstant.getEpochSecond}:t>, which leaves too little time to be worth " +
-          "starting a hunt now. Press **Next** to line up for it instead."
+          "starting a hunt now. Press **Next** to book the window after it instead."
 
       case ClaimOutcome.JustTaken(respawn) =>
         s"${Config.noEmoji} Somebody claimed ${RespawnEmbeds.spawnLink(respawn)} a moment before you. " +
-          "Press **Next** to line up behind them."
-
-      case ClaimOutcome.QueueFull(respawn, limit) =>
-        s"${Config.noEmoji} The queue for ${RespawnEmbeds.spawnLink(respawn)} is full ($limit waiting)."
+          "Press **Next** to book the window after them."
 
       case ClaimOutcome.NoStamina(respawn, needed, tank, resetsAt) =>
         s"${Config.noEmoji} ${RespawnEmbeds.spawnLink(respawn)} needs **${RespawnEmbeds.humanDuration(needed)}** but you " +
@@ -633,6 +631,27 @@ object RespawnButtons extends StrictLogging {
     Embeds.response(text)
   }
 
+  /** Answer a Leave press, carrying the Loot Split form when a hunt actually
+   *  ended.
+   *
+   *  Same reasoning as the "Claim ended" DM in
+   *  [[com.tibiabot.respawn.RespawnService]]: leaving a spawn is the moment a
+   *  party has a hunt to split and is already looking at their phone. Pressing it
+   *  changes nothing about the claim — the form reads pasted text and does
+   *  arithmetic on it — and it retires itself once it has produced a split, with
+   *  `/lootsplit` the way back to it.
+   *
+   *  Only on `Released`. Giving up a queue place is not the end of a hunt, there
+   *  is nothing to split, and the refusals have no hunt behind them at all. */
+  private def respondRelease(respond: Responder, outcome: ReleaseOutcome): Unit =
+    respond.embed(Embeds.response(renderRelease(outcome)), lootSplitRowFor(outcome))
+
+  private[interactions] def lootSplitRowFor(outcome: ReleaseOutcome): Option[ActionRow] =
+    outcome match {
+      case _: ReleaseOutcome.Released => Some(com.tibiabot.lootsplit.LootSplitIds.buttonRow)
+      case _                          => None
+    }
+
   private def renderRelease(outcome: ReleaseOutcome): String = outcome match {
     case ReleaseOutcome.Released(respawn, refunded, offered) =>
       val refund = if (refunded > 0) s"\nYou got **${RespawnEmbeds.humanDuration(refunded)}** of stamina back." else ""
@@ -650,7 +669,11 @@ object RespawnButtons extends StrictLogging {
       s"${Config.noEmoji} The respawn claim system isn't set up here."
   }
 
-  private val notModeratorText: String =
+  // Lazy so that touching anything in this object does not load the whole
+  // configuration: it is the only eager reference to Config here, and forcing it
+  // at class-init put every pure decision in this file out of reach of a test
+  // that has no discord.conf to resolve.
+  private lazy val notModeratorText: String =
     s"${Config.noEmoji} That needs the **Manage Server** permission, " +
       s"or the **${com.tibiabot.commands.Permissions.ModeratorRoleName}** role."
 

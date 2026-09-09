@@ -7,33 +7,25 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-/** Performs writes that another bot's dashboard handed over.
+/** Performs writes that another bot's dashboard handed over. Every bot runs one,
+ *  and each only touches commands for guilds whose respawns it runs, so exactly
+ *  one process executes a given command — the one whose sweep will send its
+ *  reminders and handovers.
  *
- *  Every bot runs one of these, and each only touches commands for guilds whose
- *  respawns it runs — so exactly one process ever executes a given command, and
- *  it is the one whose lifecycle sweep will go on to send the reminders and
- *  handovers for it.
- *
- *  The lease is taken *before* the work, not after. That makes this at-most-once
- *  rather than at-least-once: a process that dies mid-claim will not pick the
- *  command up again on restart, and the person is told nothing was confirmed.
- *  The other way round — execute, then mark done — would re-run a claim that had
- *  already charged somebody's stamina, and stamina spent twice is not something
- *  they can see or undo.
- */
+ *  The lease is taken *before* the work, making this at-most-once: a process that
+ *  dies mid-claim will not pick it up again, and the person is told nothing was
+ *  confirmed. Execute-then-mark-done would re-run a claim that had already charged
+ *  somebody's stamina, which they can neither see nor undo. */
 final class RespawnCommandConsumer(
   cache: RedisCache,
   local: RespawnActionPort,
   ownsGuild: String => Boolean,
   selfId: String,
-  /** Who somebody is in a guild this bot runs, resolved locally. `None` when
-   *  they may not use the dashboard there at all.
-   *
-   *  This is the permission check for every relayed command, and it belongs
-   *  here because this is the only process that can make it: the bot serving
-   *  the page is not in the guild and cannot read a member of it. Defaulted to
-   *  a refusal so that a consumer stood up without one performs nothing rather
-   *  than everything. */
+  /** Who somebody is in a guild this bot runs, resolved locally; `None` when they
+   *  may not use the dashboard there. The permission check for every relayed
+   *  command, here because this is the only process that can make it — the bot
+   *  serving the page cannot read a member of a guild it is not in. Defaulted to a
+   *  refusal, so a consumer stood up without one performs nothing. */
   resolve: (String, String) => Option[GuildAccess] = (_, _) => None
 )(implicit ec: ExecutionContext) extends StrictLogging {
 

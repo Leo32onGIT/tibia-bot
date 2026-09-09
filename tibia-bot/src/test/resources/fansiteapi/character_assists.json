@@ -1,0 +1,944 @@
+{
+    "characterGameInformation": {
+        "characterName": "Chimerraa",
+        "level": 383,
+        "vocation": "monk",
+        "isPromoted": true,
+        "sex": "male",
+        "world": "Antica",
+        "residence": "Rathleton",
+        "deletedTimestamp": 0,
+        "comment": null,
+        "wasRecentlyTradedAndNotRenamed": false,
+        "spouse": null,
+        "formerWorld": null,
+        "lastLogin": 1788025234,
+        "isPremium": true,
+        "formerNames": [],
+        "guildName": "Progressive",
+        "guildRank": "Vice Leader",
+        "achievementPoints": 124
+    },
+    "characterDeathsData": {
+        "tooMany": false,
+        "deaths": [
+            {
+                "date": 1788048201,
+                "level": 383,
+                "murderers": [
+                    {
+                        "name": "Cyberpayout",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Chlopaczyna Zeszczecina",
+                        "tradedMurderer": false,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "feral sphinx",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1788033982,
+                "level": 382,
+                "murderers": [
+                    {
+                        "name": "Shoomel",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Nydexa",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Humek Mephii Havoc",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Cyberpayout",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Hasses Bombchar",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Todalarica monk",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mecanic store",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Helukz",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Cuacte",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Ankara Tacos",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1788013013,
+                "level": 383,
+                "murderers": [
+                    {
+                        "name": "freakish lost soul",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787855046,
+                "level": 378,
+                "murderers": [
+                    {
+                        "name": "reality reaver",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787785486,
+                "level": 377,
+                "murderers": [
+                    {
+                        "name": "naga warrior",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787589488,
+                "level": 373,
+                "murderers": [
+                    {
+                        "name": "naga warrior",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787579718,
+                "level": 373,
+                "murderers": [
+                    {
+                        "name": "naga warrior",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787504796,
+                "level": 371,
+                "murderers": [
+                    {
+                        "name": "Nerom Bror",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mastermind Saanchez",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Paralyseiii",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Exit Friendly Bolt",
+                        "tradedMurderer": false,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Cham Pally",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Nohand Kazzq",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Bombita Charloveado",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Profe Goet",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Obrotowe kolano",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Ksowy serwis",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787442208,
+                "level": 371,
+                "murderers": [
+                    {
+                        "name": "falcon paladin",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787431549,
+                "level": 371,
+                "murderers": [
+                    {
+                        "name": "Shoomel",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Warton",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Saanchez Style",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Kraken katox",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Daky on three",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mini Mac",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Magiczny Proceder",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Cyberpayout",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Lidera Deja Vu",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Meditz",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Ankara Tacos",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Big Kat Knight",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787429304,
+                "level": 371,
+                "murderers": [
+                    {
+                        "name": "Retrium",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Warton",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Nydexa",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Asalam Vonaax",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Daky on three",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mini Mac",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Krystek Krystus",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Fraise",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Cyberpayout",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Ragnar Lothbrok Specnaz",
+                        "tradedMurderer": false,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Svki",
+                        "tradedMurderer": false,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mijha",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Edw Anton",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Marcelkaa Lover",
+                        "tradedMurderer": true,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Ankara Tacos",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787342212,
+                "level": 371,
+                "murderers": [
+                    {
+                        "name": "falcon paladin",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787311287,
+                "level": 370,
+                "murderers": [
+                    {
+                        "name": "falcon paladin",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787170018,
+                "level": 367,
+                "murderers": [
+                    {
+                        "name": "Zevelina",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Venom Malyn",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Toxic Alumn",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Pedrin Milionario",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Zalina No Sio",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mini Mac",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Sakakabana",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Kouper Elsharer",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Me Mccready",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Mephii Healer",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Deathmetal Opeth",
+                        "tradedMurderer": false,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Wojtus Cola Drinker",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Gnievka",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Nestor Sato",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Kanclerz richie",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Royal Stymus",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Reaper Slayer",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Sou da Paz",
+                        "tradedMurderer": false,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Stpid Kid Fromwdc",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Pall Bro",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Zevelima",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Ankara Tacos",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Big Kat Knight",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "Dwem Luto",
+                        "tradedMurderer": true,
+                        "assist": true,
+                        "playerCharacter": true,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787153485,
+                "level": 368,
+                "murderers": [
+                    {
+                        "name": "glooth blob",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1787101057,
+                "level": 367,
+                "murderers": [
+                    {
+                        "name": "headwalker",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786998347,
+                "level": 366,
+                "murderers": [
+                    {
+                        "name": "charging Outburst",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786929764,
+                "level": 365,
+                "murderers": [
+                    {
+                        "name": "naga warrior",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786892799,
+                "level": 363,
+                "murderers": [
+                    {
+                        "name": "naga archer",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786830929,
+                "level": 362,
+                "murderers": [
+                    {
+                        "name": "Eliminates",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "broodrider inferniarch",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786817091,
+                "level": 362,
+                "murderers": [
+                    {
+                        "name": "makara",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786664738,
+                "level": 359,
+                "murderers": [
+                    {
+                        "name": "naga archer",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786575639,
+                "level": 356,
+                "murderers": [
+                    {
+                        "name": "Chimerraa",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "icecold book",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786570734,
+                "level": 356,
+                "murderers": [
+                    {
+                        "name": "Chimerraa",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "icecold book",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786469775,
+                "level": 354,
+                "murderers": [
+                    {
+                        "name": "sparkion",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786040467,
+                "level": 348,
+                "murderers": [
+                    {
+                        "name": "makara",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1786006994,
+                "level": 345,
+                "murderers": [
+                    {
+                        "name": "Chimerraa",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "animated feather",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1785942278,
+                "level": 343,
+                "murderers": [
+                    {
+                        "name": "broodrider inferniarch",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1785941133,
+                "level": 343,
+                "murderers": [
+                    {
+                        "name": "gorger inferniarch",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1785857221,
+                "level": 343,
+                "murderers": [
+                    {
+                        "name": "sineater inferniarch",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            },
+            {
+                "date": 1785705848,
+                "level": 339,
+                "murderers": [
+                    {
+                        "name": "Chimerraa",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    },
+                    {
+                        "name": "animated feather",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": false,
+                        "remark": null
+                    }
+                ]
+            }
+        ]
+    },
+    "characterAdminInformation": null,
+    "characterAccountInformation": null,
+    "accountCharacters": null
+}

@@ -1,0 +1,56 @@
+{
+    "characterGameInformation": {
+        "characterName": "Gatorbeug",
+        "level": 13,
+        "vocation": "sorcerer",
+        "isPromoted": false,
+        "sex": "male",
+        "world": "Victoris",
+        "residence": "Kazordoon",
+        "deletedTimestamp": 0,
+        "comment": null,
+        "wasRecentlyTradedAndNotRenamed": false,
+        "spouse": null,
+        "formerWorld": null,
+        "lastLogin": 1788069902,
+        "isPremium": true,
+        "formerNames": [],
+        "guildName": null,
+        "guildRank": null,
+        "achievementPoints": 6
+    },
+    "characterDeathsData": {
+        "tooMany": false,
+        "deaths": [
+            {
+                "date": 1788070126,
+                "level": 13,
+                "murderers": [
+                    {
+                        "name": "Beams of Justice",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": "fire elemental"
+                    }
+                ]
+            },
+            {
+                "date": 1788070028,
+                "level": 13,
+                "murderers": [
+                    {
+                        "name": "Beams of Justice",
+                        "tradedMurderer": false,
+                        "assist": false,
+                        "playerCharacter": true,
+                        "remark": null
+                    }
+                ]
+            }
+        ]
+    },
+    "characterAdminInformation": null,
+    "characterAccountInformation": null,
+    "accountCharacters": null
+}

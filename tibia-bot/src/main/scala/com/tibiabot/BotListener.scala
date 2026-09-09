@@ -13,7 +13,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter
 import com.typesafe.scalalogging.StrictLogging
 import scala.jdk.CollectionConverters._
 import com.tibiabot.domain.PendingScreenshot
-import com.tibiabot.commands.{CommandRouter, SlashRouting}
+import com.tibiabot.commands.{CommandPath, CommandRouter, SlashRouting}
 
 import java.time.ZonedDateTime
 import java.util.concurrent.{Executors, ThreadFactory}
@@ -27,7 +27,9 @@ class BotListener extends ListenerAdapter with StrictLogging {
   // mutable.Map, so the handler signatures are unchanged.
   private val pendingScreenshots = scala.collection.concurrent.TrieMap[String, PendingScreenshot]()
 
-  // Slash-command dispatch table lives in commands.SlashRouting (one entry per command).
+  // Slash-command dispatch table lives in commands.SlashRouting, keyed by invoked
+  // path rather than command name (see CommandPath) — the router falls back to the
+  // longest registered prefix, so an entry can own a command, a group or one leaf.
   private val slashRouter = new CommandRouter[SlashCommandInteractionEvent](SlashRouting.handlers)
 
   private def namedPool(size: Int, prefix: String) = {
@@ -40,54 +42,77 @@ class BotListener extends ListenerAdapter with StrictLogging {
     Executors.newFixedThreadPool(size, factory)
   }
 
-  // Slash-command handlers run here, off JDA's shared event thread. Some
-  // handlers (channel/role creation in particular) make many sequential
-  // blocking JDA REST calls; without this, one slow command would starve
-  // dispatch of every other event — including a different user's slash
-  // command, whose deferReply() would then never fire within Discord's
-  // 3-second ack window and show as "interaction failed" even though its
-  // own handler code is fine.
+  // Slash-command handlers run here, off JDA's shared event thread. Channel and
+  // role creation make many sequential blocking REST calls, and without this one
+  // slow command starves dispatch of every other event — including another user's
+  // command, whose deferReply() then misses Discord's 3-second ack window and
+  // shows as "interaction failed" though its own code is fine.
   private val commandExecutor = namedPool(8, "slash-command")
 
-  // Buttons and modals run on their own pool rather than sharing the one
-  // above. A `/setup` holds a thread for as long as it takes to build a
-  // category, four channels, five roles and their permission overrides, one
-  // blocking call at a time — so on a shared pool a press arriving mid-setup
-  // waited behind all of it. Everything here either acknowledges on the event
-  // thread before it queues (see below) or, for a press that opens a modal and
-  // so cannot be acknowledged early, must reach Discord within three seconds
-  // from a cold start. Neither can afford to sit behind server-building work.
+  // Buttons and modals get their own pool. A `/setup` holds a thread for as long
+  // as it takes to build a category, four channels and five roles one blocking
+  // call at a time, so on a shared pool a press arriving mid-setup waited behind
+  // all of it. Everything here either acknowledges on the event thread before
+  // queueing or — for a press opening a modal, which cannot be acknowledged early
+  // — must reach Discord within three seconds from cold.
   private val interactionExecutor = namedPool(8, "interaction")
 
   override def onSlashCommandInteraction(event: SlashCommandInteractionEvent): Unit = {
+    val path = CommandPath.of(event)
+    // A command that answers with a form is the one shape this cannot acknowledge
+    // up front: replyModal has to be the interaction's first response, so there is
+    // nothing to defer into. It cannot queue for a worker either — the three-second
+    // window would then be spent waiting on a pool shared with /setup, with Discord
+    // still unanswered. Both are fine because such a handler only builds a form: no
+    // database, no REST, nothing that could block JDA's event thread.
+    if (SlashRouting.opensModal(path)) {
+      if (!BotApp.startUpComplete) event.reply(startingUpText).setEphemeral(true).queue()
+      else {
+        try slashRouter.route(path, event)
+        catch {
+          case ex: Throwable =>
+            logger.error(s"Unhandled exception opening the form for slash command '$path'", ex)
+            if (!event.isAcknowledged)
+              event.reply(s"${Config.noEmoji} Something went wrong running that command.").setEphemeral(true).queue(_ => (), _ => ())
+        }
+        // Off the event thread, and after the form has gone out: this is a database
+        // write, and the command must not wait on it.
+        commandExecutor.execute(() => recordCommandActivity(event))
+      }
+      return
+    }
     event.deferReply(true).queue()
     if (BotApp.startUpComplete) {
       commandExecutor.execute(() => {
         try {
-          // Feeds BotApp's daily inactive-guild prune sweep — any command
-          // counts, not just world-related ones (someone using /galthen or
-          // /boosted is genuinely using the bot). Must never block or break
-          // the actual command, so its own failure is swallowed here rather
-          // than left to the outer catch below.
-          try {
-            Option(event.getGuild).foreach(g => BotApp.guildActivityRepository.recordCommandRun(g.getId, ZonedDateTime.now()))
-          } catch {
-            case ex: Throwable => logger.warn(s"Failed to record guild activity for command '${event.getName}'", ex)
-          }
-          slashRouter.route(event.getName, event)
+          recordCommandActivity(event)
+          slashRouter.route(path, event)
         } catch {
           case ex: Throwable =>
-            logger.error(s"Unhandled exception running slash command '${event.getName}'", ex)
+            logger.error(s"Unhandled exception running slash command '$path'", ex)
             val embed = new EmbedBuilder().setDescription(s"${Config.noEmoji} Something went wrong running that command.").setColor(presentation.Embeds.BrandColor).build()
             event.getHook.sendMessageEmbeds(embed).queue(_ => (), _ => ())
         }
       })
     } else {
-      val responseText = s"${Config.noEmoji} The bot is still starting up, try running your command later."
-      val embed = new EmbedBuilder().setDescription(responseText).setColor(presentation.Embeds.BrandColor).build()
+      val embed = new EmbedBuilder().setDescription(startingUpText).setColor(presentation.Embeds.BrandColor).build()
       event.getHook.sendMessageEmbeds(embed).queue()
     }
   }
+
+  private val startingUpText: String =
+    s"${Config.noEmoji} The bot is still starting up, try running your command later."
+
+  /** Feeds BotApp's daily inactive-guild prune sweep — any command counts, not
+   *  just world-related ones (someone using /galthen or /boosted is genuinely
+   *  using the bot). Must never block or break the actual command, so its own
+   *  failure is swallowed here rather than left to either caller's catch. */
+  private def recordCommandActivity(event: SlashCommandInteractionEvent): Unit =
+    try {
+      Option(event.getGuild).foreach(g => BotApp.guildActivityRepository.recordCommandRun(g.getId, ZonedDateTime.now()))
+    } catch {
+      case ex: Throwable => logger.warn(s"Failed to record guild activity for command '${CommandPath.of(event)}'", ex)
+    }
 
   override def onGuildJoin(event: GuildJoinEvent): Unit = {
     val guild = event.getGuild
@@ -101,17 +126,39 @@ class BotListener extends ListenerAdapter with StrictLogging {
   }
 
   override def onModalInteraction(event: ModalInteractionEvent): Unit =
+    // The loot split neither defers nor queues: it parses the text that arrived
+    // with the submission and answers from that, with no database or REST work in
+    // between, and it has to pick ephemeral-or-not from what the parse said — which
+    // is a choice deferring would already have made. See interactions.LootSplit.
+    if (interactions.LootSplit.handlesModal(event.getModalId)) {
+      try interactions.LootSplit.handleModal(event)
+      catch {
+        case ex: Throwable => logger.error(s"Unhandled exception on the loot split form", ex)
+      }
+    }
     // Respawn modals route separately because ModalHandler opens with
     // deferEdit(), which rewrites the message the modal came from — here that is
     // the pinned board post. They also hit the database and JDA, so like the
     // respawn buttons they run off the event thread.
-    if (interactions.RespawnModals.handles(event.getModalId)) {
-      // Acknowledged here rather than inside the handler, for the same reason
-      // as the buttons below: deferring as the handler's first statement still
-      // left the acknowledgement waiting for a free worker. Every branch can be
-      // deferred, since none of them opens a further modal — but *how* differs.
-      // The log's search rewrites the log panel it was opened from, which needs
-      // deferEdit; everything else answers with an ephemeral of its own.
+    // Panel forms. Always deferred: a bulk add is up to a hundred API lookups,
+    // and none of the settings writes are instant either. Replies go through the
+    // hook, and ephemerally — the panel they came from is ephemeral too.
+    else if (interactions.PanelModals.handles(event.getModalId)) {
+      event.deferReply(true).queue()
+      interactionExecutor.execute(() => {
+        try interactions.PanelModals.handle(event)(scala.concurrent.ExecutionContext.global)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on panel form '${event.getModalId}'", ex)
+        }
+      })
+    }
+    else if (interactions.RespawnModals.handles(event.getModalId)) {
+      // Acknowledged here rather than inside the handler, as with the buttons
+      // below: deferring as the handler's first statement still left the
+      // acknowledgement waiting for a free worker. Every branch can be deferred,
+      // since none opens a further modal — but *how* differs: the log's search
+      // rewrites the panel it came from and needs deferEdit, everything else
+      // answers with an ephemeral of its own.
       if (interactions.RespawnModals.editsOriginal(event.getModalId)) event.deferEdit().queue()
       else event.deferReply(true).queue()
       // A form submitted from a spawn's post counts as touching it, exactly as
@@ -142,11 +189,20 @@ class BotListener extends ListenerAdapter with StrictLogging {
     }
 
   override def onButtonInteraction(event: ButtonInteractionEvent): Unit =
+    // Loot Split opens a form and nothing else, so it cannot be deferred and has
+    // no reason to queue — the press is answered on the event thread.
+    if (interactions.LootSplit.handlesButton(event.getComponentId)) {
+      try interactions.LootSplit.handleButton(event)
+      catch {
+        case ex: Throwable => logger.error(s"Unhandled exception opening the loot split form", ex)
+      }
+    }
     // Respawn buttons create/edit forum threads through blocking JDA calls, so
+
     // they go to the interaction pool. Running them inline would stall JDA's
     // event thread — the exact starvation the pools above exist to prevent —
     // while a thread is created or un-archived.
-    if (interactions.RespawnButtons.handles(event.getComponentId)) {
+    else if (interactions.RespawnButtons.handles(event.getComponentId)) {
       // Acknowledged here, on the event thread, before the press is queued —
       // the same order onSlashCommandInteraction above uses, and for the same
       // reason. Deferring inside the handler instead put the acknowledgement
@@ -174,7 +230,26 @@ class BotListener extends ListenerAdapter with StrictLogging {
           case ex: Throwable => logger.error(s"Unhandled exception on respawn button '${event.getComponentId}'", ex)
         }
       })
-    } else if (interactions.NotifyButtons.handles(event.getComponentId)) {
+    }
+    // The /settings, /hunted and /allies panels. Same shape as the respawn
+    // buttons above and acknowledged the same way: a press that opens a form
+    // cannot be deferred at all, one that rewrites the panel defers an edit,
+    // and one that answers with a message defers a reply. See PanelIds.ackFor.
+    else if (interactions.PanelButtons.handles(event.getComponentId)) {
+      import com.tibiabot.panels.PanelIds
+      PanelIds.ackFor(event.getComponentId) match {
+        case PanelIds.Ack.OpensModal   => ()
+        case PanelIds.Ack.EditsMessage => event.deferEdit().queue()
+        case PanelIds.Ack.Replies      => event.deferReply(true).queue()
+      }
+      interactionExecutor.execute(() => {
+        try interactions.PanelButtons.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on panel button '${event.getComponentId}'", ex)
+        }
+      })
+    }
+    else if (interactions.NotifyButtons.handles(event.getComponentId)) {
       // The notification autoroles and the controls under the DMs they send.
       // Acknowledged here for the same reason as the respawn buttons above,
       // with the same exception: a press that opens a form cannot be deferred,

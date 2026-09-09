@@ -10,8 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # Matches docker-compose.yml, so the integration specs exercise the same
+      # major version production runs rather than whichever one happened to be
+      # pinned here.
       postgres:
-        image: postgres:15
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -23,13 +26,14 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up JDK 8
-        uses: actions/setup-java@v4
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "8"
+          # Keep in step with `dockerBaseImage` and `-release` in build.sbt.
+          java-version: "25"
           cache: sbt
 
       - name: Set up sbt
@@ -38,6 +42,15 @@ jobs:
       - name: Compile and test (unit + Postgres integration)
         working-directory: tibia-bot
         env:
+          # PGHOST/PGPASSWORD reach the service above, so the *IntegrationSpec
+          # suites run instead of cancelling themselves.
           PGHOST: localhost
           PGPASSWORD: postgres
-        run: sbt -batch clean test
+          # discord.conf substitutes these four with no defaults, and any suite
+          # that loads the real application config aborts without them. They are
+          # placeholders: nothing here talks to Discord or TibiaData.
+          TOKEN: dummy
+          POSTGRES_HOST: localhost
+          POSTGRES_PASSWORD: postgres
+          TIBIADATA_HOST: http://localhost:8081
+        run: sbt -batch clean compile Test/compile doc test

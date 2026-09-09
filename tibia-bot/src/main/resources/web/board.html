@@ -1461,8 +1461,32 @@ const fmtLocal = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
  */
 const fmtClock12 = d =>
   `${d.getHours() % 12 === 0 ? 12 : d.getHours() % 12}:${pad(d.getMinutes())}${d.getHours() < 12 ? 'am' : 'pm'}`;
-const fmtDur = m =>
-  m == null ? '—' : (m % 60 === 0 && m >= 60 ? `${m / 60}h` : m > 60 ? `${Math.floor(m / 60)}h${m % 60}` : `${m}m`);
+/** Every length of time the page prints, in one spelling: `45m`, `3hr`,
+ *  `3hr9m`.
+ *
+ *  There were three of these, and all three were on screen together with a
+ *  spawn window open — a hunt counting down in `189m`, its length beside it as
+ *  `3h9`, the next booking due `in 3h09m`. Three spellings of one unit is a
+ *  reader's problem before it is a tidiness one: `3h9` has to be decoded rather
+ *  than read, and two of them next to each other invite the question of whether
+ *  they are even the same measurement.
+ *
+ *  Hours are spelled `hr` rather than `h` because a bare `h` beside a bare `m`
+ *  reads as a pair of axes, and because the minutes that follow it are not
+ *  padded: `3h9` could be nine minutes or ninety, where `3hr9m` can only be one
+ *  of them. Under an hour it stays in plain minutes, the unit a short hunt is
+ *  actually counted in, and a whole hour drops the minutes rather than printing
+ *  a zero.
+ *
+ *  Nothing here has a width to fit: the labels that could collide are measured
+ *  at draw time (see the tank's `fits`) or ellipsised by CSS.
+ */
+const fmtDur = m => {
+  if (m == null) return '—';
+  if (m < 60) return `${m}m`;
+  const hours = Math.floor(m / 60), rest = m % 60;
+  return rest ? `${hours}hr${rest}m` : `${hours}hr`;
+};
 
 // Quantised rather than continuous, for the same reason the monitoring
 // dashboard's heat ramp is: a spawn should sit at a recognisable level rather
@@ -1502,17 +1526,27 @@ function minutesLeft(endsAt) {
   return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 60000));
 }
 
+/** What is left of a hunt. The count is [[minutesLeft]] — rounded to the minute
+ *  and floored at zero, so a hunt at the wire reads 0m and never goes negative —
+ *  and the spelling is the page's one duration spelling. */
+function timeLeft(endsAt) {
+  return fmtDur(minutesLeft(endsAt));
+}
+
 /** How far off something is, at the coarseness worth reading at that distance.
  *  Minutes while it is soon enough to wait for, hours through the evening, days
  *  once it is another day's problem — an evening seven days out does not become
- *  more useful for being told it is 168 hours. */
+ *  more useful for being told it is 168 hours.
+ *
+ *  Only the two ends are its own: `now`, which is a word rather than a length,
+ *  and the day count past which hours stop being worth counting. Everything
+ *  between is [[fmtDur]], because "in 3hr9m" and "3hr9m left" are the same
+ *  measurement seen from two sides and used to be spelled two ways. */
 function relTime(at) {
   const mins = Math.round((new Date(at).getTime() - Date.now()) / 60000);
   if (mins <= 0) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60), rest = mins % 60;
-  if (hours < 24) return rest ? `${hours}h${pad(rest)}m` : `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
+  if (mins < 60 * 24) return fmtDur(mins);
+  return `${Math.round(mins / 60 / 24)}d`;
 }
 
 /** Today, tomorrow, or the weekday — for a list whose whole point is *when*, a
@@ -1590,7 +1624,7 @@ function atName(spawn) {
 
 const STATE_TEXT = {
   free: () => 'free',
-  claimed: s => `${atName(s)}${s.endsAt ? ` · ${minutesLeft(s.endsAt)}m left` : ''}`,
+  claimed: s => `${atName(s)}${s.endsAt ? ` · ${timeLeft(s.endsAt)} left` : ''}`,
   booked: s => `${atName(s)} booked${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
   confirmed: s => `${atName(s)} confirmed${s.nextAt ? ` · ${clockTime(s.nextAt)}` : ''}`,
 };
@@ -2034,28 +2068,44 @@ function paintCard(spawn) {
 }
 
 /** Which spawns are shown, and in what order: the ones being hunted right now
- *  first, soonest to finish at the front, then everything else by how recently
- *  it was touched — and a spawn nobody has ever claimed last.
+ *  first, soonest to finish at the front, then the ones with a booking due,
+ *  soonest to start at the front, then everything else by how recently it was
+ *  touched — and a spawn nobody has ever claimed last.
  *
  *  A live hunt is the one thing on the board that is about to change, so the
  *  front of the list is ordered by when it changes. Letting a spawn go drops it
  *  behind everything still held, which is the point: the top of the board is
  *  for what is happening, not for who was last to do something.
  *
- *  The second tier is still plain recency, the rule Discord's forum follows for
- *  a post. A booked slot that has not come round yet does not count as activity
+ *  The middle tier is what is about to happen, on the same reasoning. It is the
+ *  blue cards exactly — booked and confirmed alike — and it is keyed off the
+ *  time the card prints rather than off the state word, so the tier a spawn is
+ *  in is the tier its face says it is in. A settled booking whose start the
+ *  server did not send has nothing to sort by and no time on the card either,
+ *  so it drops to recency with the rest.
+ *
+ *  The last tier is still plain recency, the rule Discord's forum follows for a
+ *  post. A booked slot that has not come round yet does not count as activity
  *  — see lastActivityByRespawn, without which a spawn booked for tomorrow
- *  outranked everything until tomorrow.
+ *  outranked everything until tomorrow. That is still the right rule down here:
+ *  the booking now lifts the card by its own tier, and letting it also count as
+ *  activity would rank a spawn twice for one fact.
  */
 function shownSpawns() {
-  const held = s => (s.state === 'claimed' ? 0 : 1);
+  const tier = s => (s.state === 'claimed' ? 0 : s.nextAt ? 1 : 2);
   // A held spawn with no window on it — both ends have to be present for the
   // server to send either — has no time left to read, so it sorts to the back
   // of the held group rather than turning the comparison into NaN.
   const ends = s => (s.endsAt ? new Date(s.endsAt).getTime() : Infinity);
+  const starts = s => new Date(s.nextAt).getTime();
   const since = s => { const h = hoursSince(s.lastActivity); return h == null ? Infinity : h; };
-  return board.spawns.filter(matches).slice().sort((a, b) =>
-    held(a) - held(b) || (held(a) === 0 ? ends(a) - ends(b) : since(a) - since(b)));
+  return board.spawns.filter(matches).slice().sort((a, b) => {
+    const group = tier(a) - tier(b);
+    if (group) return group;
+    if (tier(a) === 0) return ends(a) - ends(b);
+    if (tier(a) === 1) return starts(a) - starts(b);
+    return since(a) - since(b);
+  });
 }
 
 /** Put the cards in the right order, making and removing only what changed.
@@ -3272,18 +3322,18 @@ function primaryAction(spawn) {
   if (!canClaimNow(spawn)) return null;
 
   // Wording follows what will actually happen, so nobody presses "Claim" and is
-  // surprised to find themselves in a queue. Only a *live hunt* produces a
-  // queue: booked and confirmed both mean nobody is on it right now, so claiming
-  // succeeds — cut short by the booking, which the answer explains.
-  const joining = spawn.state === 'claimed';
-  const claim = button(joining ? 'Join queue' : 'Claim', joining ? 'btn' : 'btn claim',
-    () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration }, s => {
-      if (joining) {
-        // Behind whoever is on it. The position is theirs to know, so the count
-        // moves and nothing claims to know where in the line they are.
-        s.queued = true;
-        s.queueLength = (s.queueLength || 0) + 1;
-      } else {
+  // surprised by what they get. Only a *live hunt* is in the way: booked and
+  // confirmed both mean nobody is on it right now, so claiming succeeds — cut
+  // short by the booking, which the answer explains.
+  //
+  // On a held spawn the same call books the first window nobody else has, which
+  // is the Book button's outcome by another route — so it wears Book's face and,
+  // like doBook, guesses nothing. Only the server knows which window that is, and
+  // a made-up block on the calendar would be a worse answer than a moment's wait.
+  const booking = spawn.state === 'claimed';
+  const claim = button(booking ? 'Book next' : 'Claim', booking ? 'btn' : 'btn claim',
+    () => post(`/dashboard/g/${GUILD_ID}/claim`, { code: spawn.code, minutes: view.duration },
+      booking ? null : s => {
         // Theirs from now until the duration runs out — subject to a booking or
         // a tank the server knows more about, which the answer corrects.
         s.state = 'claimed';
@@ -3294,10 +3344,10 @@ function primaryAction(spawn) {
         s.startsAt = new Date().toISOString();
         s.endsAt = new Date(Date.now() + view.duration * 60000).toISOString();
         s.lastActivity = s.startsAt;
-      }
-    }));
-  // Joining a queue is not the claim action and does not borrow its face.
-  if (!joining) {
+      }),
+    booking ? 'ti-calendar-plus' : undefined);
+  // Booking a window is not the claim action and does not borrow its face.
+  if (!booking) {
     const face = claimEmojiImg();
     if (face) claim.insertBefore(face, claim.firstChild);
   }
@@ -5887,7 +5937,7 @@ refresh().then(openDeepLink);
 // away, and a week of bookings does not change under the reader the way a live
 // board does.
 setInterval(() => { if (!view.busy && !view.pick) refresh(); }, 10000);
-// The progress bars and "m left" move between polls, so redraw on a shorter beat
+// The progress bars and the time left move between polls, so redraw on a shorter beat
 // than the fetch — otherwise a hunt would visibly jump every ten seconds.
 setInterval(() => { if (board && !view.code) tick(); }, 1000);
 </script>

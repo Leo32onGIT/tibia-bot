@@ -12,15 +12,13 @@ import scala.concurrent.duration.FiniteDuration
  *  this holds cross-world killers and anyone who logged in since that table
  *  was last rebuilt.
  *
- *  Failed lookups are cached too, as `NoLevel`. Without that, a killer the
- *  API has no answer for (deleted character, transfer in progress, a summon
- *  name that got past the parser) is re-fetched on every death they appear in
- *  — and `getKillerFallback` deliberately bypasses the Date-header character
- *  cache, so every one of those is a full request and parse.
+ *  Failed lookups are cached as `NoLevel`, or a killer the API has no answer for
+ *  (deleted character, transfer in progress, a summon name past the parser) is
+ *  re-fetched on every death they appear in — and `getKillerFallback` bypasses the
+ *  Date-header character cache, so each is a full request and parse.
  *
- *  Names are matched case-insensitively, matching `onlineListTable`.
- *  Thread-safe: filled from a stream thread, read while building embeds.
- */
+ *  Names match case-insensitively, as `onlineListTable` does. Thread-safe: filled
+ *  from a stream thread, read while building embeds. */
 final class KillerLevelCache(ttl: FiniteDuration, maxEntries: Int = 4096) {
 
   private case class Entry(level: Option[Int], at: ZonedDateTime)

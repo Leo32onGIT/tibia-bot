@@ -112,6 +112,59 @@ class NotifyRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Pos
     repo.allBounty().count(_.guildId == guildId) shouldBe 0
   }
 
+  test("removing one bounty leaves that user's others alone") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcNotifyRepository(provider)
+    val userId = "user-bounty-remove"
+    repo.deleteGuild(guildId)
+
+    val dropped = repo.upsertBounty(guildId, world, userId, "Bubble", 10)
+    val kept = repo.upsertBounty(guildId, world, userId, "Eternal Oblivion", 10)
+
+    repo.deleteBounty(dropped.id)
+    repo.bountyById(dropped.id) shouldBe None
+    repo.bountyById(kept.id).map(_.character) shouldBe Some("Eternal Oblivion")
+
+    // The name is free again afterwards, rather than colliding with a row that
+    // is no longer there.
+    val readded = repo.upsertBounty(guildId, world, userId, "Bubble", 20)
+    readded.id should not be dropped.id
+    repo.allBounty().count(_.guildId == guildId) shouldBe 2
+
+    repo.deleteGuild(guildId)
+  }
+
+  /** What a user leaving a guild leaves behind. Everything of theirs in that
+   *  guild goes, across both kinds — and nothing of anyone else's, nor their own
+   *  subscriptions in a guild they are still in. */
+  test("forgetting a user takes both kinds, in that guild only") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcNotifyRepository(provider)
+    val leaver = "user-left-guild"
+    val stayer = "user-still-here"
+    val otherGuild = "555000555000555222"
+    repo.deleteGuild(guildId)
+    repo.deleteGuild(otherGuild)
+
+    val goneMasslog = repo.upsertMasslog(guildId, world, leaver, 8)
+    val goneBounty = repo.upsertBounty(guildId, world, leaver, "Bubble", 10)
+    val theirOtherGuild = repo.upsertMasslog(otherGuild, world, leaver, 8)
+    val someoneElse = repo.upsertMasslog(guildId, world, stayer, 8)
+
+    repo.deleteUser(guildId, leaver)
+
+    repo.masslogById(goneMasslog.id) shouldBe None
+    repo.bountyById(goneBounty.id) shouldBe None
+    // A guild they have not left keeps hearing from them.
+    repo.masslogById(theirOtherGuild.id).map(_.userId) shouldBe Some(leaver)
+    repo.masslogById(someoneElse.id).map(_.userId) shouldBe Some(stayer)
+
+    repo.deleteGuild(guildId)
+    repo.deleteGuild(otherGuild)
+  }
+
   test("notification stamps survive the round trip to the second") {
     val provider = pgOrCancel()
     ensureCacheSchema(provider)

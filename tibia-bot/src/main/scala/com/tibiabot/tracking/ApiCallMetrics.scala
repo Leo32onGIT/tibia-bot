@@ -8,16 +8,20 @@ final case class ApiCallStats(total: Long, perSecond: Double, perHour: Long)
 
 /** A source's throughput plus its breakdowns.
  *
- *  `dimensions` is keyed by dimension name then by value — e.g.
- *  `"endpoint" -> ("/v4/character" -> stats)`. A source can carry several
- *  independent dimensions (TibiaData counts every call once under `endpoint`
- *  and once under `status`), so the values within one dimension sum to the
- *  overall total but values across dimensions do not.
+ *  `dimensions` is keyed by dimension name then value — e.g.
+ *  `"endpoint" -> ("/v4/character" -> stats)`. Values within one dimension sum to
+ *  the overall total; values across dimensions do not, since a source can carry
+ *  several independent ones.
  *
- *  `observedSeconds` is how long this counter has actually been collecting,
- *  capped at the hour window. Below 3600 the `perHour` figure is a partial
- *  hour rather than a rate, and the dashboard says so rather than showing a
- *  confident number that is really "everything since boot". */
+ *  A dimension supplied on only *some* calls sums to that subset instead —
+ *  Discord's `ratelimited` is recorded only for 429s, because the whole-total
+ *  dimensions cannot answer "which call was throttled" between them. Sharing such
+ *  a dimension against the overall total or within itself are both meaningful and
+ *  different, so the caller must say which it meant.
+ *
+ *  `observedSeconds` is how long this counter has been collecting, capped at the
+ *  window. Below 3600 the `perHour` figure is a partial hour rather than a rate,
+ *  and the dashboard says so. */
 final case class ApiCallSnapshot(
   total: Long,
   perSecond: Double,
@@ -28,17 +32,13 @@ final case class ApiCallSnapshot(
 )
 
 /** A count of events per second over a trailing hour, in a fixed ring of
- *  one-second buckets.
+ *  one-second buckets. Allocation-free once built — recording is an increment and
+ *  a time step only zeroes the buckets that aged out — which matters because the
+ *  hottest caller is one record per TibiaData response, hundreds a second.
  *
- *  Fixed-size and allocation-free once built: recording is an increment, and
- *  the only work on a time step is zeroing the buckets that just aged out.
- *  That matters because the hottest caller here is one record per TibiaData
- *  response, which is hundreds a second across all worlds.
- *
- *  A bucket ages out by being overwritten with zero as the clock passes it, so
- *  a counter that goes quiet for a while reports zero rather than stale counts
- *  from an hour ago. All access is synchronised: writers are akka dispatcher
- *  and JDA threads, the reader is the dashboard's HTTP thread. */
+ *  A bucket ages out by being zeroed as the clock passes it, so a quiet counter
+ *  reports zero rather than stale counts. All access is synchronised: writers are
+ *  pekko and JDA threads, the reader is the dashboard's HTTP thread. */
 private[tracking] final class RollingCounter(now: () => Long) {
   import RollingCounter.BucketCount
 
@@ -134,9 +134,10 @@ private[tracking] object RollingCounter {
  *
  *  Each call is recorded once against the overall counter and once under each
  *  tag supplied, so one `record("endpoint" -> "/v4/world", "status" -> "200")`
- *  populates both breakdowns without double-counting the total. Every dimension
- *  therefore sums to the overall total, which is what lets the dashboard show a
- *  share per row.
+ *  populates both breakdowns without double-counting the total. A dimension
+ *  named on every call therefore sums to the overall total, which is what lets
+ *  the dashboard show a share per row; one named on only some calls sums to
+ *  that subset instead — see [[ApiCallSnapshot]].
  *
  *  Unlike [[WorldMetrics]]' fixed 15-minute counters (reset externally on a
  *  timer) and [[com.tibiabot.discord.RateLimitedSender]]'s per-label window
@@ -177,6 +178,19 @@ final class ApiCallMetrics(now: () => Long = () => System.currentTimeMillis()) {
     val counters = synchronized { tags.map { case (d, v) => counterFor(d, v) } }
     counters.foreach(_.record())
   }
+
+  /** Record a call under one dimension only, leaving the overall total alone.
+   *
+   *  For a value that cannot be known while the call is being counted — the age
+   *  of a body that has not been parsed yet, say. The call itself is counted by
+   *  [[record]] at the choke point as usual; this adds the late-arriving
+   *  breakdown afterwards without counting the call twice.
+   *
+   *  Such a dimension sums to the subset it was supplied for rather than to the
+   *  overall total, exactly like one supplied on only some [[record]] calls —
+   *  see [[ApiCallSnapshot]] for what that means when reading a share. */
+  def recordDimension(dimension: String, value: String): Unit =
+    synchronized { counterFor(dimension, value) }.record()
 
   def snapshot(): ApiCallSnapshot = {
     val dims = synchronized { dimensions }

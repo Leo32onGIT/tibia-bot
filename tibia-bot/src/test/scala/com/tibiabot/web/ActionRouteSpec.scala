@@ -1,8 +1,8 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
-import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.testkit.ScalatestRouteTest
+import org.apache.pekko.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
+import org.apache.pekko.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.testkit.ScalatestRouteTest
 import com.tibiabot.discord.{DiscordGateway, MemberAccess}
 import net.dv8tion.jda.api.entities.{Guild, User}
 import org.scalatest.funsuite.AnyFunSuite
@@ -165,7 +165,7 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     val mac = javax.crypto.Mac.getInstance("HmacSHA256")
     mac.init(new javax.crypto.spec.SecretKeySpec("session-secret".getBytes("UTF-8"), "HmacSHA256"))
     val sig = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(mac.doFinal(payload.getBytes("UTF-8")))
-    akka.http.scaladsl.model.headers.Cookie("vb_session", s"$payload.$sig")
+    org.apache.pekko.http.scaladsl.model.headers.Cookie("vb_session", s"$payload.$sig")
   }
 
   private def body(json: String) = HttpEntity(ContentTypes.`application/json`, json)
@@ -254,7 +254,7 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       status shouldBe StatusCodes.Found
       val location = header("Location").get.value()
       location should startWith("/dashboard/auth/login?")
-      val to = akka.http.scaladsl.model.Uri(location).query().get("to").get
+      val to = org.apache.pekko.http.scaladsl.model.Uri(location).query().get("to").get
       new String(java.util.Base64.getUrlDecoder.decode(to), "UTF-8") shouldBe "/dashboard/g/g1?spawn=415"
     }
   }
@@ -304,14 +304,14 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
   test("a board that has not changed comes back as 304 with no body") {
     val actions = new RecordingActions
     val r = routes(actions)
-    var tag: akka.http.scaladsl.model.headers.EntityTag = null
+    var tag: org.apache.pekko.http.scaladsl.model.headers.EntityTag = null
     Get("/dashboard/g/g1/board") ~> signedIn ~> r ~> check {
       status shouldBe StatusCodes.OK
-      tag = header[akka.http.scaladsl.model.headers.ETag]
+      tag = header[org.apache.pekko.http.scaladsl.model.headers.ETag]
         .map(_.etag).getOrElse(fail("no ETag on the board"))
     }
     Get("/dashboard/g/g1/board")
-      .withHeaders(akka.http.scaladsl.model.headers.`If-None-Match`(tag)) ~> signedIn ~> r ~> check {
+      .withHeaders(org.apache.pekko.http.scaladsl.model.headers.`If-None-Match`(tag)) ~> signedIn ~> r ~> check {
       status shouldBe StatusCodes.NotModified
       responseAs[String] shouldBe ""
     }
@@ -319,9 +319,9 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
 
   test("a stale ETag is answered in full rather than as unchanged") {
     val actions = new RecordingActions
-    val stale = akka.http.scaladsl.model.headers.EntityTag("something-else")
+    val stale = org.apache.pekko.http.scaladsl.model.headers.EntityTag("something-else")
     Get("/dashboard/g/g1/board")
-      .withHeaders(akka.http.scaladsl.model.headers.`If-None-Match`(stale)) ~>
+      .withHeaders(org.apache.pekko.http.scaladsl.model.headers.`If-None-Match`(stale)) ~>
       signedIn ~> routes(actions) ~> check {
       status shouldBe StatusCodes.OK
     }

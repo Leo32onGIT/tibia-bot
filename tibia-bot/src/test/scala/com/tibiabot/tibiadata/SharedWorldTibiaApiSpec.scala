@@ -32,6 +32,9 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
   private val sharedWorldKey = "tibia:world-shared:antica"
   private val sharedCharacterKey = "tibia:character-shared:abu shusha"
 
+  private def beating(cache: FakeCache): Unit =
+    cache.store.put(PrimaryPresence.HeartbeatKey, "primary-bot-id")
+
   private class FakeCache(preset: Map[String, String] = Map.empty) extends RedisCache {
     val store = TrieMap.empty[String, String] ++ preset
     var gets = 0
@@ -210,6 +213,83 @@ class SharedWorldTibiaApiSpec extends AnyFunSuite with Matchers with JsonSupport
     val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary, worldTtl = 90.seconds)
     await(api.getWorld("Antica"))
     cache.lastTtl(sharedWorldKey) shouldBe 90.seconds
+  }
+
+  test("each character source publishes under its own prefix, so a secondary can race them") {
+    // With two upstreams running, one shared key would hold whichever source
+    // wrote last — which is not the same as the freshest. Namespacing lets a
+    // secondary read both and reach the primary's own answer without calling
+    // either API.
+    val stub = new StubApi(); val cache = new FakeCache()
+    val fansite = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary,
+      characterKeyPrefix = SharedWorldTibiaApi.FansiteCharacterKeyPrefix)
+    await(fansite.getCharacter("Abu Shusha"))
+
+    cache.store.keys.toList should contain("fansite:character-shared:abu shusha")
+    cache.store.keys.toList should not contain sharedCharacterKey
+  }
+
+  test("a secondary reads the prefix its own source publishes to") {
+    val published = character.toJson.compactPrint
+    val cache = new FakeCache(Map("fansite:character-shared:abu shusha" -> published))
+    val stub = new StubApi()
+    val fansite = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Secondary,
+      characterKeyPrefix = SharedWorldTibiaApi.FansiteCharacterKeyPrefix)
+
+    await(fansite.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 0
+  }
+
+  test("the default prefix is unchanged, so an existing shared cycle keeps working") {
+    // A deploy that upgrades one bot before the other must not have the two
+    // silently reading different keys.
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Primary)
+    await(api.getCharacter("Abu Shusha"))
+    cache.store.keys.toList should contain(sharedCharacterKey)
+  }
+
+  test("consume-only: a secondary waits for the primary rather than fetching") {
+    // The point of the whole arrangement: only the primary's address is
+    // whitelisted upstream, so a miss must not put this one on the wire.
+    val stub = new StubApi(); val cache = new FakeCache()
+    beating(cache)
+    val presence = new PrimaryPresence(cache, 30.seconds, () => java.time.Instant.now())
+    await(presence.refreshNow())
+
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Secondary, primaryPresence = Some(presence))
+    await(api.getCharacter("Abu Shusha")).isLeft shouldBe true
+    stub.characterCalls shouldBe 0
+  }
+
+  test("consume-only: it falls back to fetching when the primary goes quiet") {
+    // Fails open. Losing the primary costs duplicate requests; the alternative
+    // is every secondary going blind at once.
+    val stub = new StubApi(); val cache = new FakeCache()
+    val presence = new PrimaryPresence(cache, 30.seconds, () => java.time.Instant.now())
+    await(presence.refreshNow()) // no heartbeat in the cache
+
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Secondary, primaryPresence = Some(presence))
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 1
+  }
+
+  test("consume-only: a cache hit is still served without waiting for anything") {
+    val stub = new StubApi(); val cache = new FakeCache(Map(sharedCharacterKey -> character.toJson.compactPrint))
+    beating(cache)
+    val presence = new PrimaryPresence(cache, 30.seconds, () => java.time.Instant.now())
+    await(presence.refreshNow())
+
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Secondary, primaryPresence = Some(presence))
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 0
+  }
+
+  test("without a presence check the original fetch-on-miss behaviour is untouched") {
+    val stub = new StubApi(); val cache = new FakeCache()
+    val api = new SharedWorldTibiaApi(stub, cache, Config.BotRole.Secondary)
+    await(api.getCharacter("Abu Shusha")) shouldBe Right(character)
+    stub.characterCalls shouldBe 1
   }
 
   test("every other method passes straight through to the underlying API regardless of role") {

@@ -1,7 +1,7 @@
 package com.tibiabot
 package tibiadata
 
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import com.tibiabot.tibiadata.response._
 import org.apache.commons.text.StringEscapeUtils
 import spray.json.{DefaultJsonProtocol, JsObject, JsString, JsValue, RootJsonFormat}
@@ -43,7 +43,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
       case Some(g) => guildFormat.write(g)
     }
   }
-  implicit val characterFormat: RootJsonFormat[response.Character] = jsonFormat16(response.Character)
+  implicit val characterFormat: RootJsonFormat[response.Character] = jsonFormat18(response.Character)
   implicit val killersFormat: RootJsonFormat[Killers] = jsonFormat4(Killers)
   implicit val deathsFormat: RootJsonFormat[Deaths] = jsonFormat5(Deaths)
   implicit val accountInformationFormat: RootJsonFormat[AccountInformation] = jsonFormat3(AccountInformation)
@@ -79,6 +79,11 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val creatureListFormat: RootJsonFormat[CreatureList] = jsonFormat3(CreatureList)
   implicit val creatureDataFormat: RootJsonFormat[CreatureData] = jsonFormat2(CreatureData)
   implicit val creatureResponseFormat: RootJsonFormat[CreatureResponse] = jsonFormat2(CreatureResponse)
+
+  implicit val highscoreEntryFormat: RootJsonFormat[HighscoreEntry] = jsonFormat6(HighscoreEntry)
+  implicit val highscorePageFormat: RootJsonFormat[HighscorePage] = jsonFormat3(HighscorePage)
+  implicit val highscoreDataFormat: RootJsonFormat[HighscoreData] = jsonFormat6(HighscoreData)
+  implicit val highscoresResponseFormat: RootJsonFormat[HighscoresResponse] = jsonFormat2(HighscoresResponse)
 
 }
 

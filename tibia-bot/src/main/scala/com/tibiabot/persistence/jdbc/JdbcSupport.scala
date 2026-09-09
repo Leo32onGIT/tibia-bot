@@ -17,21 +17,18 @@ private[persistence] object JdbcSupport {
     finally conn.close()
   }
 
-  /** Like [[withConnection]], but runs `use` inside a single transaction:
-   *  committed if it returns, rolled back if it throws.
+  /** Like [[withConnection]], but runs `use` in one transaction: committed if it
+   *  returns, rolled back if it throws.
    *
-   *  Needed by the respawn claim system, which is the first feature here whose
-   *  writes are genuinely contended — claim and queue mutations arrive on JDA's
-   *  event threads (slash commands and button clicks from different people at
-   *  once) *and* on the expiry sweep, all racing on the same spawn. Doing
-   *  read-then-write across two autocommit statements lets two simultaneous
-   *  Next clicks read the same queue length and both write position 3. The
-   *  callers pair this with `SELECT ... FOR UPDATE` on the respawn row, which
+   *  Needed by the respawn claim system, whose writes are genuinely contended —
+   *  claim and queue mutations arrive on JDA's event threads *and* on the expiry
+   *  sweep, racing on the same spawn. Read-then-write across two autocommit
+   *  statements lets two simultaneous Next clicks read the same queue length and
+   *  both write position 3. Callers pair this with `SELECT ... FOR UPDATE`, which
    *  only serialises within a transaction.
    *
-   *  Autocommit is restored before the connection is closed so a pooled or
-   *  reused connection can't leak transactional mode into an unrelated caller.
-   */
+   *  Autocommit is restored before close, so a pooled connection cannot leak
+   *  transactional mode into an unrelated caller. */
   def withTransaction[A](connect: () => Connection)(use: Connection => A): A =
     withConnection(connect) { conn =>
       val previousAutoCommit = conn.getAutoCommit

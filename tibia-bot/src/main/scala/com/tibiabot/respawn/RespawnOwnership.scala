@@ -9,25 +9,18 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Which bot identity is responsible for a guild's respawn system.
  *
- *  Several bot identities (Blue, Red, a local DEV bot) can share a guild, and
- *  each one runs its own copy of the lifecycle sweep against the *same*
- *  `_<guildId>` database. Without this, every one of them acts on every claim:
- *  they race to send the hunt reminder, to start due slots, and to DM handover
- *  offers, so a spawn claimed through one bot gets answered by another — and
- *  because the sweep's read and its "mark done" write aren't one transaction,
- *  the same nudge can go out twice. Nothing in the respawn subsystem drew this
- *  line before; the only related rule, CommandSchemas.restrictedCommandGuildOwners,
- *  governs slash-command registration and was never consulted here.
+ *  Several identities (Blue, Red, a local DEV bot) can share a guild, each running
+ *  its own lifecycle sweep against the *same* `_<guildId>` database. Without this
+ *  they all act on every claim — racing to send reminders, start due slots and DM
+ *  handover offers — and since the sweep's read and its "mark done" write are not
+ *  one transaction, the same nudge can go out twice.
  *
- *  The owner is whoever created the guild's board post, which is the bot that
- *  built the forum in the first place. That needs no configuration and no
- *  migration: it is already true of every existing guild, and stays true if
- *  another identity is added later.
+ *  The owner is whoever created the guild's board post, i.e. the bot that built
+ *  the forum. That needs no configuration and no migration: it is already true of
+ *  every existing guild.
  *
- *  Button and modal interactions need no equivalent guard — a component only
- *  ever reaches the application whose message carries it, so those are scoped
- *  to the owning bot already.
- */
+ *  Buttons and modals need no equivalent guard — a component only reaches the
+ *  application whose message carries it. */
 final class RespawnOwnership(selfUserId: String) extends StrictLogging {
 
   /** Resolved owners, by guild id. Written once and kept: a board post's

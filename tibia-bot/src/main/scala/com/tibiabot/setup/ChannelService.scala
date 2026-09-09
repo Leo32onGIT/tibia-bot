@@ -12,7 +12,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer
 import net.dv8tion.jda.api.entities.channel.concrete.{Category, TextChannel}
 import net.dv8tion.jda.api.entities.emoji.Emoji
-import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role}
+import net.dv8tion.jda.api.entities.{Guild, Message, MessageEmbed, Role, User}
 import net.dv8tion.jda.api.events.guild.{GuildJoinEvent, GuildLeaveEvent}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -104,21 +104,85 @@ final class ChannelService(
     }).toMap)
   }
 
+  /** What the bot needs where its command log goes. Embeds because that is all
+   *  AdminLog ever posts — a channel granting Send Messages alone takes the log
+   *  and shows nothing of it. */
+  private val commandLogPermissions: List[Permission] =
+    List(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND, Permission.MESSAGE_EMBED_LINKS)
+
+  /** Point the command log at a channel that already exists — the Command Log
+   *  button on `/settings`.
+   *
+   *  `/setup` makes a log channel in the bot's own category, which is right for a
+   *  server meeting the bot for the first time and wrong for one that already
+   *  keeps every bot's log in one place. Only the channel moves: the category
+   *  stays, since the boosted channel and the spawns forum live in it, and the old
+   *  channel is left alone rather than deleted — by now it is an ordinary channel
+   *  of theirs, with history somebody may want.
+   *
+   *  Permissions are checked before anything is written. AdminLog drops a post it
+   *  cannot send (see AdminLog.send), so a log pointed somewhere the bot cannot
+   *  talk simply goes quiet — and the moment you would notice is the moment you
+   *  went looking for a record of something.
+   */
+  def setCommandLogChannel(guild: Guild, user: User, channel: TextChannel): MessageEmbed = {
+    val embedBuild = new EmbedBuilder()
+    embedBuild.setColor(BrandColor)
+    val config = discordRetrieveConfig(guild)
+    val currentId = config.getOrElse("admin_channel", "0")
+    val missing = commandLogPermissions.filterNot(guild.getSelfMember.hasPermission(channel, _))
+    if (config.isEmpty) {
+      embedBuild.setDescription(
+        s"${Config.noEmoji} You need to run `/setup` before you can move the command log.")
+    } else if (currentId == channel.getId) {
+      embedBuild.setDescription(s"${Config.noEmoji} The command log is already <#${channel.getId}>.")
+    } else if (missing.nonEmpty) {
+      val named = missing.map(permission => s"**${permission.getName}**").mkString(", ")
+      embedBuild.setDescription(
+        s"${Config.noEmoji} I can't post in <#${channel.getId}> — I'm missing $named there.\n\n" +
+          "Grant them to me on that channel, or to a role I have, and press the button again.")
+    } else {
+      // Database first, then the cache the death and activity posts read — see
+      // TibiaBot.postToDiscordAndCleanUp, which takes the channel id off the
+      // Discords record rather than re-reading config per death.
+      discordUpdateConfig(guild, "", channel.getId, "", "", "")
+      updateAdminChannel(guild.getId, channel.getId)
+
+      // Digits-only before it is looked up: `getTextChannelById` parses a
+      // snowflake and throws on anything else, and this runs inside a deferred
+      // interaction, where a throw is an answer that never arrives. The stored
+      // value is "0" on a guild that never had one.
+      val previous = Option(currentId).filter(id => id.nonEmpty && id.forall(_.isDigit))
+        .flatMap(id => Option(guild.getTextChannelById(id)))
+      // The move is logged in both places, and the order is the point: the new
+      // channel proves the bot can write there, and the old one says where its
+      // log went rather than just stopping.
+      com.tibiabot.presentation.AdminLog.post(channel,
+        s"${Names.user(user.getName)} pointed the command log here.",
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif")
+      previous.foreach(old => com.tibiabot.presentation.AdminLog.post(old,
+        s"${Names.user(user.getName)} moved the command log to <#${channel.getId}>.\n\nNothing more will be posted here.",
+        "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif"))
+      val leftBehind = previous
+        .map(old => s"\n\n*<#${old.getId}> is still there — delete it if you don't want it.*")
+        .getOrElse("")
+      embedBuild.setDescription(
+        s":gear: The command log is now <#${channel.getId}>.$leftBehind")
+    }
+    embedBuild.build()
+  }
+
   /** The bot's own override on its "Violent Bot" category.
    *
-   *  MANAGE_PERMISSIONS is the load-bearing one. Discord only lets you write a
-   *  channel override if you either already hold every permission in it or hold
-   *  Manage Permissions *explicitly on that channel* — so without this, granting
-   *  the moderator role its access to the spawns forum fails, and takes the whole
-   *  forum setup down with it. The thread permissions are here for the same
-   *  reason: the forum override hands those to the moderator role, and you cannot
-   *  grant what you do not have.
+   *  MANAGE_PERMISSIONS is the load-bearing one: Discord only lets you write a
+   *  channel override if you hold every permission in it, or hold Manage
+   *  Permissions explicitly on that channel — so without it, granting the
+   *  moderator role access to the spawns forum fails and takes the forum setup
+   *  with it. The thread permissions are here for the same reason.
    *
-   *  Non-fatal. A bot invited without Manage Roles cannot grant itself Manage
-   *  Permissions either, and a guild in that position should still get its
-   *  channels — it just needs the permission adding by hand before the spawns
-   *  forum will set up.
-   */
+   *  Non-fatal: a bot invited without Manage Roles cannot grant itself this
+   *  either, and should still get its channels — the permission just needs adding
+   *  by hand before the spawns forum will set up. */
   private def setCategoryBotPerms(category: Category, botRole: Role): Unit =
     try {
       category.upsertPermissionOverride(botRole)
@@ -138,16 +202,13 @@ final class ChannelService(
           s"grants Manage Roles by hand", ex)
     }
 
-  /** The @everyone override on the bot's "Violent Bot" category.
+  /** The @everyone override on the bot's "Violent Bot" category. Members may see
+   *  it but not open posts or threads of their own. The spawns forum inherits from
+   *  here rather than carrying its own override, so this is where "one post per
+   *  respawn, created by the bot" is enforced.
    *
-   *  Members may see it — that is how they read the notifications channel and the
-   *  spawns forum — but may not open posts or threads of their own. The spawns
-   *  forum deliberately inherits from here rather than carrying its own override,
-   *  so this is where the "one post per respawn, created by the bot" rule is
-   *  actually enforced.
-   *
-   *  One helper for all four creation sites, so a new one can't quietly forget
-   *  the deny. `visible` is false on the path that hides the category entirely. */
+   *  One helper for all four creation sites, so a new one cannot forget the deny.
+   *  `visible` is false on the path that hides the category entirely. */
   private def setCategoryPublicPerms(category: Category, publicRole: Role, visible: Boolean): Unit = {
     val action = category.upsertPermissionOverride(publicRole)
       .grant(Permission.CREATE_PUBLIC_THREADS)
@@ -157,11 +218,9 @@ final class ChannelService(
   /** Reuse the guild's existing role of this name, or create it with the given
    *  colour. Used by /setup only; /repair looks up roles by stored id instead
    *  and creates its own replacements inline if they're missing. */
-  /** Create (or adopt) the guild's moderator role and remember its id.
-   *
-   *  Reuses an existing role of the same name, so a server that already made one
-   *  by hand — or is being repaired — keeps whatever members it already has
-   *  rather than getting a second, empty role. */
+  /** Create (or adopt) the guild's moderator role and remember its id. Reuses an
+   *  existing role of the same name, so a server that made one by hand — or is
+   *  being repaired — keeps its members rather than getting a second, empty role. */
   private def ensureModeratorRole(guild: Guild): Option[Role] =
     try {
       val role = getOrCreateRole(guild, com.tibiabot.commands.Permissions.ModeratorRoleName, new Color(114, 137, 218))
@@ -263,25 +322,29 @@ final class ChannelService(
     Button.secondary("bounty", " ").withEmoji(Emoji.fromFormatted(Config.bountyEmoji))
   )
 
-  /** The "the bot will poke" role-notification embed for a world. Built by
-   *  /setup (initial post), /fullbless (edits the existing message) and
-   *  /repair (reposts it). `level` is a String because /repair reads it
-   *  straight out of the stored world config; it is only ever interpolated.
+  /** The "the bot will poke" role-notification embed for a world. Built by /setup,
+   *  /fullbless (which edits it) and /repair (which reposts it). `level` is a
+   *  String because /repair reads it straight out of the stored world config.
    *
-   *  The last two lines describe a DM rather than a channel poke, so they say
-   *  so: a role that only ever messages you privately is a different promise
-   *  from one that mentions you in a channel, and the difference has to be
-   *  readable before anyone presses the button. */
+   *  The last two lines describe a DM rather than a channel poke and say so: a
+   *  role that only messages you privately is a different promise from one that
+   *  mentions you, and that has to be readable before anyone presses. */
   def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, bountyRoleId: String, level: String): MessageEmbed = {
-    // A world configured before bounties existed carries '0' here until /repair
-    // creates the role. `<@&0>` renders as a deleted role, which reads as
-    // something broken rather than as something not set up yet.
+    // A world configured before bounties existed carries '0' until /repair creates
+    // the role, and `<@&0>` renders as a deleted role — which reads as broken
+    // rather than as not set up yet.
     val bountyMention = if (bountyRoleId == null || bountyRoleId == "0") "**Bounty**" else s"<@&$bountyRoleId>"
     new EmbedBuilder()
       .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
       .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
       .setColor(BrandColor)
-      .setFooter("Add or remove yourself from the role using the buttons below:")
+      // Not "add or remove yourself from the role": three of the five buttons do
+      // that, and the last two open a form that sets up a DM subscription (the
+      // role follows it). Saying the first thing for all five is what leaves
+      // somebody adding the Mass Log role by hand and waiting for a DM that is
+      // not coming — nothing reads the role, and without the privileged members
+      // intent nothing can.
+      .setFooter("Use the buttons below to set these up:")
       .setDescription(
         s"${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n" +
         s"${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n" +
@@ -309,17 +372,11 @@ final class ChannelService(
     else s"Catalogue: ${parts.mkString(", ")}."
   }
 
-  /** What the respawn system needs that this bot was not given.
-   *
-   *  Checked up front rather than discovered halfway through: the system is a
-   *  forum, a set of channel overrides, and threads it archives and un-archives.
-   *  Finding out at the third step leaves a guild holding a channel the bot
-   *  cannot manage.
-   *
-   *  Bots added before this feature existed were invited with a narrower set, so
-   *  this is the ordinary case for an existing server rather than an error — the
-   *  answer is a fresh invite, not a retry.
-   */
+  /** What the respawn system needs that this bot was not given. Checked up front
+   *  rather than discovered halfway through, which would leave a guild holding a
+   *  channel the bot cannot manage. Bots added before this feature were invited
+   *  with a narrower set, so this is ordinary for an existing server — the answer
+   *  is a fresh invite, not a retry. */
   private[setup] def missingRespawnPermissions(guild: Guild): List[Permission] =
     List(Permission.MANAGE_CHANNEL, Permission.MANAGE_ROLES, Permission.MANAGE_THREADS)
       .filterNot(permission => guild.getSelfMember.hasPermission(permission))
@@ -336,17 +393,12 @@ final class ChannelService(
   }
 
   /** Create the respawn system's `📅・sᴘᴀᴡɴs` forum and its pinned board post in
-   *  the guild's admin category, seeding the catalogue on the way.
+   *  the guild's admin category, seeding the catalogue on the way. Idempotent: an
+   *  existing forum is reported and left alone, so this doubles as the repair
+   *  path. Returns the text to show the caller.
    *
-   *  Idempotent by design: if the forum still exists this reports that and
-   *  changes nothing, so it doubles as the repair path. Returns the text to
-   *  show the caller.
-   *
-   *  Kept here rather than in RespawnService because it needs the guild's admin
-   *  category, which is `discord_info` state this class already owns — and
-   *  because `/setup` and `/repair` call it for exactly the same reason they
-   *  create the notifications channel.
-   */
+   *  Here rather than in RespawnService because it needs the guild's admin
+   *  category, which is `discord_info` state this class already owns. */
   def createSpawnsForum(guild: Guild): String = {
     if (!Config.Respawn.enabled) {
       return s"${Config.noEmoji} The respawn claim system isn't enabled on this bot."
@@ -471,39 +523,36 @@ final class ChannelService(
     }
   }
 
-  /** Retire the respawn forum when `/remove` takes the guild's last world.
+  /** Delete the respawn forum when `/remove` takes the guild's last world.
    *
-   *  Unlike the command-log and notifications channels, the forum is **kept** —
-   *  it holds the server's hunt history, and deleting that silently isn't worth
-   *  the tidiness. Instead it is archived, renamed, lifted out of the bot's
-   *  category and made read-only, while the bot drops all of its own respawn
-   *  data (claims, catalogue, settings).
+   *  The same treatment the command-log and notifications channels get, and for
+   *  the same reason: `/remove` on the last world is somebody asking the bot to
+   *  take its furniture with it, and a channel nothing writes to any more is
+   *  just something for them to clean up by hand. It used to be kept as a
+   *  read-only archive, which left a locked, renamed channel behind and made the
+   *  removal feel half-done.
    *
-   *  Two consequences worth knowing:
-   *   - Because the catalogue goes, a later `/setup` builds a *new* forum from
-   *     the bundled seed; the retired one stays behind as history under its own
-   *     name, so the two never collide.
-   *   - This is deliberately *not* gated on `Config.Respawn.enabled`. The flag
-   *     can be switched off after a guild already has a forum, and teardown
-   *     still has to leave that channel in a sane state.
+   *  The bot's own respawn data (claims, catalogue, settings) goes with it, so a
+   *  later `/setup` builds a fresh forum from the bundled seed rather than
+   *  inheriting a catalogue whose threads point at a channel that is gone.
+   *
+   *  Deliberately *not* gated on `Config.Respawn.enabled`: the flag can be
+   *  switched off after a guild already has a forum, and teardown still has to
+   *  clean it up.
    */
-  def retireSpawnsForum(guild: Guild): Unit = {
+  def deleteSpawnsForum(guild: Guild): Unit = {
     try {
       respawnService.settings(guild.getId).foreach { settings =>
         com.tibiabot.respawn.RespawnThreads.findForum(guild, settings).foreach { forum =>
-          com.tibiabot.respawn.RespawnThreads.retireForum(guild, forum,
-            "Violent Bot is no longer tracking a world on this server, so respawn claims have been turned off.\n\n" +
-              "This channel has been kept as a read-only archive of previous claims. " +
-              "Delete it whenever you like — the bot won't touch it again.\n\n" +
-              "Running `/setup` for a world later will create a fresh spawns channel.")
+          forum.delete().complete()
         }
         respawnService.teardown(guild.getId)
       }
     } catch {
       case ex: Throwable =>
         // Never fail a /remove over this — the world's own channels are the
-        // point, and a half-retired forum is fixable by hand.
-        logger.warn(s"Could not retire the respawn forum on guild '${guild.getId}'", ex)
+        // point, and a forum left behind is deletable by hand.
+        logger.warn(s"Could not delete the respawn forum on guild '${guild.getId}'", ex)
     }
   }
 
@@ -689,8 +738,8 @@ final class ChannelService(
         val categoryId = newCategory.getId
         val activityId = activityChannel.getId
 
-        postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/levels filter`** command.")
-        postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/deaths filter`** command.")
+        postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/settings filter levels`** command.")
+        postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/settings filter deaths`** command.")
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "0", "0", activityId)
@@ -1363,9 +1412,9 @@ final class ChannelService(
           if (boostedChannel != null) boostedChannel.delete().complete()
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           if (adminChannel != null) adminChannel.delete().complete()
-          // Before the category: the forum is kept, so it has to be moved out
-          // deliberately rather than orphaned by the category's deletion.
-          retireSpawnsForum(guild)
+          // Before the category: deleting a category doesn't delete what is in
+          // it, it orphans those channels to the top of the server.
+          deleteSpawnsForum(guild)
           val adminCategory = guild.getCategoryById(discordConfig.getOrElse("admin_category", "0"))
           if (adminCategory != null) adminCategory.delete().complete()
         } else {

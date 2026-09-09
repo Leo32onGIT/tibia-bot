@@ -15,6 +15,13 @@ object Embeds {
    *  notices). */
   val NemesisPurple: Int = 11563775
 
+  /** The bot's yellow (the same 14397256 GuildActivity uses for neutral activity
+   *  and RespawnEmbeds calls WarnColor) — something the bot did on its own rather
+   *  than something somebody asked it to do. The brand colour reads as an answer
+   *  to a command; this reads as the bot acting unprompted, which is worth
+   *  telling apart at a glance in a channel that is mostly audit lines. */
+  val AutomaticColor: Int = 14397256
+
   /** A minimal response embed: the brand colour and a description, nothing else.
    *  Replaces the repeated `new EmbedBuilder().setColor(3092790)
    *  .setDescription(...).build()` chain used for simple command replies. */

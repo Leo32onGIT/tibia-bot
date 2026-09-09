@@ -1,6 +1,6 @@
 package com.tibiabot
 
-import akka.actor.ActorSystem
+import org.apache.pekko.actor.ActorSystem
 import com.tibiabot.tibiadata.TibiaDataClient
 import com.tibiabot.tibiadata.response.{BoostedResponse, CreatureResponse}
 import com.tibiabot.scheduler.ServerSaveSchedule
@@ -12,7 +12,7 @@ import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.User
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.Message
-import net.dv8tion.jda.api.entities.channel.concrete.PrivateChannel
+import net.dv8tion.jda.api.entities.channel.concrete.{PrivateChannel, TextChannel}
 import net.dv8tion.jda.api.utils.TimeFormat
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
 import net.dv8tion.jda.api.requests.ErrorResponse
@@ -58,16 +58,10 @@ object BotApp extends App with StrictLogging {
 
   /** Build a RateLimitedSender ticking every `delayMs`.
    *
-   *  The five-minute tick no longer logs — the `[rate-limit:name]` line was a
-   *  steady drip of two entries every five minutes forever, and the same figures
-   *  are on the dashboard whenever somebody actually wants them.
-   *
-   *  It still runs, because [[discord.RateLimitedSender.snapshotAndReset]] is the
-   *  only thing that rolls the per-label window, and the dashboard reads that
-   *  window (see web.StatusRoute). Dropping the tick with the log would quietly
-   *  turn "avg wait" from the last five minutes into an average since boot, which
-   *  stops moving when a lane starts struggling — the opposite of what it is for.
-   */
+   *  The five-minute tick no longer logs, but still runs:
+   *  [[discord.RateLimitedSender.snapshotAndReset]] is the only thing that rolls
+   *  the per-label window the dashboard reads. Dropping it would turn "avg wait"
+   *  into an average since boot, which stops moving when a lane struggles. */
   private def makeMonitoredSender(name: String, delayMs: Int, perGroupMinGapMs: Long = 0): discord.RateLimitedSender = {
     val sender = new discord.RateLimitedSender(drain => {
       val cancellable = actorSystem.scheduler.scheduleWithFixedDelay(
@@ -83,21 +77,17 @@ object BotApp extends App with StrictLogging {
     sender
   }
 
-  // Shared, bot-wide background lane for low-priority outbound sends (renames,
-  // activity/admin embeds, batched level-ups, boosted-DM notifications) — one
-  // instance across every world stream so the aggregate send rate is bounded
-  // bot-wide, not per world. Deaths and the boosted-channel server-save post
-  // are top priority and bypass this entirely.
+  // Bot-wide background lane for low-priority sends (renames, activity/admin
+  // embeds, batched level-ups, boosted DMs) — one instance across every world
+  // stream, so the rate is bounded bot-wide rather than per world. Deaths and the
+  // boosted server-save post bypass it entirely.
   val outboundSender = makeMonitoredSender("background", Config.globalMessageDelayMs)
 
-  // Separate, much slower lane just for online-list message edits/sends —
-  // Discord rate-limits this traffic far harder than the general REST budget
-  // (confirmed via live 429s with Retry-After 4-6s), so it needs its own pace
-  // instead of sharing the lane above with everything else. Those limits are
-  // per-channel, so the lane is additionally told to space out sends targeting
-  // the same channel (see the group argument in dispatchOnlineListUpdate); the
-  // bot-wide pace alone can't prevent one channel's several embeds draining
-  // back-to-back.
+  // A much slower lane just for online-list edits: Discord rate-limits this
+  // traffic far harder than the general REST budget (live 429s with Retry-After
+  // 4-6s). The limits are per-channel, so the lane also spaces out sends to the
+  // same channel — the bot-wide pace alone cannot stop one channel's several
+  // embeds draining back-to-back.
   val onlineListSender = makeMonitoredSender(
     "online-list", Config.onlineListMessageDelayMs, Config.onlineListPerChannelMinGapMs
   )
@@ -136,6 +126,10 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
   private val worldTransferRepository: persistence.WorldTransferRepository =
     new persistence.jdbc.JdbcWorldTransferRepository(connectionProvider)
+  private val highscoreRepository: persistence.HighscoreRepository =
+    new persistence.jdbc.JdbcHighscoreRepository(connectionProvider)
+  private val experienceRepository: persistence.ExperienceRepository =
+    new persistence.jdbc.JdbcExperienceRepository(connectionProvider)
   // Temporary, for the move of announced transfers from guild scope to world
   // scope — see JdbcLegacyWorldTransferMigration.
   private val legacyWorldTransferMigration =
@@ -174,6 +168,17 @@ object BotApp extends App with StrictLogging {
 
   // Let the games begin
   logger.info("Starting up")
+  // Said once at startup rather than per world: which character upstreams are
+  // in play is the first thing to check when death latency looks wrong.
+  Config.FansiteApi.mode match {
+    case Config.FansiteApi.Shadow =>
+      logger.info("Fansite API in shadow mode — fetched and compared alongside TibiaData, but nothing is posted from it")
+    case Config.FansiteApi.Race =>
+      logger.info(s"Fansite API racing TibiaData — sources held ${Config.FansiteApi.phaseOffsetTicks} poll ticks apart, freshest sheet wins")
+    case Config.FansiteApi.Off =>
+      if (Config.FansiteApi.disabledForMissingToken)
+        logger.warn("FANSITE_API_MODE asked for the fansite API but FANSITE_API_TOKEN is empty — staying on TibiaData alone")
+  }
 
   val jda = app.Bootstrap.buildReadyJda(Config.token, new BotListener())
   logger.info("JDA ready")
@@ -202,19 +207,17 @@ object BotApp extends App with StrictLogging {
     }
 
   // Respawn claim system — see respawn.RespawnService. Constructed regardless of
-  // Config.Respawn.enabled (it does no I/O until called, and the repository
-  // creates its tables lazily on first use); the flag gates command
-  // registration, channel creation and the sweep below instead.
+  // Config.Respawn.enabled, which does no I/O until called; the flag gates
+  // command registration, channel creation and the sweep instead.
   val respawnService = new respawn.RespawnService(respawnRepository)
 
-  // Which guilds' respawn systems are this bot identity's to run. Several bots
-  // can share a guild and all sweep the same per-guild database; this is what
-  // stops them answering each other's claims (see respawn.RespawnOwnership).
+  // Which guilds' respawn systems are this bot identity's to run — several bots
+  // sharing a guild would otherwise answer each other's claims.
   private val respawnOwnership = new respawn.RespawnOwnership(discordGateway.selfUserId)
 
-  // Per-user boosted boss/creature notification subscriptions. Takes this bot's
-  // own id for the same reason respawnOwnership above does: bots sharing a
-  // bot_cache database must not consume each other's server-save state.
+  // Per-user boosted boss/creature subscriptions. Takes this bot's own id for the
+  // same reason respawnOwnership does: bots sharing a bot_cache database must not
+  // consume each other's server-save state.
   val boostedService = new boosted.BoostedService(connectionProvider, boostedRepository, cacheRepository, tibiaDataClient, () => boostedBossesList, discordGateway.selfUserId)
 
   // The mass-log and bounty DM subscriptions behind the two notification-channel
@@ -222,20 +225,14 @@ object BotApp extends App with StrictLogging {
   // what creates the two tables — see notify.NotifyService for why it caches.
   val notifyService = new notifications.NotifyService(notifyRepository, discordGateway, outboundSender)
 
-  // Ties bot activity to a Patreon subscription via a seat system (see
-  // paywall.PaywallService): /setup checks the caller, then assigns one of
-  // their seats to that (guild, world) pair; that pair's activity keeps
-  // posting only while Patreon still reports that seat's owner an active
-  // patron (read from patreonMemberRepository's synced snapshot below — the
-  // support Discord's role plays no part in this any more), and a world that
-  // stops checking out (including one that was never seated at all) gets
-  // Config.Patreon.graceDays to sort it out before anything is actually
-  // paused. Seat count is Config.Patreon.seatsPerUser plus any per-user
-  // adjustment granted through the dashboard (see
-  // PaywallService.effectiveSeatLimit). Config.PatreonApi.enabled is passed
-  // in as well: an install with no Patreon credentials and nothing ever
-  // synced is a self-host, and the gate stands down there entirely rather
-  // than refusing everyone (see PaywallService.patreonNotConfigured).
+  // Ties bot activity to a Patreon subscription via seats (see
+  // paywall.PaywallService): /setup assigns one of the caller's seats to a
+  // (guild, world) pair, which keeps posting only while patreonMemberRepository's
+  // synced snapshot still reports that seat's owner an active patron. A world
+  // that stops checking out gets Config.Patreon.graceDays before anything pauses.
+  // Seats are Config.Patreon.seatsPerUser plus any dashboard adjustment (see
+  // PaywallService.effectiveSeatLimit). Config.PatreonApi.enabled marks a
+  // self-host, where the gate stands down entirely rather than refusing everyone.
   val paywallService = new paywall.PaywallService(discordGateway, patreonSeatRepository, patreonSeatOverrideRepository, patreonGraceRepository, patreonMemberRepository, Config.Patreon.supportGuildId, Config.Patreon.seatsPerUser, Config.Patreon.graceDays, discordGateway.applicationOwnerId, Config.PatreonApi.enabled)
 
   // Direct Patreon API access — see Config.PatreonApi and syncPatreonMembers
@@ -250,11 +247,6 @@ object BotApp extends App with StrictLogging {
     discordRetrieveConfig _, worldConfig _, checkConfigDatabase _
   )
 
-  // Per-guild custom online-list tag categories (/neutral tag ...)
-  val customSortService = new customsort.CustomSortService(
-    customSortRepository, streamState, tibiaDataClient, huntedAlliedService.fetchPlayerSummary _,
-    discordRetrieveConfig _, checkConfigDatabase _
-  )
 
   // get bot userID (used to stamp automated enemy detection messages)
   val botUser = discordGateway.selfUserId
@@ -277,19 +269,14 @@ object BotApp extends App with StrictLogging {
   // unauthenticated landing page at its root via Caddy passing through to
   // GitHub Pages (see Caddyfile).
   //
-  //   /dashboard — the member-facing respawn dashboard, and where the OAuth
-  //                routes live. Primary, so a bare login lands here and the
-  //                redirect URI already registered with Discord is unchanged.
-  //   /status    — the owner-only monitoring dashboard. Named for what its own
-  //                masthead has always said (`Violent Bot /status`) rather than
-  //                something new.
+  //   /dashboard — member-facing respawn dashboard, and where the OAuth routes
+  //                live. Primary, so a bare login lands here.
+  //   /status    — owner-only monitoring dashboard.
   //
-  // One login covers both: the callback sets the session cookie under each
-  // path. Deliberately not one cookie at `/`, which would hand the session to
-  // GitHub Pages on every visit to the landing page.
-  //
-  // The OAuth client id is the bot's own application id, which for a standard
-  // bot is the same snowflake as its user id.
+  // One login covers both: the callback sets the cookie under each path.
+  // Deliberately not one cookie at `/`, which would hand the session to GitHub
+  // Pages on every landing-page visit. The OAuth client id is the bot's own
+  // application id, the same snowflake as its user id.
   private val dashboardMountPath = "/dashboard"
   private val adminMountPath = "/status"
   private val discordAuth = new web.DiscordAuth(
@@ -300,16 +287,13 @@ object BotApp extends App with StrictLogging {
     mountPath = dashboardMountPath,
     extraCookiePaths = List(adminMountPath),
     secureCookies = Config.Web.secureCookies,
-    // So a dashboard link pasted into Discord unfurls as this bot rather than as
-    // Discord itself, which is what the crawler found at the end of the sign-in
-    // redirect it was following. Built from the configured origin, so it names
-    // whichever domain this deployment actually answers on, and picked per area
-    // so the two mounts above describe themselves rather than the site.
+    // So a link pasted into Discord unfurls as this bot rather than as Discord
+    // itself, which is what the crawler found at the end of the sign-in redirect.
+    // Built from the configured origin, and picked per area.
     linkPreview = Some(web.LinkPreview.forPath(Config.Web.baseUrl)),
-    // So a restart is not a sign-in. The session cookie is signed rather than
-    // stored and already survives one; the guild list behind it lived in memory,
-    // so every member came back perfectly authenticated and resolving to no
-    // servers at all. Ids only, and they grant nothing — see UserGuildCache.
+    // So a restart is not a sign-in. The signed cookie already survived one, but
+    // the guild list behind it was in memory, so members came back authenticated
+    // and resolving to no servers. Ids only, granting nothing — see UserGuildCache.
     userGuildStore = persistence.RedisCacheProvider.cache
   )(actorSystem, ex)
   private val statusRoute = new web.StatusRoute(
@@ -328,34 +312,27 @@ object BotApp extends App with StrictLogging {
         isLocal = guildId => discordGateway.guildById(guildId) != null,
         selfBotId = discordGateway.selfUserId)(ex))
     else None
-  // Where an access answer that has fallen due is resolved again, behind
-  // whoever was handed the old one — see AccessCache's "two horizons".
+  // Where a due access answer is resolved again, behind whoever was handed the
+  // old one — see AccessCache's "two horizons".
   //
-  // Small on purpose. Every refresh is a chain of blocking Discord REST calls,
-  // and Discord's budget is bot-wide and shared with the world scanning that is
-  // this bot's actual job; four threads is the ceiling on how much of it the
-  // dashboard can take at any instant. In the steady state it is nowhere near
-  // busy — a few hundred visitors, each refreshed once every few minutes, is a
-  // couple of lookups a second — so what this width really bounds is the cold
-  // start, when every visitor's entry is missing at once and the temptation is
-  // to resolve all of them together.
+  // Small on purpose: every refresh is a chain of blocking Discord REST calls
+  // against a bot-wide budget shared with world scanning. The steady state is a
+  // couple of lookups a second, so this width really bounds the cold start, when
+  // every visitor's entry is missing at once.
   private val accessRefreshPool = scala.concurrent.ExecutionContext.fromExecutorService(
     java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
       val thread = new Thread(r, "access-refresh")
       thread.setDaemon(true)
       thread
     }))
-  // Where a visitor's individual guilds are looked up, when they are in more
-  // than one this bot tracks. Its own pool because every other dashboard pool
-  // *waits* on it: reads, refreshes, another bot's questions and the write
-  // relay's permission check all resolve access, and fanning out onto the pool
-  // the caller already occupies is a deadlock rather than a slowdown.
+  // Where a visitor's individual guilds are looked up. Its own pool because every
+  // other dashboard pool *waits* on it — fanning out onto the pool the caller
+  // already occupies is a deadlock, not a slowdown.
   //
-  // Wider than the pools that wait on it, since one resolution can want several
-  // of these at once and they are all parked on a Discord round trip. Nothing
-  // here governs how hard Discord is pushed — JDA's own rate limiter does that,
-  // and queues past it — so this is about not making a visitor wait for a
-  // thread, rather than about the budget.
+  // Wider than those pools, since one resolution can want several of these at
+  // once, all parked on a Discord round trip. Nothing here governs how hard
+  // Discord is pushed (JDA's rate limiter does); it is about not making a visitor
+  // wait for a thread.
   private val dashboardLookupPool = scala.concurrent.ExecutionContext.fromExecutorService(
     java.util.concurrent.Executors.newFixedThreadPool(12, (r: Runnable) => {
       val thread = new Thread(r, "dashboard-lookup")
@@ -401,19 +378,14 @@ object BotApp extends App with StrictLogging {
       thread.setDaemon(true)
       thread
     }))
-  // Reads get their own, separate from the writes above.
+  // Reads get their own pool, separate from the writes above. Sharing one pool of
+  // four was the problem, not its size: resolving access waits on the other bots
+  // in the fleet, so a few visitors loading the dashboard while another bot was
+  // slow could occupy every thread and leave nothing to perform a claim with.
   //
-  // They shared one pool of four, and the sharing was the problem rather than
-  // the size: resolving access waits on the other bots in the fleet (see
-  // RemoteGuildAccess), so a few visitors loading the dashboard while another
-  // bot was slow could occupy every thread and leave nothing to perform a
-  // claim with. That coupling is also what forced the wait itself to be kept
-  // unrealistically short, which is what made the picker drop servers.
-  //
-  // Larger than the write pool because these threads are almost never running:
-  // they are parked on a Discord REST call or on an answer coming back over
-  // Redis. Bounded all the same, so a burst queues instead of spawning threads
-  // without limit.
+  // Larger than the write pool because these threads are almost never running —
+  // they are parked on a REST call or on Redis — but still bounded, so a burst
+  // queues rather than spawning threads without limit.
   private val dashboardReadPool = scala.concurrent.ExecutionContext.fromExecutorService(
     java.util.concurrent.Executors.newFixedThreadPool(12, (r: Runnable) => {
       val thread = new Thread(r, "dashboard-read")
@@ -454,25 +426,16 @@ object BotApp extends App with StrictLogging {
   }
   // The other side of the access relay: answer what somebody else's dashboard
   // asks about a guild this bot is in. Resolved locally on purpose — going back
-  // out over Redis here would have two bots asking each other the same question
-  // until both timed out.
+  // out over Redis would have two bots asking each other until both timed out.
   //
-  // On its own pool, and not on `ex`, which is what it used to run on. Every
-  // question answered here ends in a *blocking* JDA member lookup, and the
-  // sweep starts one per pending question at once — so a burst of questions
-  // put an unbounded number of blocking calls onto the default dispatcher.
-  // That dispatcher is eight-odd threads and also runs the HTTP server, the
-  // world poll streams and every scheduled job in this file: enough
-  // simultaneous questions and the bot stops answering requests at all, on the
-  // strength of somebody else's dashboard being opened.
+  // Its own pool, not `ex`: every answer ends in a *blocking* JDA member lookup
+  // and the sweep starts one per pending question, so a burst put unbounded
+  // blocking calls onto the default dispatcher — which also runs the HTTP server,
+  // the world poll streams and every scheduled job in this file.
   //
-  // A fixed pool is the bound as well as the isolation — the fan-out can no
-  // longer exceed its width, and the work that does not fit queues instead of
-  // taking a thread from something else. Four is generous against a deadline
-  // of `RemoteGuildAccess.DefaultTimeout` and a lookup worth a few hundred
-  // milliseconds; deliberately not shared with the action pool, since the
-  // point of splitting reads off writes was that a slow answer must not be
-  // able to hold up a claim.
+  // The fixed pool is the bound as well as the isolation. Four is generous
+  // against `RemoteGuildAccess.DefaultTimeout`; deliberately not shared with the
+  // action pool, so a slow answer cannot hold up a claim.
   private val accessAnswerPool = scala.concurrent.ExecutionContext.fromExecutorService(
     java.util.concurrent.Executors.newFixedThreadPool(4, (r: Runnable) => {
       val thread = new Thread(r, "access-answer")
@@ -486,19 +449,104 @@ object BotApp extends App with StrictLogging {
     selfBotId = discordGateway.selfUserId)(accessAnswerPool)
 
   /** Whether this bot is listening for access questions on its own channel, and
-   *  so whether its roster may tell the others to send them there.
-   *
-   *  Written once the subscription has actually been accepted, and read by
-   *  `publishGuildRoster` on every beat. It must not be a statement about what
-   *  this build is capable of: a bot advertising a channel it never subscribed
-   *  to would have every other bot publishing into silence and waiting out a
-   *  deadline to discover it, which is worse than the sweep this replaces. */
+   *  so whether its roster may point the others there. Written only once the
+   *  subscription is accepted — never a statement about what this build can do,
+   *  since a bot advertising a channel it never subscribed to leaves every other
+   *  bot publishing into silence until a deadline expires. */
   @volatile private var answeringOnChannel = false
 
-  /** Republished well inside its own TTL, so a missed beat or two never drops
-   *  this bot's guilds out of anybody's picker. */
+  /** Republished well inside its own TTL, so a missed beat never drops this bot's
+   *  guilds out of anybody's picker.
+   *
+   *  '''The TTL is twenty beats rather than four, and that margin is the point.'''
+   *  Asking about a dead bot costs nothing and self-corrects — the question
+   *  reaches no subscriber and the guild is *named on the picker* as unanswered.
+   *  A guild in nobody's roster is not a candidate at all, so it can never be
+   *  reported unreachable either; it simply is not on the page. A short TTL turns
+   *  one stalled database walk into every guild silently vanishing. Fail towards
+   *  the outage that says something. */
   private val guildRosterPublishEvery = 30.seconds
-  private val guildRosterTtl = 2.minutes
+  private val guildRosterTtl = 10.minutes
+
+  /** Where the roster walk runs, which is emphatically not `ex`.
+   *
+   *  The walk is one blocking database read per guild. On the default dispatcher
+   *  it shared eight-odd threads with every world stream, every scheduled job here
+   *  and the HTTP server, so a walk stalled on a slow borrow (fifteen seconds
+   *  before the pool refuses) stalled all of them. Pekko IO is the visible
+   *  casualty — a log full of undelivered `Tcp$Register` dead letters is an
+   *  outgoing connection missing its five-second registration deadline.
+   *
+   *  Not the dashboard's lookup pool either, since everything there waits on it.
+   *  One thread: the walk is sequential and wants isolation, not width — see
+   *  [[publishGuildRosterSoon]] for what stops beats queueing behind a slow one. */
+  private val guildRosterPool = scala.concurrent.ExecutionContext.fromExecutorService(
+    java.util.concurrent.Executors.newSingleThreadExecutor((r: Runnable) => {
+      val thread = new Thread(r, "guild-roster")
+      thread.setDaemon(true)
+      thread
+    }))
+
+  /** How long this bot's answer to "has this guild set the respawn system up"
+   *  is reused. Bounds how late a guild that has just run /setup joins the
+   *  roster, which is the only thing the staleness costs.
+   *
+   *  The map below needs no eviction to go with it: it holds a row per guild
+   *  this bot is in, which is a bound the process already lives inside, rather
+   *  than a row per visitor the way the dashboard's own memories do. */
+  private val respawnSetupMemoFor = 5.minutes
+  private val respawnSetupMemo =
+    new java.util.concurrent.ConcurrentHashMap[String, (Boolean, Long)]()
+
+  /** Whether `guildId` has the respawn system set up, remembered for a while.
+   *
+   *  `respawnService.settings` is an uncached blocking query, asked about every
+   *  guild this bot serves. Every beat it is the heaviest standing database load
+   *  in the fleet, for an answer that changes only when somebody runs /setup —
+   *  and paid against a connection budget shared with every other bot on the same
+   *  Postgres, which is the contention that made the walk slow to begin with.
+   *
+   *  '''A guild that cannot be read keeps whatever was last known.''' A throw used
+   *  to escape into `publishGuildRoster`'s catch and abandon the entire roster, so
+   *  one guild's hiccup took every guild out of the picker. Reading the failure as
+   *  "not set up" would be just as wrong the other way. Neither is something the
+   *  database said, so neither is believed. */
+  private def hasRespawnSetup(guildId: String): Boolean = {
+    val now = System.nanoTime()
+    val known = Option(respawnSetupMemo.get(guildId))
+    known match {
+      case Some((answer, at)) if now - at < respawnSetupMemoFor.toNanos => answer
+      case _ =>
+        try {
+          val answer = respawnService.settings(guildId).isDefined
+          respawnSetupMemo.put(guildId, (answer, now))
+          answer
+        } catch {
+          case e: Throwable =>
+            logger.warn(s"Could not read respawn settings for guild '$guildId' while " +
+              s"building the roster, keeping what was last known: ${e.getMessage}")
+            known.exists(_._1)
+        }
+    }
+  }
+
+  private val guildRosterInFlight = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Run a roster beat on [[guildRosterPool]], unless the last one is still
+   *  going.
+   *
+   *  The guard is what makes a single thread safe to schedule onto. Without it
+   *  a walk lasting longer than the beat leaves the next one queued behind it,
+   *  and a bot slow enough to do that repeatedly ends up publishing from a
+   *  backlog — every roster it writes older than the one before it, which is
+   *  worse than skipping. Skipping costs nothing: the TTL is twenty beats wide
+   *  precisely so that missing some of them is survivable.
+   */
+  private def publishGuildRosterSoon(): Unit =
+    if (guildRosterInFlight.compareAndSet(false, true)) {
+      guildRosterPool.execute(() =>
+        try publishGuildRoster() finally guildRosterInFlight.set(false))
+    } else logger.debug("Skipping a guild roster beat; the previous one is still running")
 
   /** The guilds this bot could answer about, so the others know to ask.
    *
@@ -507,6 +555,9 @@ object BotApp extends App with StrictLogging {
    *  whose answer is always no. Republished rather than kept, so a bot that dies
    *  falls out of everyone's picker within the TTL instead of being asked about
    *  forever.
+   *
+   *  Blocking, and run on [[guildRosterPool]] rather than wherever the schedule
+   *  fired — see [[publishGuildRosterSoon]], which is what the timer calls.
    */
   private def publishGuildRoster(): Unit =
     try {
@@ -518,7 +569,7 @@ object BotApp extends App with StrictLogging {
         // A guild cannot have a respawn forum without /setup having made its
         // database first, so nothing is lost by not asking.
         .filter(g => worldsData.contains(g.getId))
-        .filter(g => respawnService.settings(g.getId).isDefined)
+        .filter(g => hasRespawnSetup(g.getId))
         .map(g => web.RosterGuild(g.getId, g.getName, Option(g.getIconUrl)))
       persistence.RedisCacheProvider.cache.setEx(
         web.GuildRoster.key(discordGateway.selfUserId),
@@ -545,13 +596,10 @@ object BotApp extends App with StrictLogging {
     // Still swept, and more slowly, but only for as long as there is anybody
     // left to sweep for: the only questions written as keys now come from a bot
     // that has not yet been restarted onto this build, and the rosters say
-    // whether any such bot is still running. Once none is, this costs one
-    // cached read of that answer per beat and no `KEYS` at all — so the last of
-    // the keyspace walks goes away on its own, on the deploy that finishes the
-    // fleet, rather than waiting for somebody to come back and delete it.
-    //
-    // Nothing is lost if the answer is late or unavailable: not knowing reads
-    // as "somebody might still be old", and the sweep runs.
+    // whether any such bot is still running. Once none is, this costs one cached
+    // read per beat and no `KEYS` at all, so the last keyspace walk goes away on
+    // the deploy that finishes the fleet. A late or missing answer reads as
+    // "somebody might still be old", and the sweep runs.
     actorSystem.scheduler.scheduleWithFixedDelay(
       web.AccessQueryConsumer.SweepEvery, web.AccessQueryConsumer.SweepEvery
     )(() => {
@@ -566,9 +614,12 @@ object BotApp extends App with StrictLogging {
     })(ex)
     // Published straight away as well as on the beat, so a bot restarting does
     // not drop out of everybody else's server picker for half a minute.
+    //
+    // The schedule fires on `ex` and the walk itself does not: what runs here
+    // only hands the work to the roster's own thread — see publishGuildRosterSoon.
     actorSystem.scheduler.scheduleWithFixedDelay(
       scala.concurrent.duration.Duration.Zero, guildRosterPublishEvery
-    )(() => publishGuildRoster())(ex)
+    )(() => publishGuildRosterSoon())(ex)
     logger.info("Dashboard access relay listening for questions from other bots' dashboards")
   }
   // One read of a guild's board answers every tab watching it — see
@@ -599,28 +650,74 @@ object BotApp extends App with StrictLogging {
   // its worlds/guilds are instead published (below) for the primary's
   // dashboard to merge in, so no HTTP server, no Caddy, no second domain needed.
   if (Config.BotRole.current != Config.BotRole.Secondary) {
-    import akka.http.scaladsl.server.Directives._
+    import org.apache.pekko.http.scaladsl.server.Directives._
     // The auth routes stay under /dashboard, where their redirect URI already
     // points; /status reaches them via the session cookie set for both paths.
     val routes = concat(
       pathPrefix("dashboard") { concat(discordAuth.routes, respawnDashboardRoute.routes) },
       pathPrefix("status") { concat(statusRoute.routes, patreonAdminRoute.routes) }
     )
-    akka.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort).bind(routes)
+    org.apache.pekko.http.scaladsl.Http()(actorSystem).newServerAt("0.0.0.0", Config.Web.statusPort).bind(routes)
     logger.info(s"Dashboards listening internally on port ${Config.Web.statusPort}: " +
       s"members at $dashboardMountPath, owner at $adminMountPath")
   } else {
-    // Matches the dashboard's own ~10s poll cadence (StatusRoute's comment on
-    // buildPatreonJson) — frequent enough that a primary's merged view feels
-    // live, cheap enough that it's a non-issue running forever in the
-    // background. TTL on the published key is longer than this interval
-    // (see secondaryStatusPublishTtl) so a couple of missed cycles don't
-    // make this secondary's panel flicker off the primary's dashboard.
+    // Matches the dashboard's ~10s poll cadence, so a primary's merged view feels
+    // live. The published key's TTL is longer than this interval (see
+    // secondaryStatusPublishTtl) so a couple of missed cycles don't flicker this
+    // secondary's panel off the primary's dashboard.
     actorSystem.scheduler.scheduleWithFixedDelay(5.seconds, 10.seconds)(() => publishSecondaryStatus())(ex)
     logger.info(s"Running as a shared-world-cycle secondary ('${discordGateway.selfUserName}') — publishing status to the primary's dashboard instead of running its own")
   }
 
   private val secondaryStatusPublishTtl = 30.seconds
+
+  // --- shared world cycle: one bot fetches, the rest consume ---
+
+  if (Config.BotRole.current == Config.BotRole.Primary) {
+    // The signal every consume-only secondary decides on. Published before the
+    // reconciler starts so secondaries are never told to wait for a primary
+    // that is not yet fetching anything.
+    actorSystem.scheduler.scheduleWithFixedDelay(Duration.Zero, Config.BotRole.heartbeatInterval)(
+      () => publishPrimaryHeartbeat())(ex)
+  }
+
+  /** Tells every secondary that a primary is alive and publishing, so waiting
+   *  for its sheets is better than fetching their own. Its absence is what
+   *  sends them back to fetching, so this must keep beating for as long as this
+   *  process is actually polling — see [[tibiadata.PrimaryPresence]]. */
+  private def publishPrimaryHeartbeat(): Unit =
+    persistence.RedisCacheProvider.cache.setEx(
+      tibiadata.PrimaryPresence.HeartbeatKey,
+      discordGateway.selfUserId,
+      Config.BotRole.heartbeatTtl
+    ).recover { case e: Throwable => logger.warn(s"Failed to publish the primary heartbeat: ${e.getMessage}") }(ex)
+
+  /** Polls worlds that only a secondary serves, purely so their sheets reach
+   *  the shared cache from the one address the upstreams have agreed to. */
+  private lazy val unionFetchReconciler = new app.UnionFetchReconciler(
+    localWorlds = () => streamSupervisor.activeWorlds,
+    secondaryStatuses = () => statusRoute.secondaryStatusSnapshots(),
+    startPoller = world => {
+      val api = app.CharacterApiStack.forWorld(TibiaBot.PollInterval)(actorSystem, ex)
+      new app.FetchOnlyWorldPoller(
+        world, api, TibiaBot.PollInterval,
+        firstPollDelay = TibiaBot.fleetFetchFirstDelay(scala.util.Random.nextInt),
+        fanOut = Config.BotRole.fleetFetchFanOut
+      )(actorSystem, ex, org.apache.pekko.stream.Materializer.matFromSystem(actorSystem)).start()
+    },
+    enabled = Config.BotRole.fleetFetchActive
+  )(ex)
+
+  if (Config.BotRole.fleetFetchActive) {
+    // Reconciled on a timer rather than on an event: a secondary's snapshot
+    // expires on its own, so a bot that dies just stops appearing and its
+    // worlds are dropped on the next pass with nothing to miss.
+    actorSystem.scheduler.scheduleWithFixedDelay(30.seconds, 60.seconds)(
+      () => { unionFetchReconciler.reconcile(); () })(ex)
+    logger.info("Fetching character sheets for worlds only other bots in the fleet serve, so their lookups need no upstream call of their own")
+  }
+  if (Config.BotRole.consumeOnlyActive)
+    logger.info("Consuming character sheets published by the primary — this bot calls the character APIs only if that primary goes quiet")
 
   /** Publishes this secondary's full status snapshot (worlds/guilds, rate-limit
    *  lanes, bot identity — the exact same data its own dashboard would show,
@@ -647,10 +744,46 @@ object BotApp extends App with StrictLogging {
   def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData
   def huntedGuildsData: Map[String, List[Guilds]] = streamState.huntedGuildsData
   def alliedGuildsData: Map[String, List[Guilds]] = streamState.alliedGuildsData
+
+  /** Does any guild list this player, hunted or allied?
+   *
+   *  Across every guild, because the list cache is shared: one cached sheet
+   *  serves whoever lists that player, so it is worth writing if anybody does.
+   *  The per-guild checks in TibiaBot answer a different question — whether
+   *  *this* discord cares — and cannot stand in for this one.
+   */
+  def isOnAnyList(name: String): Boolean = {
+    val lower = name.toLowerCase
+    huntedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower)) ||
+      alliedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower))
+  }
+
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
+
+  /** Where a guild's command log currently goes, if that channel is still there.
+   *
+   *  Off the in-memory Discords record rather than `discordRetrieveConfig`, which
+   *  is a database round trip — this is read while a button press is being turned
+   *  into a form, and that has no deferral to hide behind. The same record is what
+   *  the death and activity posts log through, so it is the honest answer to
+   *  "where does the bot post" as well as the cheap one.
+   *
+   *  None for a guild with no worlds set up: it has no Discords record at all.
+   */
+  def commandLogChannel(guild: Guild): Option[TextChannel] =
+    discordsData.values.flatten.find(_.id == guild.getId).map(_.adminChannel)
+      // A snowflake or nothing: getTextChannelById parses the string and throws
+      // on anything that is not a number. "0" is what a guild without one holds.
+      .filter(id => id.nonEmpty && id.forall(_.isDigit))
+      .flatMap(id => Option(guild.getTextChannelById(id)))
   def worldsData: Map[String, List[Worlds]] = streamState.worldsData
   def activityCommandBlocker: Map[String, Boolean] = streamState.activityCommandBlocker
+
+  /** See [[com.tibiabot.state.StreamState.huntedNamesForWorld]] — it reads four
+   *  of that class's maps, so it lives there and is delegated to here like the
+   *  accessors above. */
+  def huntedNamesForWorld(world: String): Set[String] = streamState.huntedNamesForWorld(world)
   def modifyActivityData(f: Map[String, List[PlayerCache]] => Map[String, List[PlayerCache]]): Unit =
     streamState.modifyActivityData(f)
   def modifyWorldTransfersData(f: Map[String, List[WorldTransfer]] => Map[String, List[WorldTransfer]]): Unit =
@@ -840,18 +973,14 @@ object BotApp extends App with StrictLogging {
   }
   startBot(None, None) // guild: Option[Guild], world: Option[String]
 
-  // Respawn claim system: close expired claims, promote whoever is queued
-  // behind them, and warn claimants whose time is nearly up.
+  // Respawn claim system: close expired claims, promote whoever is queued behind
+  // them, and warn claimants whose time is nearly up.
   //
-  // On its own single-threaded scheduler rather than the shared actorSystem
-  // one, because the body blocks — it creates, edits and archives forum threads
-  // through JDA — and the Akka scheduler's dispatcher also runs every world's
-  // poll stream. scheduleWithFixedDelay on a single thread additionally means a
-  // slow sweep can never overlap itself.
-  //
-  // Nothing here is scheduled per claim, so this is restart-safe by
-  // construction: a claim that lapsed while the bot was down is resolved by the
-  // first sweep after it comes back, not lost with an in-memory timer.
+  // Its own single-threaded scheduler, not the shared actorSystem one: the body
+  // blocks on JDA forum-thread calls, and the Pekko dispatcher also runs every
+  // world's poll stream. A single thread also stops a slow sweep overlapping
+  // itself. Nothing is scheduled per claim, so this is restart-safe by
+  // construction.
   if (Config.Respawn.enabled) {
     val respawnSweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
       (r: Runnable) => {
@@ -859,12 +988,10 @@ object BotApp extends App with StrictLogging {
         thread.setDaemon(true)
         thread
       })
-    // Bring each configured guild's spawn images in line with the bundled list.
-    // Deciding which monster represents a spawn is an ongoing curation job, and
-    // the seed import deliberately never revisits a code a guild already has —
-    // so without this an improved list would only reach brand-new guilds.
-    // Cheap (one batched UPDATE per guild) and a no-op once in step, so it runs
-    // on every boot rather than needing to be remembered as a command.
+    // Bring each guild's spawn images in line with the bundled list. The seed
+    // import never revisits a code a guild already has, so without this an
+    // improved list would only reach brand-new guilds. One batched UPDATE per
+    // guild and a no-op once in step, so it runs every boot.
     discordGateway.guilds.filter(g => worldsData.contains(g.getId)).foreach { guild =>
       try {
         respawnService.settings(guild.getId)
@@ -873,23 +1000,19 @@ object BotApp extends App with StrictLogging {
             val changed = respawnService.syncSeedCreatures(guild.getId)
             if (changed > 0) logger.info(s"Updated $changed respawn creature images in guild '${guild.getId}'")
             // The codes themselves, for the same reason: this is the moment an
-            // edited respawns.json reaches a guild that already exists. It used
-            // to take somebody remembering to run /repair, which meant a code
-            // added to the bundled file simply never appeared on servers that
-            // had been set up before it.
+            // edited respawns.json reaches an existing guild. It used to need
+            // somebody remembering to run /repair.
             val sync = respawnService.syncSeed(guild.getId)
             if (sync.changedAnything)
               logger.info(s"Respawn catalogue in guild '${guild.getId}': ${sync.added} added, " +
                 s"${sync.updated} corrected, ${sync.retired.size} retired")
-            // A retired code's post goes with it. Left in the forum it is still
-            // a card people can find and press Claim on, for a spawn the
-            // catalogue can no longer resolve.
+            // A retired code's post goes with it, or it stays a card people can
+            // find and press Claim on for a spawn nothing can resolve.
             val posts = respawnService.deleteRetiredThreads(guild, config, sync.retired)
             if (posts > 0) logger.info(s"Deleted $posts retired respawn posts in guild '${guild.getId}'")
-            // And the ones nothing can name any more: a delete that Discord
-            // refused on an earlier boot, or a code retired back when
-            // retirement only took the row. Nothing records those, so they are
-            // found by being a post of ours the catalogue does not point at.
+            // And the ones nothing can name: a delete Discord refused on an
+            // earlier boot, or a code retired when retirement only took the row.
+            // Found by being a post of ours the catalogue does not point at.
             val orphans = respawnService.deleteOrphanedThreads(guild, config)
             if (orphans > 0)
               logger.info(s"Deleted $orphans orphaned respawn posts in guild '${guild.getId}'")
@@ -947,11 +1070,9 @@ object BotApp extends App with StrictLogging {
               .filter(respawnOwnership.ownsRespawns(guild, _))
               .foreach { config =>
                 respawnService.sweep(guild)
-                // After the sweep, so a spawn that has just come free has
-                // already had its own post closed and there is nothing here to
-                // race. Both of these are no-ops on a quiet guild: the first
-                // returns immediately with nothing due, and the second only
-                // looks at posts JDA already has cached as open.
+                // After the sweep, so a spawn that just came free has already had
+                // its post closed and there is nothing to race. Both are no-ops on
+                // a quiet guild.
                 respawnService.closeIdleThreads(guild, config)
                 if (reconcilePosts) {
                   val closed = respawnService.reconcileThreads(guild, config)
@@ -970,6 +1091,135 @@ object BotApp extends App with StrictLogging {
       }
     }, sweepMillis, sweepMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
     logger.info(s"Respawn claim system enabled — sweeping every ${Config.Respawn.sweepInterval}")
+  }
+
+  // ---------------------------------------------------------------------------
+  // The highscores sweep: skill advances into the Levels channel, and the
+  // experience history the statistics channel will read later.
+  //
+  // Primary-only. Blue and red share a database, so one bot writing these tables
+  // is enough for both to read them, and two bots sweeping would mean scraping
+  // every page twice from the same address for nothing.
+  // ---------------------------------------------------------------------------
+  private lazy val highscoreGap = new highscores.HighscoreGap(Config.Highscores.minRequestGap)
+
+  /** Its own client, and so its own in-flight ceiling. A highscores sweep is
+   *  thousands of requests an hour on a schedule nobody is waiting for; sharing
+   *  the character poll's permits would let it sit in front of a death. */
+  private lazy val highscoresApi: tibiadata.HighscoresApi =
+    new TibiaDataClient(inFlight = new tibiadata.InFlightLimit(Config.Highscores.maxInFlight))(actorSystem)
+
+  /** The guild a character is in, for the ally/enemy classification.
+   *
+   *  A highscore row does not carry one, and the guild decides more than the
+   *  icon: a server showing enemy level-ups but not neutral ones would miss an
+   *  enemy's skill advance entirely if we guessed neutral. So it is fetched —
+   *  but only for characters that actually advanced (a handful per list, not the
+   *  thousand we read), and only when some server tracking the world has guild
+   *  lists at all. A failure degrades to neutral rather than dropping the post.
+   */
+  private def resolveAdvanceGuilds(world: String, advances: List[domain.HighscoreEvent]): Future[Map[String, String]] = {
+    val names = advances.map(_.displayName).distinct
+    Future.traverse(names) { name =>
+      tibiaDataClient.getCharacter(name).map {
+        case Right(sheet) if sheet.character.character.world.equalsIgnoreCase(world) =>
+          Some(highscores.HighscoreDiff.key(name) -> sheet.character.character.guild.map(_.name).getOrElse(""))
+        case _ => None
+      }.recover { case _ => None }
+    }.map(_.flatten.toMap)
+  }
+
+  /** The Levels channels that want this world's advances, with the settings that
+   *  decide which ones. Reads exactly what the level-up path reads, so a skill
+   *  advance obeys the switches a server already set rather than new ones. */
+  private def highscoreAudience(world: String): List[highscores.HighscoreTarget] =
+    discordsData.getOrElse(world, Nil).flatMap { discord =>
+      val guildId = discord.id
+      if (!paywallService.isActive(guildId, world)) None
+      else worldsData.getOrElse(guildId, Nil).find(_.name.equalsIgnoreCase(world)).flatMap { worldConfig =>
+        val channelId = worldConfig.levelsChannel
+        if (channelId.isEmpty || channelId == "0") None
+        else Some(highscores.HighscoreTarget(
+          guildId = guildId,
+          guildLabel = Option(discordGateway.guildById(guildId)).map(_.getName).getOrElse(guildId),
+          channelId = channelId,
+          showNeutral = worldConfig.showNeutralLevels,
+          showAllies = worldConfig.showAlliesLevels,
+          showEnemies = worldConfig.showEnemiesLevels,
+          minimumLevel = worldConfig.levelsMin,
+          alliedGuilds = alliedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+          huntedGuilds = huntedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+          alliedPlayers = alliedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+          huntedPlayers = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+        ))
+      }
+    }
+
+  private lazy val highscoreAnnouncer = new highscores.HighscoreAnnouncer(
+    audience = highscoreAudience,
+    resolveGuilds = resolveAdvanceGuilds,
+    channelFor = (guildId, channelId) =>
+      Option(discordGateway.guildById(guildId))
+        .flatMap(guild => Option(guild.getTextChannelById(channelId)))
+        .filter(channel => channel.canTalk() || !Config.prod),
+    send = (channel, message) =>
+      outboundSender.enqueue("skill-up") { () =>
+        channel.sendMessage(message).setSuppressedNotifications(true).queue(null, null)
+      },
+    onPosted = (world, count, guildLabel) => {
+      val summary = if (count == 1) "1 player advanced a skill" else s"$count players advanced a skill"
+      recentEventsRegistry.forWorld(world).record(
+        "skill-up", s"""$summary <span class="muted">&middot; $guildLabel</span>""")
+    },
+    skillIcon = presentation.SkillEmojis.icon
+  )(ex)
+
+  private lazy val highscoreService = new highscores.HighscoreService(
+    api = highscoresApi,
+    sweep = new highscores.HighscoreSweep(
+      api = highscoresApi,
+      repository = highscoreRepository,
+      experience = experienceRepository,
+      gap = () => highscoreGap.get,
+      delay = wait => org.apache.pekko.pattern.after(wait, actorSystem.scheduler)(Future.unit)(ex)
+    )(ex),
+    pace = highscoreGap,
+    trackedWorlds = () => streamSupervisor.activeWorlds.toList,
+    settings = highscores.HighscoreSettings(
+      window = Config.Highscores.window,
+      workers = Config.Highscores.workers,
+      minRequestGap = Config.Highscores.minRequestGap
+    )
+  )(ex)
+
+  /** Posts what the sweep filed, for this bot's own guilds. Runs everywhere the
+   *  feature is on, unlike the sweep. */
+  private lazy val highscoreFeed = new highscores.HighscoreFeed(
+    repository = highscoreRepository,
+    botId = discordGateway.selfUserId,
+    serves = world => discordsData.contains(world),
+    announce = highscoreAnnouncer.announce
+  )
+
+  if (Config.Highscores.enabled) {
+    // Sweeping is fleet-wide work and belongs to one bot: two bots reading the
+    // same pages from two addresses through the same TibiaData instance would
+    // only double the load on tibia.com for identical rows.
+    if (Config.BotRole.current != Config.BotRole.Secondary) {
+      actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, Config.Highscores.probeInterval)(
+        () => { highscoreService.tick(); () })(ex)
+      logger.info(s"Highscores sweep enabled for every tracked world, probing every ${Config.Highscores.probeInterval}")
+    }
+
+    // Posting is the opposite: every bot is a different Discord user in its own
+    // guilds and can only write to those, so each reads the shared events table
+    // and posts what belongs to it. A secondary that skipped this would leave
+    // every guild it serves without a single skill advance.
+    actorSystem.scheduler.scheduleWithFixedDelay(3.minutes, 1.minute)(() => {
+      try highscoreFeed.tick()
+      catch { case error: Throwable => logger.warn("Failed to post highscore advances", error) }
+    })(ex)
+    logger.info("Highscores advance feed enabled for this bot's guilds")
   }
 
   // run the scheduler to clean cache and update dashboard every hour.
@@ -996,6 +1246,7 @@ object BotApp extends App with StrictLogging {
       removeDeathsCache(ZonedDateTime.now())
       removeLevelsCache(ZonedDateTime.now())
       cleanHuntedList()
+      reviewQuietListedPlayers()
       galthenService.cleanExpired()
       updateOnOdd = 0
     } else {
@@ -1034,10 +1285,8 @@ object BotApp extends App with StrictLogging {
             // rest of this message's markdown (Discord would treat the next
             // stray backtick, in "`/setup`" below, as its closing one).
             val subscriber = Names.user(userName)
-            // An empty userId means this world never had a seat at all (a
-            // legacy setup whose grace period ran out) — there's no
-            // subscription to describe as lapsed and nobody to name, so say
-            // what's actually true instead of pointing at a `<@>` nobody.
+            // An empty userId means this world never had a seat (a legacy setup
+            // whose grace ran out) — nobody to name, so don't point at a `<@>`.
             val cause =
               if (userId.isEmpty) s"This world isn't tied to an active **Patreon** subscription."
               else s"The Patreon subscription tied to $subscriber is no longer active or *cannot be verified*."
@@ -1050,20 +1299,16 @@ object BotApp extends App with StrictLogging {
             }
           }
 
-          // Low priority (rare, one DM per lapse) — goes through the shared
-          // background lane so it can't compete with deaths/boosted-channel
-          // posts for REST slots. Mirrors the boosted-DM notification pattern.
-          // Skipped entirely for a never-seated world: no seat, no owner, so
-          // there is no personal inbox this belongs in — the admin-channel
-          // notice above is the whole story for those.
+          // Low priority — through the background lane so it can't compete with
+          // deaths for REST slots. Skipped for a never-seated world: no seat, no
+          // owner, so the admin-channel notice above is the whole story.
           if (userId.nonEmpty) outboundSender.enqueue("paywall-lapse-dm") { () =>
             val user = discordGateway.retrieveUser(userId)
             if (user != null) {
               try {
                 // Discord answers 50278/50007 to the channel open as readily as to
-                // the send, so one handler covers both steps. An unhandled open is
-                // what puts JDA's own "RestAction queue returned failure" ERROR in
-                // the log for what is only a closed inbox.
+                // the send, so one handler covers both. An unhandled open is what
+                // logs JDA's "RestAction queue returned failure" for a closed inbox.
                 val undeliverable = new ErrorHandler().handle(
                   List(ErrorResponse.NO_MUTUAL_GUILDS, ErrorResponse.CANNOT_SEND_TO_USER).asJava,
                   new java.util.function.Consumer[ErrorResponseException] {
@@ -1254,7 +1499,8 @@ object BotApp extends App with StrictLogging {
    *  was dispatched for — the send itself is queued, so a guild counted here
    *  can still fail asynchronously (logged per guild).
    *
-   *  Shared by the server-save refresh above and `/admin boosted`. */
+   *  Shared by the server-save refresh above and the Repost boosted button on
+   *  the `/admin` panel. */
   private def repostBoostedMessages(boostedEmbeds: List[MessageEmbed]): Int = {
     var posted = 0
     discordGateway.guilds.foreach { guild =>
@@ -1323,7 +1569,7 @@ object BotApp extends App with StrictLogging {
     posted
   }
 
-  /** `/admin boosted`: rebuild and repost every guild's boosted message right
+  /** `/admin`'s Repost boosted button: rebuild and repost every guild's boosted message right
    *  now, off the server-save cycle — for when a save was missed, or a batch
    *  of messages went out wrong and needs redoing without waiting a day.
    *
@@ -1345,7 +1591,29 @@ object BotApp extends App with StrictLogging {
   actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => {
     try pruneInactiveGuilds()
     catch { case ex: Throwable => logger.warn("Failed to run the inactive-guild prune sweep", ex) }
+    try pruneHighscoreHistory()
+    catch { case ex: Throwable => logger.warn("Failed to run the highscore history prune", ex) }
   })(ex)
+
+  /** Retention for the highscore tables.
+   *
+   *  Only the raw experience readings really need this — a thousand rows per
+   *  world per snapshot is 1.63M a day across the fleet, and the disk is at
+   *  80%. The rest is housekeeping: a stale score is already harmless, because
+   *  a character who comes back after that long is re-baselined in silence
+   *  either way, and the retention is set far outside the baseline window so
+   *  pruning can never turn a real advance into a first sighting. */
+  private def pruneHighscoreHistory(): Unit =
+    if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
+      val now = Instant.now()
+      experienceRepository.removeExpiredReadings(now.minusSeconds(Config.Highscores.experienceRawRetention.toSeconds))
+      experienceRepository.removeExpiredDaily(
+        now.minusSeconds(Config.Highscores.experienceDailyRetention.toSeconds)
+          .atZone(domain.time.Clock.Berlin).toLocalDate)
+      highscoreRepository.removeExpiredEvents(now.minusSeconds(Config.Highscores.eventRetention.toSeconds))
+      val staleBefore = now.minusSeconds(Config.Highscores.scoreRetention.toSeconds)
+      streamSupervisor.activeWorlds.foreach(world => highscoreRepository.removeStale(world, staleBefore))
+    }
 
   /** A guild with no worlds tracked (its own per-guild database may not even
    *  exist yet, if /setup has never run there — see checkConfigDatabase)
@@ -1397,32 +1665,24 @@ object BotApp extends App with StrictLogging {
     logger.warn("Patreon API sync disabled (no access token configured) — the paywall reads this sync, so nobody will pass the /setup subscription check")
   }
 
-  /** Runs a Patreon sync ahead of `/setup`'s subscription check, so someone who
-   *  subscribed and linked their Discord minutes ago passes on their first try
-   *  instead of being told to subscribe until the next half-hourly sweep lands.
-   *  Called from setup.ChannelService.createChannels.
+  /** Runs a Patreon sync ahead of `/setup`'s subscription check, so somebody who
+   *  subscribed minutes ago passes on their first try rather than waiting out the
+   *  half-hourly sweep. Called from setup.ChannelService.createChannels.
    *
-   *  Blocking, but bounded three ways, because `/setup` answering from slightly
-   *  stale data is a nuisance and `/setup` hanging is not:
-   *   - Skipped entirely if any sync started within
-   *     `Config.PatreonApi.setupSyncCooldown` — so a burst of `/setup`s, or one
-   *     right after the periodic sweep, is one fetch rather than one each (see
-   *     patreonapi.SyncThrottle).
-   *   - Waits at most `Config.PatreonApi.setupSyncTimeout`. On timeout the sync
-   *     is left running — it'll land for the next caller — and this one answers
-   *     from the previous snapshot.
-   *   - Every failure is swallowed and logged. A Patreon outage must never be
-   *     the reason `/setup` errors, and it can't cost anyone access either: a
-   *     failed fetch leaves the last good snapshot in place (see
-   *     `syncPatreonMembers`).
+   *  Blocking, but bounded three ways, since `/setup` on slightly stale data is a
+   *  nuisance and `/setup` hanging is not:
+   *   - Skipped if any sync started within `Config.PatreonApi.setupSyncCooldown`,
+   *     so a burst of `/setup`s is one fetch (see patreonapi.SyncThrottle).
+   *   - Waits at most `Config.PatreonApi.setupSyncTimeout`; on timeout the sync is
+   *     left running for the next caller and this one uses the old snapshot.
+   *   - Every failure is swallowed and logged. A Patreon outage must never be why
+   *     `/setup` errors, and it costs nobody access — a failed fetch leaves the
+   *     last good snapshot in place (see `syncPatreonMembers`).
    *
-   *  Names are deliberately not resolved on this path (`resolveNames = false`)
-   *  — that's a blocking Discord lookup per linked patron, easily the slowest
-   *  part of a sync, and it feeds only the dashboard's supporters panel. The
-   *  paywall reads patron status and the linked Discord id, both of which come
-   *  straight from Patreon. Known names are carried forward regardless, so
-   *  nothing on the dashboard blanks out; the next periodic sync refreshes
-   *  them. */
+   *  Names are deliberately not resolved here (`resolveNames = false`): that is a
+   *  blocking Discord lookup per patron, the slowest part of a sync, and it feeds
+   *  only the dashboard's supporters panel. Known names carry forward, so nothing
+   *  blanks out; the next periodic sync refreshes them. */
   def syncPatreonMembersForSetup(): Unit =
     if (Config.PatreonApi.enabled && patreonSyncThrottle.tryAcquire(System.nanoTime())) {
       try Await.result(syncPatreonMembers(resolveNames = false), Config.PatreonApi.setupSyncTimeout)
@@ -1444,11 +1704,9 @@ object BotApp extends App with StrictLogging {
     member.discordUserId match {
       case None => member
       case Some(discordId) =>
-        // Whatever was resolved last time, for when this lookup can't answer.
-        // The snapshot is replaced wholesale, so without this a Discord timeout
-        // blanks a supporter's name on the dashboard until some later sync
-        // happens to succeed — losing a name we already knew, over a hiccup that
-        // had nothing to do with them.
+        // Whatever was resolved last time, for when this lookup can't answer. The
+        // snapshot is replaced wholesale, so without this a Discord timeout blanks
+        // a supporter's name until some later sync succeeds.
         def lastKnown = member.copy(discordUsername = known.get(discordId))
         try {
           val user = discordGateway.retrieveUser(discordId)
@@ -1461,39 +1719,32 @@ object BotApp extends App with StrictLogging {
     }
 
   /** Best-effort snapshot of the Patreon campaign's member list (see
-   *  patreonapi.PatreonApiClient) — run on the periodic schedule above and,
-   *  with `resolveNames = false`, on demand ahead of `/setup`'s subscription
-   *  check (see [[syncPatreonMembersForSetup]], which is also where the
-   *  throttling and the reasoning for skipping name resolution live). Backs
-   *  both the dashboard's
-   *  supporters panel and the paywall gate itself — this snapshot is what
-   *  PaywallService.callerIsSubscribed reads, so the guards below on what
-   *  gets written are load-bearing, not tidiness. It also reclaims a
-   *  dashboard-granted seat override for
-   *  someone Patreon has *just now* confirmed a Discord link for (see
-   *  PaywallService.reclaimOverridesFromPatreon): a one-time hand-off from
-   *  the admin's manual bridge to Patreon as the ongoing source of truth,
-   *  the moment that account first appears linked — never on a later sync,
-   *  so a legitimate bonus later granted to an already-linked supporter
-   *  isn't silently wiped out every cycle. Determined by diffing against the
-   *  previous snapshot (captured here before it's overwritten), not by
-   *  anything in the fetched member data itself. Fire-and-forget: a failed
-   *  fetch just leaves the last snapshot in place until the next tick, same
-   *  degrade-gracefully shape as everything else here. */
+   *  patreonapi.PatreonApiClient) — run on the periodic schedule above and, with
+   *  `resolveNames = false`, ahead of `/setup`'s subscription check (see
+   *  [[syncPatreonMembersForSetup]]). Backs both the dashboard's supporters panel
+   *  and the paywall gate, since this is what PaywallService.callerIsSubscribed
+   *  reads — so the guards below on what gets written are load-bearing.
+   *
+   *  It also reclaims a dashboard-granted seat override for somebody Patreon has
+   *  *just now* confirmed a Discord link for (see
+   *  PaywallService.reclaimOverridesFromPatreon): a one-time hand-off from the
+   *  admin's manual bridge to Patreon as the source of truth, never on a later
+   *  sync, so a bonus granted to an already-linked supporter is not wiped every
+   *  cycle. Determined by diffing the previous snapshot, captured here before it
+   *  is overwritten.
+   *
+   *  Fire-and-forget: a failed fetch leaves the last snapshot in place. */
   private def syncPatreonMembers(resolveNames: Boolean = true): Future[Unit] = {
     patreonSyncThrottle.record(System.nanoTime())
     patreonApiClient.fetchAllMembers().map {
-      // A failed fetch must never reach replaceSnapshot: that call prunes
-      // every row the sync didn't carry, so an empty list wouldn't leave the
-      // snapshot stale, it would erase it — and with it every supporter's
-      // access, since callerIsSubscribed reads this table.
+      // A failed fetch must never reach replaceSnapshot: it prunes every row the
+      // sync didn't carry, so an empty list erases the snapshot — and with it
+      // every supporter's access, since callerIsSubscribed reads this table.
       case None =>
         logger.warn("Patreon member sync failed; keeping the previous snapshot rather than replacing it")
-      // A *successful* empty response is refused for the same reason. A live
-      // campaign never legitimately drops to zero members, so this reads as a
-      // misconfigured campaign id or a Patreon-side oddity answering 200 with
-      // no data — and a campaign that really had no members would have
-      // nobody to gate anyway, so declining to wipe costs nothing.
+      // A *successful* empty response is refused for the same reason: a live
+      // campaign never drops to zero, so this reads as a misconfigured campaign id
+      // or a 200 with no data. A campaign that really is empty gates nobody.
       case Some(members) if members.isEmpty =>
         logger.warn("Patreon member sync returned no members at all; keeping the previous snapshot rather than emptying it")
       case Some(members) =>
@@ -1641,8 +1892,48 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  private def cleanHuntedList(): Unit =
-    cacheRepository.removeExpiredList(ZonedDateTime.now())
+  /** Re-check the listed players the world poll cannot see, one guild at a time.
+   *
+   *  Runs on the same half-hourly beat as the cache sweep above. Each guild only
+   *  looks at players nothing has refreshed in a day and caps how many it asks
+   *  about, so this is a handful of lookups however long the lists are — see
+   *  HuntedAlliedService.reviewQuietPlayers.
+   *
+   *  Failures are per guild and swallowed there: one unreachable database or
+   *  deleted admin channel must not stop the sweep reaching everybody else.
+   */
+  private def reviewQuietListedPlayers(): Unit =
+    discordGateway.guilds.foreach { guild =>
+      huntedAlliedService.reviewQuietPlayers(guild).failed.foreach { failure =>
+        logger.warn(s"Listed-player review failed for guild '${guild.getId}': ${failure.getMessage}")
+      }(ex)
+      // Separate pass, and after the review: an entry flagged on this very beat
+      // has its whole grace period ahead of it, so nothing it just found can be
+      // removed here.
+      huntedAlliedService.pruneFlaggedPlayers(guild).failed.foreach { failure =>
+        logger.warn(s"Flagged-player prune failed for guild '${guild.getId}': ${failure.getMessage}")
+      }(ex)
+    }
+
+  /** Nightly cleanup of the shared list cache.
+   *
+   *  Keyed on who is still listed rather than on how old a row is: the table has
+   *  one reader — drawing the hunted and allied lists — and a cached sheet does
+   *  not decay while a character is offline, so age said nothing about whether a
+   *  row was still right. It only decided when the list would stop being able to
+   *  show somebody. See CacheRepository.pruneList.
+   *
+   *  The set spans every guild, because the cache does: one row serves whoever
+   *  lists that player, so it may only go when nobody does.
+   */
+  private def cleanHuntedList(): Unit = {
+    val listed: Set[String] =
+      (huntedPlayersData.values.flatten ++ alliedPlayersData.values.flatten)
+        .map(_.name.toLowerCase).toSet
+    val removed = cacheRepository.pruneList(listed)
+    if (removed > 0)
+      logger.info(s"List cache: dropped $removed sheet(s) for players no list references any more")
+  }
 
 
   /** The Rashid / Dream Courts / (Drome, when active) server-save embeds for a
@@ -1724,31 +2015,22 @@ object BotApp extends App with StrictLogging {
   def worldRetrieveConfig(guild: Guild, world: String): Map[String, String] =
     worldConfigRepository.retrieveWorld(guild.getId, world)
 
-  /** Clears whatever online-list content is currently posted for this world
-   *  and replaces it with a paused notice. Targets just the combined channel
-   *  in combined mode, or all three allies/neutrals/enemies channels that
-   *  still exist in separate mode — same channels/columns TibiaBot's own
-   *  recurring online-list update reads (see TibiaBot.onlineList). No
-   *  explicit "resumed" cleanup is needed: once the world's active again,
-   *  that recurring update's normal fetch-existing-bot-messages-and-edit-in-
-   *  place logic (updateMultiFields) naturally overwrites this embed with
-   *  real content on its next tick.
+  /** Replaces this world's posted online-list content with a paused notice — the
+   *  combined channel, or all three allies/neutrals/enemies channels that still
+   *  exist. No "resumed" cleanup is needed: once the world is active again,
+   *  `updateMultiFields` overwrites this embed with real content on its next tick.
    *
-   *  Two callers, distinguished by `adminMessageUrl`. `Some` is the lapse
-   *  handler announcing a fresh pause, and the notice links back to the
-   *  admin-channel explanation it just posted. `None` is the repair path for
-   *  a world paused in an earlier process (see the sweep's `onStillLapsed`):
-   *  there is no fresh admin message to point at, and a channel already
-   *  carrying the paused name is already showing this notice, so it's left
-   *  untouched rather than purged and reposted. That check is deliberately
-   *  not applied to the announcing path, where the notice must land even if
-   *  a previous cycle's name is still on the channel — its link would
-   *  otherwise be stale.
+   *  Two callers, distinguished by `adminMessageUrl`. `Some` is the lapse handler
+   *  announcing a fresh pause, linking back to the admin-channel explanation it
+   *  just posted. `None` is the repair path for a world paused in an earlier
+   *  process (see the sweep's `onStillLapsed`): no fresh admin message to point
+   *  at, and a channel already carrying the paused name is already showing this,
+   *  so it is left alone. The announcing path deliberately skips that check, or
+   *  its link would be stale.
    *
    *  The announcing path calls this from inside the admin-message send's own
-   *  .queue() callback, so every JDA call here must stay non-blocking
-   *  (.queue(), never .complete()) — JDA refuses nested .complete() calls
-   *  from a callback thread as a deadlock guard. */
+   *  `.queue()` callback, so every JDA call here must stay non-blocking — JDA
+   *  refuses nested `.complete()` from a callback thread as a deadlock guard. */
   private def postPausedOnlineListNotice(guild: Guild, world: String, adminMessageUrl: Option[String]): Unit = {
     val worldConfig = worldRetrieveConfig(guild, world)
     val combined = worldConfig.getOrElse("combined_online", "false") == "true"
@@ -1758,12 +2040,9 @@ object BotApp extends App with StrictLogging {
     channelIds.filterNot(_ == "0").distinct.foreach { channelId =>
       val channel = guild.getTextChannelById(channelId)
       if (channel != null && (channel.canTalk() || !Config.prod)) {
-        // Swap the "-<online count>" suffix for a warning icon, same base-name
-        // recovery TibiaBot's own renameOnlineChannelIfDue uses — one-off
-        // rename (only runs on the pause transition, not a recurring tick),
-        // so no throttling needed: nothing else renames this channel while
-        // it's paywall-paused (TibiaBot's own online-list update is already
-        // gated on paywallService.isActive and skips it entirely).
+        // Swap the "-<online count>" suffix for a warning icon, using the same
+        // base-name recovery as renameOnlineChannelIfDue. No throttling: this runs
+        // only on the pause transition, and nothing else renames a paused channel.
         val pausedName = s"${presentation.OnlineListEmbeds.baseName(channel.getName, "online")}-${presentation.OnlineListEmbeds.pausedSuffix}"
         val alreadyPaused = channel.getName == pausedName
         if (!alreadyPaused) {
@@ -1857,13 +2136,11 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  /** Bring `dreamScar` up to date, preferring a fresh (and day-aligned) wiki
-   *  read so the map can correct itself rather than inheriting every past
-   *  mistake. `shiftOnFailure` says what to do when the wiki can't be read at
-   *  all: the server-save refresh advances the map we already hold, so an
-   *  outage still rotates instead of freezing a day behind, while a manual
-   *  `/admin dreamscar` leaves it alone — that one exists to *undo* drift, and
-   *  shifting on a failed fetch could just as easily add some. */
+  /** Bring `dreamScar` up to date, preferring a fresh day-aligned wiki read so the
+   *  map corrects itself rather than inheriting past mistakes. `shiftOnFailure`
+   *  says what to do when the wiki can't be read: the server-save refresh advances
+   *  the map we hold, so an outage still rotates, while `/admin`'s Dreamscar leaves
+   *  it alone — that exists to *undo* drift, not add some. */
   private def refreshDreamScarBosses(shiftOnFailure: Boolean): Unit =
     fetchDreamScarBosses() match {
       case Some(bosses) => dreamScar = bosses

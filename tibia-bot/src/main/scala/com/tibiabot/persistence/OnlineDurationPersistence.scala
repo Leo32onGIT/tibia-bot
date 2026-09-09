@@ -15,21 +15,18 @@ object OnlinePlayerSnapshot {
 }
 
 /** Best-effort Redis persistence for a world's in-memory online-duration state
- *  (see tracking.OnlineTracker) — one snapshot blob per world, keyed by world
- *  name, so a restart doesn't reset every online player's displayed duration
- *  back to zero. Boot `load()`s it; a save is triggered after every real
- *  `OnlineTracker.updateFromOnline` cycle (TibiaBot's existing ~60s poll, no
- *  separate schedule needed).
+ *  (see tracking.OnlineTracker) — one snapshot blob per world, so a restart does
+ *  not reset every player's displayed duration to zero. Loaded at boot, saved
+ *  after every `OnlineTracker.updateFromOnline` cycle, on the existing poll.
  *
- *  Deliberately omits `time` (last-updated-at) from the snapshot — restoring
- *  it verbatim would make the first post-restart poll's delta count the
- *  entire downtime gap toward duration; OnlineTracker.restore re-stamps it to
- *  the restore moment instead. Written as one whole blob per cycle rather
- *  than per entry, because the state this wraps is rebuilt in full every poll
- *  and the poll must never touch Redis per character.
+ *  Deliberately omits `time`: restoring it verbatim would make the first
+ *  post-restart delta count the whole downtime gap toward duration, so
+ *  OnlineTracker.restore re-stamps it. Written as one blob per cycle rather than
+ *  per entry, since the state is rebuilt in full every poll and the poll must
+ *  never touch Redis per character.
  *
- *  No-op when Redis is disabled (NoopRedisCache); all failures degrade to an
- *  empty load / dropped save, so this can never affect correctness. */
+ *  A no-op without Redis; every failure degrades to an empty load or dropped
+ *  save, so it can never affect correctness. */
 final class OnlineDurationPersistence(cache: RedisCache, world: String, ttl: FiniteDuration = 20.minutes)(implicit ec: ExecutionContext) {
   private val key = s"tibia:online-snapshot:${world.toLowerCase}"
 

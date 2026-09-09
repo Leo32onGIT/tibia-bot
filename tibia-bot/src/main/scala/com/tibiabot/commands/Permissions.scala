@@ -9,13 +9,10 @@ import scala.jdk.CollectionConverters._
 /** Centralized command authorization checks. */
 object Permissions {
 
-  /** The role that delegates the bot's list-management commands, created by
-   *  `/setup`. A bare marker role: it carries no Discord permissions of its own,
-   *  because all it needs to say is "this person is trusted with the bot".
-   *
-   *  Lives here rather than on ChannelService so the handlers that name it in
-   *  their refusal messages don't have to reach into the setup package for a
-   *  string. */
+  /** The role delegating the bot's list-management commands, created by `/setup`.
+   *  A bare marker role carrying no Discord permissions of its own — all it says
+   *  is "this person is trusted with the bot". Here rather than on ChannelService
+   *  so handlers naming it in a refusal need not reach into the setup package. */
   val ModeratorRoleName: String = "Violent Bot Moderator"
 
   /** True if the caller is the bot's creator (the Discord application owner). */
@@ -33,22 +30,14 @@ object Permissions {
     hasManageServer(event.getGuild.retrieveMember(event.getUser).complete())
 
   /** True if the member may run the delegated commands — the hunted/allies lists
-   *  and the respawn catalogue.
+   *  and the respawn catalogue. Either **Manage Server** or the guild's "Violent
+   *  Bot Moderator" role, so granting the role is purely additive. Checked by id
+   *  rather than name, since a server may rename it.
    *
-   *  Either **Manage Server** or the guild's "Violent Bot Moderator" role, so
-   *  granting the role is purely additive: nobody who could use these commands
-   *  before loses access.
-   *
-   *  The role is checked by id rather than by name because a server may rename
-   *  it, and it is deliberately a bare marker role — it carries no Discord
-   *  permissions of its own, since its whole job is to say "this person is
-   *  trusted with the bot".
-   *
-   *  Note this cannot control command *visibility*: Discord gates commands on
-   *  permission flags, not roles, and since command-permissions v2 only server
-   *  admins can map roles to commands (Server Settings -> Integrations). That's
-   *  fine for the commands this guards, which are visible to everyone and decide
-   *  access here instead. */
+   *  This cannot control command *visibility*: Discord gates commands on
+   *  permission flags, not roles, and since command-permissions v2 only admins can
+   *  map roles to commands. Fine for what this guards, which is visible to
+   *  everyone and decides access here instead. */
   def isModerator(member: Member, moderatorRoleId: String): Boolean =
     member != null && grantsAccess(
       hasManageServer(member),

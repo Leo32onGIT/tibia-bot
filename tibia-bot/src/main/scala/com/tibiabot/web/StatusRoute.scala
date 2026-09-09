@@ -1,10 +1,10 @@
 package com.tibiabot.web
 
-import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, MediaTypes, StatusCodes}
-import akka.http.scaladsl.server.{Directive0, Route}
-import akka.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, MediaTypes, StatusCodes}
+import org.apache.pekko.http.scaladsl.server.{Directive0, Route}
+import org.apache.pekko.http.scaladsl.server.Directives._
 import com.tibiabot.domain.PatreonMember
-import com.tibiabot.{app, discord, paywall, persistence, tracking, Config}
+import com.tibiabot.{app, discord, fansiteapi, paywall, persistence, tracking, Config}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
@@ -144,6 +144,8 @@ final class StatusRoute(
         "deathDetections15m" -> JsNumber(snap.deathDetections),
         "deathLagAvg15m" -> JsNumber(snap.deathLagAvgSeconds),
         "deathLagMax15m" -> JsNumber(snap.deathLagMaxSeconds),
+        "fansiteDeathDetections15m" -> JsNumber(snap.fansiteDeathDetections),
+        "fansiteDeathLagAvg15m" -> JsNumber(snap.fansiteDeathLagAvgSeconds),
         "battleyeGreen" -> JsBoolean(snap.battleyeGreen),
         "pvpType" -> JsString(snap.pvpType),
         "discords" -> JsArray(discordsJson.toVector),
@@ -173,17 +175,56 @@ final class StatusRoute(
     // without a separate fetch or a second shape to decode.
     "apiThroughput" -> JsObject(
       "discord" -> apiThroughputJson(tracking.ApiMetrics.discord),
-      "tibiadata" -> apiThroughputJson(tracking.ApiMetrics.tibiaData)
+      "tibiadata" -> apiThroughputJson(tracking.ApiMetrics.tibiaData),
+      // The instance we run ourselves, split out because `/v4/highscores` is
+      // served by both and the endpoint breakdown collapses them onto one row.
+      // What it costs us is not what the public API costs us — this is the
+      // traffic that lands on our own IP and our own CPU — and only a counter
+      // of its own can be crossed with `status` to say whether it is coping.
+      // Always published, so a bot with no instance of its own reads zero
+      // rather than disappearing.
+      "tibiadataLocal" -> apiThroughputJson(tracking.ApiMetrics.tibiaDataLocal),
+      // Its own subtree rather than another endpoint row under tibiadata: while
+      // both character upstreams are running, the question this panel exists to
+      // answer is which of the two is struggling, and one merged total cannot
+      // say. Always published, so a row that reads zero is itself the answer
+      // when the fansite source is off or failing.
+      "fansiteapi" -> apiThroughputJson(tracking.ApiMetrics.fansiteApi)
+    ),
+    // The second source's own health, none of which appears above: that subtree
+    // counts requests that actually left, and everything interesting about a
+    // rationed lane is what it decided not to send.
+    "fansite" -> JsObject(
+      "enabled" -> JsBoolean(Config.FansiteApi.enabled),
+      "refused" -> apiThroughputJson(tracking.ApiMetrics.fansiteRefused),
+      "circuitOpenUntil" -> fansiteapi.FansiteCircuitBreaker.shared.openUntilInstant
+        .map(i => JsString(i.toString): JsValue).getOrElse(JsNull),
+      "roster" -> rosterJson(fansiteapi.FansiteRoster.shared.snapshot)
     )
   )
 
-  /** Any shared-world-cycle secondary's published status, fetched raw — see
-   *  `secondaryStatusKeyPrefix`. Only a Primary looks; a plain/secondary
-   *  deployment gets an empty list back with no Redis round-trip at all.
-   *  Uses `keysMatching` rather than a fixed secondary list so this supports
-   *  however many secondaries are actually publishing, with zero config on
-   *  the primary side when a new one joins. A secondary that's gone quiet
-   *  (past its publish TTL) just stops appearing — no special-casing needed. */
+  /** How the fansite budget is currently being spent. `saturated` is the field
+   *  worth watching: while it is false every hunted character online is covered
+   *  and the level ranking is inert, so `cutoffLevel` means nothing yet. */
+  private def rosterJson(roster: fansiteapi.RosterSnapshot): JsObject = JsObject(
+    "offered" -> JsNumber(roster.offered),
+    "admitted" -> JsNumber(roster.admitted),
+    "cutoffLevel" -> JsNumber(roster.cutoffLevel),
+    "saturated" -> JsBoolean(roster.saturated),
+    "worlds" -> JsNumber(roster.worlds)
+  )
+
+  /** Any secondary's published status, fetched raw — see
+   *  `secondaryStatusKeyPrefix`. Only a primary looks; anything else gets an empty
+   *  list with no Redis round trip. `keysMatching` rather than a fixed list, so a
+   *  new secondary needs no config on the primary and one gone quiet past its TTL
+   *  simply stops appearing. */
+  /** The same snapshots the dashboard merges, exposed for
+   *  [[com.tibiabot.app.UnionFetchReconciler]]: the world lists in them are
+   *  already exactly what it needs to know, so it reuses this rather than
+   *  introducing a second way for bots to report the same thing. */
+  def secondaryStatusSnapshots(): Future[Vector[JsObject]] = remoteSecondaryStatuses()
+
   private def remoteSecondaryStatuses(): Future[Vector[JsObject]] =
     if (Config.BotRole.current != Config.BotRole.Primary) Future.successful(Vector.empty)
     else {
@@ -230,31 +271,23 @@ final class StatusRoute(
     "discordUsername" -> member.discordUsername.map(s => JsString(s): JsValue).getOrElse(JsNull)
   )
 
-  /** One entry per supporter (not per seat), each carrying their seats — the
-   *  dashboard's Option-B grouped view. Guild names are resolved via
-   *  `guildById` (an in-memory JDA cache read, not a REST call — same as
-   *  `buildStatusJson`'s per-world discord names above) so this stays cheap
-   *  on the 10s poll; `userName` uses the stored snapshot rather than a live
-   *  `retrieveUser` REST lookup for the same reason — a live lookup only
-   *  happens once, in PatreonAdminRoute, when a seat is actually assigned.
+  /** One entry per supporter (not per seat), each carrying their seats. Guild
+   *  names come from `guildById` — an in-memory JDA cache read, not a REST call —
+   *  and `userName` from the stored snapshot, both so this stays cheap on the 10s
+   *  poll; a live `retrieveUser` happens once, in PatreonAdminRoute.
    *
-   *  Additively merges in patreonMemberRepository's synced snapshot (see
-   *  patreonapi.PatreonApiClient) — the same snapshot the paywall gate reads,
-   *  so a supporter's patronStatus here and their ability to `/setup` come
-   *  from one source and can't disagree:
-   *   - a seat-holding supporter whose Discord id matches a synced member
-   *     gets that member's patronStatus/pledgeCents spliced on, and their
-   *     Patreon fullName supersedes the seat's own one-time stored name;
-   *   - a synced member with a linked Discord id but no seat becomes its own
-   *     entry (userId set, empty seats — the existing add/remove-seat flow
-   *     still targets a real Discord id, just starting from zero seats);
-   *   - a synced member never linked to Discord at all also becomes its own
-   *     entry, but with `userId: null` — the dashboard has no Discord id to
-   *     act on, so it renders informational-only, no seat-management
-   *     buttons.
-   *  Members with no patron_status at all (Patreon's own null state — never
-   *  completed becoming a patron, distinct from a real active/former/declined
-   *  status) are dropped before any of this, seat-holders included. */
+   *  Additively merges patreonMemberRepository's synced snapshot, the same one the
+   *  paywall gate reads, so patronStatus here and the ability to `/setup` cannot
+   *  disagree:
+   *   - a seat-holder matching a synced member gets its patronStatus/pledgeCents,
+   *     and its Patreon fullName supersedes the seat's stored name;
+   *   - a synced member with a linked Discord id but no seat becomes its own entry
+   *     with empty seats, which the add/remove-seat flow still targets;
+   *   - a synced member never linked to Discord becomes an entry with
+   *     `userId: null`, rendered informational-only with no seat buttons.
+   *
+   *  Members with no patron_status at all — Patreon's null state, distinct from
+   *  active/former/declined — are dropped first, seat-holders included. */
   private def buildPatreonJson(): JsArray = {
     val bySupporter = paywallService.allSeats().groupBy(_.userId)
     // A null patron_status (never completed becoming a patron, or a similar
@@ -528,7 +561,10 @@ object StatusRoute {
         // Absent, not empty, for a secondary still running a build from before
         // these counters existed — the dashboard renders that as "no data"
         // rather than a confident 0/s that looks like a dead bot.
-        "apiThroughput" -> status.fields.getOrElse("apiThroughput", JsNull)
+        "apiThroughput" -> status.fields.getOrElse("apiThroughput", JsNull),
+        // Same absent-not-empty treatment: a secondary on an older build has no
+        // second source to report on, which is not the same as one sitting idle.
+        "fansite" -> status.fields.getOrElse("fansite", JsNull)
       )
     }
     JsArray((summarize(own) +: secondaries.map(summarize)).toVector)

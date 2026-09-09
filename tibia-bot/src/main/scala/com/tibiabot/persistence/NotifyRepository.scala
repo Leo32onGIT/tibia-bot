@@ -32,6 +32,10 @@ trait NotifyRepository {
   def bountyById(id: Long): Option[BountySub]
 
   def setMasslogEnabled(id: Long, enabled: Boolean): Unit
+  def deleteMasslog(id: Long): Unit
+  /** Every subscription one user holds in one guild — what is left behind when
+   *  they leave it. */
+  def deleteUser(guildId: String, userId: String): Unit
   def setBountyEnabled(id: Long, enabled: Boolean): Unit
 
   def muteMasslog(id: Long, until: Instant): Unit
@@ -41,6 +45,11 @@ trait NotifyRepository {
 
   def markMasslogNotified(id: Long, at: Instant): Unit
   def markBountyNotified(id: Long, at: Instant): Unit
+
+  /** Stop watching one character — the only row deletion a user can ask for.
+   *  Mass-log subscriptions have no equivalent: there is one per world, and
+   *  switching it off is what wanting rid of it looks like. */
+  def deleteBounty(id: Long): Unit
 
   /** Drop everything for a guild — called when a world or the whole guild goes
    *  away. Guild-scoped rows in a shared database have no other way of being

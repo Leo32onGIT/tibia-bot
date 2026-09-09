@@ -8,12 +8,10 @@ package com.tibiabot.tracking
  *  backlog for "current state" traffic is bounded by the number of distinct
  *  targets rather than by how often they are refreshed.
  *
- *  Backed by a `java.util.LinkedHashMap` keyed by the caller's key, or by a
- *  synthetic sequence number for unkeyed items so they interleave in the same
- *  FIFO order. Every operation — enqueue, supersede, dequeue, size — is O(1);
- *  the previous implementation scanned the whole queue on each keyed enqueue,
- *  which on a lane running hundreds deep cost O(depth) per send while holding
- *  the sender's lock.
+ *  Backed by a `java.util.LinkedHashMap` keyed by the caller's key, or a synthetic
+ *  sequence number for unkeyed items so they interleave in FIFO order. Every
+ *  operation is O(1); scanning the queue on each keyed enqueue cost O(depth) per
+ *  send while holding the sender's lock.
  *
  *  @param capacity   max retained items (default: unbounded)
  *  @param dropNewest if true, reject the incoming item when full (tail drop);
@@ -89,6 +87,24 @@ final class BoundedMessageQueue[T](capacity: Int = Int.MaxValue, dropNewest: Boo
       scanned += 1
     }
     found
+  }
+
+  /** Remove every queued item matching `pred`, returning how many went. Order
+   *  among the survivors is untouched.
+   *
+   *  Walks the whole queue, unlike everything else here, so it is for the rare
+   *  case where a caller learns that a batch of pending work has become
+   *  pointless — see [[com.tibiabot.discord.RateLimitedSender.cancelGroup]]. */
+  def removeAll(pred: T => Boolean): Int = {
+    val it = q.entrySet().iterator()
+    var removed = 0
+    while (it.hasNext) {
+      if (pred(it.next().getValue)) {
+        it.remove()
+        removed += 1
+      }
+    }
+    removed
   }
 
   private def removeOldest(): T = {

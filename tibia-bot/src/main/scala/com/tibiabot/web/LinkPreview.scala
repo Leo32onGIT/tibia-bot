@@ -2,38 +2,26 @@ package com.tibiabot.web
 
 /** What a link crawler is shown when it asks for a page it cannot sign in to.
  *
- *  Every gated area answers an unauthenticated visitor with a redirect to
- *  Discord's OAuth screen, which is right for a person and wrong for a crawler:
- *  Discord's own unfurler follows both hops, lands on `discord.com`, and scrapes
- *  the tags it finds there — so a link to this bot's dashboard embedded as
- *  "Discord — Group Chat That's All Fun & Games", advertising Discord to a room
- *  full of people already using it.
+ *  Gated areas redirect an unauthenticated visitor to Discord's OAuth screen,
+ *  which is right for a person and wrong for a crawler: Discord's unfurler follows
+ *  both hops, lands on `discord.com` and scrapes the tags there — so a link to
+ *  this bot's dashboard embedded as "Discord — Group Chat That's All Fun & Games".
  *
- *  A crawler cannot hold a session, so there is nothing to be gained by sending
- *  it round the loop. It gets this page instead: a real one, with the tags that
- *  describe what is actually behind the link.
+ *  A crawler cannot hold a session, so it gets a real page with tags describing
+ *  what is behind the link. One page per gated area rather than one for the site,
+ *  since the areas are not the same thing to whoever is shown the card — see
+ *  [[Area]] and [[forPath]].
  *
- *  One page per gated area rather than one for the site, because the areas are
- *  not the same thing to the person being shown the card — a link to the respawn
- *  board and a link to the bot's own monitoring both used to unfurl as the bot's
- *  name and a sentence about Tibia. See [[Area]] and [[forPath]].
- *
- *  Not cloaking. The page says the same thing the destination says — this is
- *  Violent Bot, sign in to reach it — so a reader who arrives here because the
- *  sniff misfired has lost nothing but a click, and the crawler is told the
- *  truth. It is only the *redirect* that is withheld, and only from something
- *  that could not have followed it usefully.
- */
+ *  Not cloaking: the page says what the destination says, so a reader who arrives
+ *  here because the sniff misfired loses only a click. Only the *redirect* is
+ *  withheld, and only from something that could not have followed it usefully. */
 object LinkPreview {
 
-  /** The unfurlers worth answering, lower-cased and matched as substrings.
-   *
-   *  A deliberately short list of things that announce themselves. Anything not
-   *  on it is treated as a person and redirected exactly as before, which is the
-   *  failure we want: a crawler nobody listed embeds a little worse, where a
-   *  person wrongly taken for one would be shown a page instead of being signed
-   *  in. Guessing from "no Accept: text/html" or similar would invert that.
-   */
+  /** The unfurlers worth answering, lower-cased and matched as substrings. A short
+   *  list of things that announce themselves; anything else is treated as a person
+   *  and redirected. That is the failure we want — an unlisted crawler embeds a
+   *  little worse, where a person wrongly taken for one would be shown a page
+   *  instead of signed in. Guessing from a missing `Accept` would invert it. */
   private val Crawlers: List[String] = List(
     "discordbot",           // the one this exists for
     "twitterbot",

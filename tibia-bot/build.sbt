@@ -1,7 +1,7 @@
 import com.typesafe.sbt.packager.docker.Cmd
 
 name := "violent-bot-dedicated"
-version := "2.2"
+version := "4.1"
 
 scalaVersion := "2.13.18"
 
@@ -12,7 +12,13 @@ scalaVersion := "2.13.18"
 //
 // Deliberately not -Xlint: it finds another hundred things in code that already
 // works, which is a separate piece of work from keeping the build quiet.
-scalacOptions ++= Seq("-deprecation", "-feature")
+// -release pins the JDK API this compiles against to the one the image ships
+// (`dockerBaseImage` below), which matters because a developer may build on any
+// JDK they happen to have. Without it, calling a method newer than the runtime
+// compiles clean locally and fails on the deploy box, which is the worst
+// possible place to find out. With it, the local build fails immediately and
+// says which method. Keep this and `dockerBaseImage` on the same number.
+scalacOptions ++= Seq("-deprecation", "-feature", "-release:25")
 
 enablePlugins(DockerPlugin)
 enablePlugins(JavaAppPackaging)
@@ -26,7 +32,35 @@ dockerExposedPorts += 443
 // Status dashboard: internal-only, reached via Caddy on the docker-compose
 // network — never published to the host directly (see docker-compose.yml).
 dockerExposedPorts += 8080
-dockerBaseImage := "eclipse-temurin:8-jre"
+// Pekko 1.7 reaches for `sun.misc.Unsafe`, which JDK 24 marked terminally
+// deprecated, so every start prints four WARNING lines before any of our own
+// logging. They come from the JVM on stderr rather than through logback, so they
+// reach `docker logs` and stop there — the dashboard never sees them.
+//
+// Do not go looking at the class the warning names. It reports whichever call
+// lands first, which is `org.apache.pekko.util.Unsafe` reading a field offset off
+// `String.value` to run a hash fast-path — the harmless one. What would actually
+// kill the bot is `pekko.dispatch.AbstractNodeQueue`, whose lock-free mailbox
+// queues are built on compareAndSwap: run with
+// `--sun-misc-unsafe-memory-access=deny` and it fails in that class's static
+// initialiser while ActorSystem is being constructed, i.e. at BotApp.scala's
+// first line of work, with nothing started.
+//
+// Not urgent, and not silenced. Both JDK 25 and JDK 26 default to `warn` (checked
+// against the shipped 26 binary, which contradicts the widely repeated claim that
+// 26 throws), so nothing flips under us while this image pins its own JDK — and
+// `--sun-misc-unsafe-memory-access=allow` is a one-line reprieve if a later JDK
+// does deny by default before the real fix is available. It stays visible because
+// a suppressed warning is one nobody acts on.
+//
+// The real fix is verified, not hoped for: Pekko moved these 21 classes to
+// VarHandle, and `pekko 2.0.0-M4` + `pekko-http 2.0.0-M1` builds this project
+// with ZERO source changes, passes all 1828 tests warning-free, and starts
+// cleanly under `=deny`. It is not taken yet only because pekko-http's 2.x line
+// has sat at its first milestone since Jan 2026 while core reached M4 — and
+// pekko-http is this bot's hot path. When 2.0.0 goes final this is a two-line
+// version bump; re-run the suite and drop this comment.
+dockerBaseImage := "eclipse-temurin:25-jre"
 // The respawn board is drawn with Java2D (presentation.RespawnBoardImage). A
 // JVM with no DISPLAY infers this on its own, so this is insurance rather than a
 // fix: it states the intent, and keeps the board rendering if a future base
@@ -62,39 +96,37 @@ dockerCommands := dockerCommands.value.flatMap {
   case other => Seq(other)
 }
 
-val AkkaHttpVersion = "10.5.0"
+val PekkoVersion = "1.7.0"
+val PekkoHttpVersion = "1.4.0"
 
-libraryDependencies += "com.typesafe" % "config" % "1.4.2"
-libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.7.0"
-libraryDependencies += "com.typesafe.akka" %% "akka-slf4j" % "2.7.0"
-libraryDependencies += "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
-libraryDependencies += "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
-libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.3.16"
-libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.6"
+libraryDependencies += "com.typesafe" % "config" % "1.4.9"
+libraryDependencies += "org.apache.pekko" %% "pekko-stream" % PekkoVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-slf4j" % PekkoVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-http" % PekkoHttpVersion
+libraryDependencies += "org.apache.pekko" %% "pekko-http-spray-json" % PekkoHttpVersion
+libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.6"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.6.3"
+libraryDependencies += "org.codehaus.janino" % "janino" % "3.1.12"
 libraryDependencies += "com.github.napstr" % "logback-discord-appender" % "1.0.0"
 libraryDependencies += "net.dv8tion" % "JDA" % "6.5.0"
-libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.2"
-libraryDependencies += "org.apache.commons" % "commons-text" % "1.10.0"
-libraryDependencies += "org.postgresql" % "postgresql" % "42.5.4"
+libraryDependencies += "club.minnced" % "discord-webhooks" % "0.8.4"
+libraryDependencies += "org.apache.commons" % "commons-text" % "1.15.0"
+libraryDependencies += "org.postgresql" % "postgresql" % "42.7.13"
 // Connection pooling in front of that driver — see PooledConnectionProvider.
-// 4.x rather than 5.x: 5 needs Java 11 and the image is `eclipse-temurin:8-jre`.
-libraryDependencies += "com.zaxxer" % "HikariCP" % "4.0.3"
-libraryDependencies += "com.google.guava" % "guava" % "30.1.1-jre"
-libraryDependencies += "io.lettuce" % "lettuce-core" % "6.2.6.RELEASE"
+libraryDependencies += "com.zaxxer" % "HikariCP" % "7.1.0"
+libraryDependencies += "io.lettuce" % "lettuce-core" % "7.7.0.RELEASE"
 
-libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.15"
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
-libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test
+libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.20"
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.20" % Test
 // Lets web.DiscordAuthSpec drive the OAuth routes as real requests — the login
 // and callback-failure branches are all cookie and redirect behaviour, which is
 // only meaningful end to end.
-libraryDependencies += "com.typesafe.akka" %% "akka-http-testkit" % AkkaHttpVersion % Test
-libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.7.0" % Test
-libraryDependencies += "com.typesafe.akka" %% "akka-stream-testkit" % "2.7.0" % Test
-libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.3.18"
-libraryDependencies += "org.jsoup" % "jsoup" % "1.17.2"
-libraryDependencies += "io.circe" %% "circe-core" % "0.14.10"
-libraryDependencies += "io.circe" %% "circe-parser" % "0.14.10"
+libraryDependencies += "org.apache.pekko" %% "pekko-http-testkit" % PekkoHttpVersion % Test
+libraryDependencies += "org.apache.pekko" %% "pekko-testkit" % PekkoVersion % Test
+libraryDependencies += "org.apache.pekko" %% "pekko-stream-testkit" % PekkoVersion % Test
+libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.11.0"
+libraryDependencies += "org.jsoup" % "jsoup" % "1.23.2"
+libraryDependencies += "io.circe" %% "circe-core" % "0.14.16"
+libraryDependencies += "io.circe" %% "circe-parser" % "0.14.16"
 
 resolvers += "jitpack" at "https://jitpack.io"

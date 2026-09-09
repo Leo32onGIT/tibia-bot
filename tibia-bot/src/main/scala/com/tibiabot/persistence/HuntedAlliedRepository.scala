@@ -8,8 +8,27 @@ import com.tibiabot.domain.{Guilds, Players}
 trait HuntedAlliedRepository {
   def getPlayers(guildId: String, table: String): List[Players]
   def getGuilds(guildId: String, table: String): List[Guilds]
-  def addHunted(guildId: String, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit
-  def addAllied(guildId: String, option: String, name: String, reason: String, reasonText: String, addedBy: String): Unit
+  /** `tradedWhenAdded` is stored for players only — guilds have no such column,
+   *  and cannot be traded. Snapshotted at add time because the flag it comes from
+   *  decays; see domain.Players. */
+  def addHunted(guildId: String, option: String, name: String, reason: String, reasonText: String,
+                addedBy: String, tradedWhenAdded: Boolean = false, tag: String = ""): Unit
+  def addAllied(guildId: String, option: String, name: String, reason: String, reasonText: String,
+                addedBy: String, tradedWhenAdded: Boolean = false, tag: String = ""): Unit
+
+  /** Mark a player entry as flagged for removal, naming why. Leaves an entry that
+   *  already carries a reason alone, which is what keeps the notice one-shot. */
+  def flagPlayer(guildId: String, table: String, name: String, reason: String): Unit
+
+  /** Clear a flag, leaving the entry on the list — see the implementation. */
+  def unflagPlayer(guildId: String, table: String, name: String): Unit
+
+  /** Put a tag on a listed player, or take one off with an empty value.
+   *  False when there is no such entry. */
+  def setTag(guildId: String, table: String, name: String, tag: String): Boolean
+
+  /** Empty one list table, returning how many rows went. */
+  def clearAll(guildId: String, table: String): Int
   def removeHunted(guildId: String, option: String, name: String): Unit
   def removeAllied(guildId: String, option: String, name: String): Unit
   /** Rename a hunted/allied player, retrying past a duplicate-key collision. */

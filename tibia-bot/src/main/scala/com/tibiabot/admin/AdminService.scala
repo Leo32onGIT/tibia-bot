@@ -14,7 +14,8 @@ import com.tibiabot.presentation.Names
 
 
 /**
- * Bot-creator-only `/admin` operations. The actual dreamScar resync, boosted
+ * Bot-creator-only `/admin` operations, behind the buttons of that command's
+ * panel — see interactions.AdminPanel. The actual dreamScar resync, boosted
  * repost and guild config lookup live in BotApp and are injected here as
  * thunks/functions.
  */
@@ -44,9 +45,22 @@ final class AdminService(
       }
     }
 
+  /** No such guild — a typo, a paste of something that is not an id, or a server
+   *  the bot has already left.
+   *
+   *  Answered rather than thrown: `guildById` returns null for both an unknown id
+   *  and one that is not a snowflake at all (see JdaDiscordGateway), and both used
+   *  to reach a `guild.getName()` below and come back to whoever asked as the
+   *  generic "something went wrong running that command". Checked here rather than
+   *  in the form that now asks for the id, so every caller is covered by it. */
+  private def noSuchGuild(guildId: String): MessageEmbed =
+    com.tibiabot.presentation.Embeds.response(
+      s"${Config.noEmoji} There is no server with the id `$guildId` — check it against the server list.")
+
   /** Leave a guild, posting the reason to its admin channel first. */
   def leave(guildId: String, reason: String): MessageEmbed = {
     val guild = discordGateway.guildById(guildId)
+    if (guild == null) return noSuchGuild(guildId)
 
     // Reading the guild's config can fail outright, and the notice is not worth
     // staying for. A guild that never ran /setup has no database of its own, so
@@ -100,6 +114,7 @@ final class AdminService(
   /** Forward a message from the bot creator to a guild's admin channel. */
   def message(guildId: String, message: String): MessageEmbed = {
     val guild = discordGateway.guildById(guildId)
+    if (guild == null) return noSuchGuild(guildId)
     val discordInfo = retrieveConfig(guild)
     var embedMessage = ""
 

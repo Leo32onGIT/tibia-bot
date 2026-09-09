@@ -1,14 +1,15 @@
 package com.tibiabot
 
-import akka.actor.{ActorSystem, Cancellable}
-import akka.stream.ActorAttributes.supervisionStrategy
-import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
-import akka.stream.{Attributes, Materializer, Supervision}
+import org.apache.pekko.actor.{ActorSystem, Cancellable}
+import org.apache.pekko.pattern.after
+import org.apache.pekko.stream.ActorAttributes.supervisionStrategy
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
+import org.apache.pekko.stream.{Attributes, Materializer, Supervision}
 import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
@@ -21,11 +22,11 @@ import scala.collection.immutable.ListMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Random, Success}
 import java.time.OffsetDateTime
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeoutException}
 import java.time.Instant
 
 //noinspection FieldFromDelayedInit
@@ -66,7 +67,15 @@ class TibiaBot(
   // What the bot believes is currently posted in each online-list channel, so
   // the steady-state refresh needs no read of Discord at all — see
   // tracking.OnlineListState.
-  private val onlineListState = new tracking.OnlineListState
+  private val onlineListState = new tracking.OnlineListState(
+    policy = tracking.OnlineListRepostPolicy.tiered(
+      Config.onlineListRepostEnabled,
+      Config.onlineListRepostDirtyFraction,
+      Config.onlineListRepostQueueDepth -> Config.onlineListRepostCooldownMs,
+      Config.onlineListRepostUrgentQueueDepth -> Config.onlineListRepostUrgentCooldownMs
+    ),
+    footerMaxStaleMs = Config.onlineListFooterMaxStaleMs
+  )
 
   // Owned by the online-list sweep, which never overlaps itself — see
   // tracking.BountyPresence for why a login needs remembering rather than
@@ -103,8 +112,17 @@ class TibiaBot(
   // Seeded from bot_cache.rename_cooldowns so a channel renamed moments before
   // a restart isn't immediately eligible for another rename (see
   // renameOnlineCategoryIfDue/renameOnlineChannelIfDue).
+  // Unlike every other timer here, this one is touched from two threads: the
+  // sweep decides a rename is due, and the send re-stamps it when the request
+  // leaves (see markRenamed). Hence the lock — a lost update would allow a rename
+  // inside Discord's 2-per-10-minutes window, which the cooldown exists to prevent.
+  private val renameTimerLock = new Object()
   private var onlineListCategoryTimer: Map[String, ZonedDateTime] = BotApp.getRenameCooldowns(world)
-  private var cacheListTimer: Map[String, ZonedDateTime] = Map.empty
+  /** What was last written to the list cache for a player, keyed by lowercased
+   *  name: (level, world, guild). Lets a scan skip the write when nothing the
+   *  list shows has moved, without reading the row back to find out. Rebuilt
+   *  from nothing on restart, so the first scan of each listed player refreshes. */
+  private var listCacheState: Map[String, (Int, String, String)] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -116,22 +134,12 @@ class TibiaBot(
   // purge timers above.
   private var onlineListRefreshSeconds: Int = 0
 
-  // The implicit ExecutionContext CachingTibiaApi takes is the stream's own `ex`
-  // (an ExecutionContextExecutor, so it wins implicit resolution) — an inner
-  // `ExecutionContext.global` binding used to sit here but was never actually
-  // selected, so it is gone rather than left looking meaningful.
-  private val tibiaDataClient: TibiaApi = {
-    val caching = new tibiadata.CachingTibiaApi(new TibiaDataClient(), persistence.RedisCacheProvider.cache)
-    val shared =
-      if (Config.BotRole.sharingEnabled) new tibiadata.SharedWorldTibiaApi(caching, persistence.RedisCacheProvider.cache, Config.BotRole.current,
-        characterTtl = Config.CharacterCache.ttl)
-      else caching
-    // Outermost, so a skippable character fetch costs nothing at all — not the
-    // request, and not the shared-cycle Redis read in front of it either. One
-    // instance per world, holding only that world's characters.
-    if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(shared, Config.CharacterCache.settings(TibiaBot.PollInterval))
-    else shared
-  }
+  // CachingTibiaApi's implicit ExecutionContext is the stream's own `ex`, an
+  // ExecutionContextExecutor, so it wins implicit resolution.
+  // One stack per world — see app.CharacterApiStack, which the primary's
+  // fetch-only poller builds identically.
+  private val tibiaDataClient: TibiaApi = app.CharacterApiStack.forWorld(TibiaBot.PollInterval)
+
 
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
@@ -173,6 +181,19 @@ class TibiaBot(
       // Best-effort, fire-and-forget: piggybacks on this world's existing poll
       // cadence instead of a separate schedule (see OnlineDurationPersistence).
       onlineDurationPersistence.save(onlineWithVocLvlAndDuration)
+
+      // Offer this world's watched characters to the fansite budget, which ranks
+      // them against every other world's and keeps the highest levels it can
+      // afford. Skipped outright when there is no second source to ration, so a
+      // bot running on TibiaData alone pays nothing for this.
+      if (Config.FansiteApi.enabled) {
+        val huntedHere = BotApp.huntedNamesForWorld(world)
+        fansiteapi.FansiteRoster.shared.publish(
+          world,
+          onlineWithVocLvlAndDuration.collect {
+            case player if huntedHere.contains(player.name.toLowerCase) => (player.name, player.level)
+          })
+      }
       // battleye_date is the literal string "release" for a world protected since
       // launch (green BattlEye); any actual date means protection was added later
       // (yellow BattlEye) — confirmed against the live TibiaData API, not documented.
@@ -201,6 +222,7 @@ class TibiaBot(
     // World poll failed: fall back to re-checking whoever was last seen online.
     case Left(_) =>
       fanOut(recentOnline.map(_.char).toSet)(tibiaDataClient.getCharacter)
+
   }.withAttributes(logAndResume)
 
   /** Fetch every character in `inputs` at the shared 32-way concurrency and
@@ -227,45 +249,56 @@ class TibiaBot(
 
         val formerNamesList: List[String] = char.character.character.former_names.map(_.toList).getOrElse(Nil)
         val formerWorldsList: List[String] = char.character.character.former_worlds.map(_.toList).getOrElse(Nil)
-
-        // Refresh the shared hunted/allied lookup cache at most once per 6 minutes
-        // per world (gated per-world, not per-character).
-        val cacheTimer = cacheListTimer.getOrElse(world, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-        if (ZonedDateTime.now().isAfter(cacheTimer.plusMinutes(6))) {
-          val cacheWorld = char.character.character.world
-          BotApp.huntedAlliedService.addListToCache(charName, formerNamesList, cacheWorld, formerWorldsList, guildName, char.character.character.level.toInt.toString, char.character.character.vocation, char.character.character.last_login.getOrElse(""), ZonedDateTime.now())
-          cacheListTimer = cacheListTimer + (world -> ZonedDateTime.now())
+        // Refresh the shared hunted/allied lookup cache.
+        //
+        // Only for players somebody actually lists, and only when something they
+        // show has changed. This used to write one arbitrary character per world
+        // per six minutes, which cached mostly players nothing reads — the table
+        // has one reader, the hunted and allied lists — while leaving listed
+        // players untouched for days at a time.
+        //
+        // The guard is in memory rather than a read of the row, so a character
+        // whose sheet has not moved costs nothing at all. It covers world and
+        // guild as well as level: a transfer or a guild swap changes what the
+        // list draws just as much as a level does.
+        // Former names count as well as the current one: on the poll that first
+        // sees a rename, the lists still hold the old name, so asking only about
+        // the new one would skip the very tick that needs writing. The row left
+        // under the old name is collected by the nightly orphan sweep once the
+        // lists have moved on - see CacheRepository.pruneList.
+        if (BotApp.isOnAnyList(charName) || formerNamesList.exists(BotApp.isOnAnyList)) {
+          val sheet = char.character.character
+          val fingerprint = (sheet.level.toInt, sheet.world, guildName)
+          if (!listCacheState.get(charName.toLowerCase).contains(fingerprint)) {
+            BotApp.huntedAlliedService.addListToCache(charName, formerNamesList, sheet.world,
+              formerWorldsList, guildName, sheet.level.toInt.toString, sheet.vocation,
+              sheet.last_login.getOrElse(""), ZonedDateTime.now())
+            listCacheState = listCacheState + (charName.toLowerCase -> fingerprint)
+          }
         }
 
         // Incoming world transfer, detected once for the world rather than once
-        // per discord watching it. The record lives in the shared bot_cache
-        // beside deaths and levels, so every discord tracking this world shares
-        // one answer to "have we seen this arrival already?", and one that adds
-        // the world later inherits that answer instead of replaying every
-        // former-world flag Tibia still has set — a backlog up to six months deep.
+        // per discord watching it. The record lives in the shared bot_cache, so
+        // every discord shares one answer to "have we seen this arrival?", and one
+        // adding the world later inherits it instead of replaying every
+        // former-world flag Tibia still has set — up to six months deep.
         //
-        // Detecting and recording are deliberately unconditional, where posting
-        // below is not: which discords announce an arrival depends on their own
-        // filters, and if the record were only written when somebody announced it,
-        // what the shared baseline held would depend on who happened to be
-        // looking.
+        // Detecting and recording are unconditional where posting is not: if the
+        // record were only written when somebody announced it, the shared baseline
+        // would depend on who happened to be looking.
         //
-        // The former-world field says somebody moved within about 180 days, never
-        // when, so the first sweep of a world nobody has tracked before still
-        // announces whoever moved at some point in that window, however long ago.
-        // It settles into real arrivals once every character has been seen once.
+        // The former-world field says somebody moved within ~180 days but never
+        // when, so a world's first sweep still announces whoever moved at any point
+        // in that window. It settles once every character has been seen once.
         //
-        // Matched on former names as well as the live one: the record is keyed by
-        // whatever the character was called when it was written, so looking only
-        // under the name they carry now reads a renamed character as a stranger
-        // and posts their months-old transfer over again under the new name.
+        // Matched on former names too: the record is keyed by whatever the
+        // character was called when written, so looking only under the current name
+        // reads a renamed character as a stranger and reposts their old transfer.
         val postedTransfer = presentation.WorldTransfers.postedFor(
           BotApp.worldTransfersData.getOrElse(world, List()), charName, formerNamesList)
-        // A record still filed under a dropped name is moved onto the live one.
-        // This is the only place that happens, and it has to be here rather than
-        // in the rename branch below: that branch only fires for characters with
-        // an activity row — members of a tracked guild — and an untracked arrival
-        // has none.
+        // A record filed under a dropped name is moved onto the live one. Only
+        // here: the rename branch below fires only for characters with an activity
+        // row, and an untracked arrival has none.
         if (postedTransfer.exists(!_.name.equalsIgnoreCase(charName))) {
           BotApp.rekeyWorldTransfer(world, charName, formerNamesList)
         }
@@ -308,20 +341,23 @@ class TibiaBot(
               val charVocation = vocEmoji(char.character.character.vocation)
               val charLevel = char.character.character.level.toInt
 
-              // Incoming world transfer, detected once for the world above.
-              // Independent of the guild join/leave logic below, and posted first so
-              // a character who transferred in and joined a tracked guild in the same
-              // poll reads in the order it happened.
+              // Incoming world transfer, detected once for the world above. Posted
+              // before the guild join/leave logic below, so a character who
+              // transferred in and joined a tracked guild in one poll reads in order.
               //
-              // Anyone tracked is announced at any level — that is the whole point of
-              // tracking them. Everybody else has to clear the world's bar (see
-              // WorldTransfers.UntrackedMinLevel), which keeps this from turning a
-              // channel about hunted and allied players into a feed of every stranger
-              // who moved house.
+              // Anyone tracked is announced at any level; everybody else must clear
+              // the bar (see WorldTransfers.UntrackedMinLevel), which keeps this
+              // from becoming a feed of every stranger who moved house.
+              //
+              // The bar is now the whole control. A per-world show_neutral_activity
+              // switch used to sit in front of it, but it was the only thing that
+              // setting did: everything else the activity channel posts — guild
+              // joins, leaves, swaps, renames — reaches this code only for a
+              // character already in a tracked guild or on a list, so there was no
+              // neutral activity for it to gate. It read as a switch over the
+              // neutral half of the channel while silencing one rare line.
               val trackedHere = huntedGuildCheck || allyGuildCheck || huntedPlayerCheck || allyPlayerCheck
-              val showNeutralActivity = worldData.headOption.map(_.showNeutralActivity).getOrElse("true")
-              val notableStranger =
-                showNeutralActivity == "true" && charLevel >= presentation.WorldTransfers.UntrackedMinLevel
+              val notableStranger = charLevel >= presentation.WorldTransfers.UntrackedMinLevel
               if (trackedHere || notableStranger) {
                 transferSources.foreach { arrivedFrom =>
                   if (activityTextChannel != null) {
@@ -343,6 +379,35 @@ class TibiaBot(
 
               var skipJoinLeave = false
 
+              // Renaming the list entry is deliberately separate from the activity
+              // rename below. That one is derived from this guild's activity
+              // records, and those only exist for characters who joined a *tracked
+              // guild* - so a player added to the hunted list on their own has
+              // never had one, their rename was never noticed, and their entry kept
+              // a name that from then on matched nobody.
+              //
+              // Needs no activity row, no announcement and no settling period: it
+              // is idempotent, and a sheet that flaps back to the old name simply
+              // stops matching rather than renaming anything back.
+              renameListEntries(guild, guildId, charName, formerNamesList)
+
+              // Has this entry stopped being worth keeping? Free here — the sheet
+              // is already in hand for a character this guild lists. Only catches
+              // players who still log in on a world this guild tracks; everyone
+              // else is the sweep's job, and a world move away from this guild's
+              // worlds is *always* the sweep's, since this loop only runs for
+              // discords tracking the world the character was just seen on.
+              if (huntedPlayerCheck || allyPlayerCheck) {
+                val hunted = huntedPlayerCheck
+                val listed = if (hunted) guildHuntedPlayers else guildAlliedPlayers
+                listed.find(_.name.equalsIgnoreCase(charName)).foreach { entry =>
+                  val trackedWorlds = worldsData.getOrElse(guildId, List()).map(_.name).toSet
+                  com.tibiabot.hunted.ListReview.review(entry, char.character.character.traded.getOrElse(false),
+                    char.character.character.world, trackedWorlds, char.character.character.deletion_date)
+                    .foreach(finding => BotApp.huntedAlliedService.flagForRemoval(guild, hunted, entry, finding))
+                }
+              }
+
               val rename = presentation.GuildActivity.renameFromFormerNames(
                 activityData.getOrElse(guildId, List()),
                 charName,
@@ -358,26 +423,22 @@ class TibiaBot(
                 // leaving under their new name this poll — that would read as a
                 // stranger appearing in the guild.
                 skipJoinLeave = true
-                // Six minutes for the character sheet to settle. A cache-bypassed
-                // fetch can be served different cached copies of the same sheet from
-                // one poll to the next, so a rename shows up, disappears and shows up
-                // again; announcing on first sight spammed the activity channel.
+                // Six minutes for the character sheet to settle: a cache-bypassed
+                // fetch can be served different cached copies poll to poll, so a
+                // rename appears, vanishes and reappears, and announcing on first
+                // sight spammed the activity channel.
                 //
-                // Moving the row is what makes the announcement one-shot — once it
-                // carries the new name, renameFromFormerNames stops recognising the
-                // character — so the move and the notice have to be the same decision.
-                // Renaming the row while staying silent (what this did before) spent
-                // the one chance to announce and posted nothing; the sheet could then
-                // flip-flop freely and the rename was simply never reported. Holding
-                // both back instead means the next poll re-detects it against the
-                // untouched row and announces exactly once, just later.
+                // The move and the notice must be one decision, because moving the
+                // row is what makes the announcement one-shot — once it carries the
+                // new name, renameFromFormerNames stops recognising the character.
+                // Moving it silently spent that one chance and posted nothing.
+                // Holding both back lets the next poll re-detect it against the
+                // untouched row and announce exactly once, just later.
                 if (renamed.previousUpdate.plusMinutes(6).isBefore(renamedAt)) {
-                  // The recorded guild is carried across as it stands rather than being
-                  // caught up to the character's current one: a rename and a guild swap
-                  // in the same poll are two events, and the swap is posted by the
-                  // guild-change branch on the next poll. Storing the current guild here
-                  // would agree with nothing in memory and would swallow the swap
-                  // outright if the bot restarted before that poll.
+                  // The recorded guild carries across as it stands rather than being
+                  // caught up: a rename and a guild swap in one poll are two events,
+                  // and the swap is posted by the guild-change branch next poll.
+                  // Storing the current guild here would swallow it outright.
                   var moved = false
                   BotApp.modifyActivityData { m =>
                     val live = m.getOrElse(guildId, List())
@@ -389,29 +450,10 @@ class TibiaBot(
                   // repeat afterwards, so say nothing.
                   if (moved) {
                     BotApp.huntedAlliedService.updateActivityToDatabase(guild, oldName, formerNamesList, renamed.guild, renamedAt, charName)
-                    // if player is in hunted or allied 'players' list, update information there too
-                    if (huntedPlayerCheck) {
-                      BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", oldName, charName)
-                      val updatedHuntedPlayersData = huntedPlayersData.getOrElse(guildId, List()).map { player =>
-                        if (player.name.equalsIgnoreCase(oldName)) {
-                          player.copy(name = charName.toLowerCase)
-                        } else {
-                          player
-                        }
-                      }
-                      BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> updatedHuntedPlayersData))
-                    }
-                    if (allyPlayerCheck) {
-                      BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", oldName, charName)
-                      val updatedAlliedPlayersData = alliedPlayersData.getOrElse(guildId, List()).map { player =>
-                        if (player.name.equalsIgnoreCase(oldName)) {
-                          player.copy(name = charName.toLowerCase)
-                        } else {
-                          player
-                        }
-                      }
-                      BotApp.huntedAlliedService.modifyAlliedPlayersData(m => m + (guildId -> updatedAlliedPlayersData))
-                    }
+                    // The hunted and allied entries are renamed by
+                    // renameListEntries above, which does not need this activity
+                    // row to exist — see the note there. Doing it again here would
+                    // be a second path to the same write, on a narrower condition.
                     if (activityTextChannel != null) {
                       if (activityTextChannel.canTalk() || (!Config.prod)) {
                         val activityEmbed = new EmbedBuilder()
@@ -704,7 +746,12 @@ class TibiaBot(
                   val guildIcon = presentation.GuildIcons.guildIcon(guildName, allyGuildCheck, huntedGuildCheck, allyPlayerCheck, huntedPlayerCheck)
                   val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.equalsIgnoreCase(world))
                   val levelsChannel = worldData.headOption.map(_.levelsChannel).getOrElse("0")
-                  val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to level **${onlinePlayer.level}** $guildIcon"
+                  // Config.levelUpEmoji sits where the skill advances put theirs
+                  // (see presentation.SkillEmojis), so the two kinds of line in
+                  // this channel keep reading as one kind of message. It is the
+                  // same emoji this path already flags the online list with a few
+                  // lines below, which is the point: one mark for "levelled".
+                  val webhookMessage = s"${vocEmoji(onlinePlayer.vocation)} **[$charName](${charUrl(charName)})** advanced to ${Config.levelUpEmoji} level **${onlinePlayer.level}** $guildIcon"
                   val levelsTextChannel = guild.getTextChannelById(levelsChannel)
                   if (levelsTextChannel != null) {
                     if (levelsTextChannel.canTalk() || (!Config.prod)) {
@@ -751,7 +798,7 @@ class TibiaBot(
             // world starting cold has no dedup history and briefly records
             // whatever it finds, up to deathRecentDuration old; the 15-minute
             // window this lands in clears that on its own.
-            worldMetrics.recordDeathDetected(deathAge)
+            worldMetrics.recordDeathDetected(deathAge, fansiteapi.FansiteRoster.shared.admits(charName))
             BotApp.addDeathsCache(world, char.character.character.name, deathTime.toString)
             Some(CharDeath(char, death))
           }
@@ -786,19 +833,56 @@ class TibiaBot(
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
 
-  /** One pass over every discord tracking this world, refreshing the online
-   *  list for those whose own refresh interval has elapsed.
+
+  /** Move a guild's hunted and allied entries onto a character's new name.
    *
-   *  Runs on its own fixed-delay schedule rather than off the back of the world
-   *  poll, so a slow or failing poll neither delays nor is delayed by the
-   *  online list. The per-guild timer below (not the sweep interval) is what
-   *  actually paces refreshes; the sweep just needs to tick often enough to
-   *  notice a guild coming due.
+   *  Matches on the sheet's former names, which is the only signal that survives
+   *  a rename — the entry still holds whatever the character used to be called,
+   *  and from the moment they renamed it matches no live character at all. Left
+   *  alone, that entry sits on the list forever, never colouring a death, never
+   *  appearing online, and looking for all the world like it is still working.
    *
-   *  Single-threaded by construction — scheduleWithFixedDelay never overlaps
-   *  runs — which is what lets this and everything it calls own the online-list
-   *  timers (onlineListTimer, the purge timers, onlineListCategoryTimer)
-   *  without locking. */
+   *  Renames at most one entry per list per call: two entries whose names are
+   *  both former names of one character would mean the same person listed twice,
+   *  which the add path already refuses.
+   */
+  private def renameListEntries(guild: Guild, guildId: String, charName: String,
+                                formerNames: List[String]): Unit =
+    if (formerNames.nonEmpty) {
+      val wasCalled = formerNames.map(_.toLowerCase).toSet
+
+      BotApp.huntedPlayersData.getOrElse(guildId, List())
+        .find(player => wasCalled.contains(player.name.toLowerCase))
+        .foreach { entry =>
+          BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "hunted", entry.name, charName)
+          BotApp.huntedAlliedService.modifyHuntedPlayersData(m =>
+            m + (guildId -> m.getOrElse(guildId, List()).map(player =>
+              if (player.name.equalsIgnoreCase(entry.name)) player.copy(name = charName.toLowerCase)
+              else player)))
+          logger.info(s"Hunted list: '${entry.name}' renamed to '$charName' in guild '$guildId'")
+        }
+
+      BotApp.alliedPlayersData.getOrElse(guildId, List())
+        .find(player => wasCalled.contains(player.name.toLowerCase))
+        .foreach { entry =>
+          BotApp.huntedAlliedService.updateHuntedOrAllyNameToDatabase(guild, "allied", entry.name, charName)
+          BotApp.huntedAlliedService.modifyAlliedPlayersData(m =>
+            m + (guildId -> m.getOrElse(guildId, List()).map(player =>
+              if (player.name.equalsIgnoreCase(entry.name)) player.copy(name = charName.toLowerCase)
+              else player)))
+          logger.info(s"Allies list: '${entry.name}' renamed to '$charName' in guild '$guildId'")
+        }
+    }
+  /** One pass over every discord tracking this world, refreshing the online list
+   *  for those whose refresh interval has elapsed.
+   *
+   *  On its own fixed-delay schedule rather than off the world poll, so a slow
+   *  poll neither delays nor is delayed by the online list. The per-guild timer
+   *  paces refreshes; the sweep only ticks often enough to notice one coming due.
+   *
+   *  Single-threaded by construction — scheduleWithFixedDelay never overlaps — so
+   *  this and everything it calls own the online-list timers without locking.
+   *  onlineListCategoryTimer is the exception, re-stamped from the send's thread. */
   private def onlineListSweep(): Unit = {
     try {
       // Before the first poll (or Redis warm-restore) lands there is no roster
@@ -807,11 +891,10 @@ class TibiaBot(
         // Only materialised if some guild is actually due — it copies the whole
         // roster, and most sweeps find nothing to do.
         lazy val roster = onlineTracker.snapshot
-        // Back off when the shared online-list lane is congested instead of
-        // always refreshing at the healthy cadence — see AdaptiveRefreshInterval
-        // for the queueDepth -> interval mapping. Feeding the current cadence
-        // back in is what gives that mapping its hysteresis, so a depth parked
-        // on a tier boundary doesn't flap between two cadences.
+        // Back off when the shared online-list lane is congested — see
+        // AdaptiveRefreshInterval for the queueDepth -> interval mapping. Feeding
+        // the current cadence back in gives it hysteresis, so a depth parked on a
+        // tier boundary doesn't flap.
         onlineListRefreshSeconds =
           discord.AdaptiveRefreshInterval.intervalSeconds(onlineListSender.queueDepth, onlineListRefreshSeconds)
         val refreshIntervalSeconds = onlineListRefreshSeconds
@@ -885,310 +968,318 @@ class TibiaBot(
 
   private lazy val postToDiscordAndCleanUp = Flow[Set[CharDeath]].mapAsync(1) { charDeaths =>
     // post death to each discord
-    if (discordsData.contains(world)) {
-      val discordsList = discordsData(world)
-      // Resolved once for the whole batch, before the per-discord loop below —
-      // the names needed depend only on the deaths, not on which discord is
-      // being posted to, so doing this inside the loop repeated every lookup
-      // per discord. Skipped entirely when no discord tracks this world (a
-      // primary polling a world only a secondary's guilds need).
-      val killerLevelsAt = ZonedDateTime.now()
+    val discordsList = if (discordsData.contains(world)) discordsData(world) else Nil
+    // Resolved once for the whole batch, before the per-discord loop below —
+    // the names needed depend only on the deaths, not on which discord is
+    // being posted to, so doing this inside the loop repeated every lookup
+    // per discord. Skipped entirely when no discord tracks this world (a
+    // primary polling a world only a secondary's guilds need).
+    val killerLevelsAt = ZonedDateTime.now()
+    // Chained, not awaited. This body runs on a dispatcher thread, and blocking
+    // it here parked that thread for the whole batch — up to the lookup timeout
+    // — while the batch's own fetches needed dispatcher threads to read their
+    // responses. Every world's stream shares one ActorSystem, so a few of them
+    // waiting at once starved the pool pekko-http subscribes response entities
+    // on, and world polls hit `response-entity-subscription-timeout` and fell
+    // back to re-checking whoever was last online. Nothing waits now.
+    val prefetched =
       if (discordsList.nonEmpty) prefetchKillerLevels(charDeaths, killerLevelsAt)
-      discordsList.foreach { discords =>
-        val guildId = discords.id
-        if (paywallService.isActive(guildId, world)) {
-        val guild = BotApp.discordGateway.guildById(discords.id)
-        val adminChannel = discords.adminChannel
-        val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.equalsIgnoreCase(world))
-        val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
-        val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
-        val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
-        val allyHelpRole = worldData.headOption.map(_.allyPkRole).getOrElse("0")
-        val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
-        val deathsTextChannel = guild.getTextChannelById(deathsChannel)
-        if (deathsTextChannel != null) {
-          if (deathsTextChannel.canTalk() || (!Config.prod)) {
-            val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
-              var notablePoke = ""
-              val charName = charDeath.char.character.character.name
-              val killer = charDeath.death.killers.lastOption.map(_.name).getOrElse("Invalid")
-              var context = "Died"
-              var embedColor = 3092790 // background default
-              var embedThumbnail = presentation.DeathEffect.thumbnail(killer).getOrElse(creatureImageUrl(killer))
-              var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
-              val killerBuffer = ListBuffer[String]()
-              val exivaBuffer = ListBuffer[String]()
-              var exivaList = ""
-              val killerList = charDeath.death.killers // get all killers
+      else Future.unit
+    prefetched.map { _ =>
+        discordsList.foreach { discords =>
+          val guildId = discords.id
+          if (paywallService.isActive(guildId, world)) {
+          val guild = BotApp.discordGateway.guildById(discords.id)
+          val adminChannel = discords.adminChannel
+          val worldData = worldsData.getOrElse(guildId, List()).filter(w => w.name.equalsIgnoreCase(world))
+          val deathsChannel = worldData.headOption.map(_.deathsChannel).getOrElse("0")
+          val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
+          val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
+          val allyHelpRole = worldData.headOption.map(_.allyPkRole).getOrElse("0")
+          val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
+          val deathsTextChannel = guild.getTextChannelById(deathsChannel)
+          if (deathsTextChannel != null) {
+            if (deathsTextChannel.canTalk() || (!Config.prod)) {
+              val embeds = charDeaths.toList.sortBy(_.death.time).map { charDeath =>
+                var notablePoke = ""
+                val charName = charDeath.char.character.character.name
+                val killer = charDeath.death.killers.lastOption.map(_.name).getOrElse("Invalid")
+                var context = "Died"
+                var embedColor = 3092790 // background default
+                var embedThumbnail = presentation.DeathEffect.thumbnail(killer).getOrElse(creatureImageUrl(killer))
+                var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
+                val killerBuffer = ListBuffer[String]()
+                val exivaBuffer = ListBuffer[(String, Option[Int])]()
+                var exivaList = ""
+                val killerList = charDeath.death.killers // get all killers
 
-              // guild rank and name
-              val guildName = charDeath.char.character.character.guild.map(_.name).getOrElse("")
-              val guildRank = charDeath.char.character.character.guild.map(_.rank).getOrElse("")
-              var guildText = ""
+                // guild rank and name
+                val guildName = charDeath.char.character.character.guild.map(_.name).getOrElse("")
+                val guildRank = charDeath.char.character.character.guild.map(_.rank).getOrElse("")
+                var guildText = ""
 
-              // guild
-              // does player have guild?
-              var guildIcon = Config.otherGuild
-              var huntedGuilds = false
-              var allyGuilds = false
-              if (guildName != "") {
-                // if untracked neutral guild show grey
-                if (embedColor == 3092790) {
-                  embedColor = 4540237
+                // guild
+                // does player have guild?
+                var guildIcon = Config.otherGuild
+                var huntedGuilds = false
+                var allyGuilds = false
+                if (guildName != "") {
+                  // if untracked neutral guild show grey
+                  if (embedColor == 3092790) {
+                    embedColor = 4540237
+                  }
+                  val customSortGuildCheck = customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.equalsIgnoreCase(guildName))
+                  if (customSortGuildCheck) {
+                    embedColor = 14397256 // yellow
+                  }
+                  // is player an ally
+                  allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(guildName))
+                  if (allyGuilds) {
+                    embedColor = 13773097 // bright red
+                    guildIcon = Config.allyGuild
+                  }
+                  // is player in hunted guild
+                  huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(guildName))
+                  if (huntedGuilds) {
+                    embedColor = 36941 // bright green
+                    if (context == "Died") {
+                      notablePoke = "fullbless" // PVE fullbless opportuniy (only poke for level 400+)
+                    }
+                  }
+                  guildText = s"$guildIcon *$guildRank* of the [$guildName](${guildUrl(guildName)})\n"
                 }
-                val customSortGuildCheck = customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "guild" && g.name.equalsIgnoreCase(guildName))
-                if (customSortGuildCheck) {
+
+                // player
+                val customSortPlayerCheck = customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.equalsIgnoreCase(charName))
+                if (customSortPlayerCheck) {
                   embedColor = 14397256 // yellow
                 }
-                // is player an ally
-                allyGuilds = alliedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(guildName))
-                if (allyGuilds) {
+                // ally player
+                val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(charName))
+                if (allyPlayers) {
                   embedColor = 13773097 // bright red
-                  guildIcon = Config.allyGuild
                 }
-                // is player in hunted guild
-                huntedGuilds = huntedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(guildName))
-                if (huntedGuilds) {
+                // hunted player
+                val huntedPlayers = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(charName))
+                if (huntedPlayers) {
                   embedColor = 36941 // bright green
                   if (context == "Died") {
-                    notablePoke = "fullbless" // PVE fullbless opportuniy (only poke for level 400+)
-                  }
-                }
-                guildText = s"$guildIcon *$guildRank* of the [$guildName](${guildUrl(guildName)})\n"
-              }
-
-              // player
-              val customSortPlayerCheck = customSortData.getOrElse(guildId, List()).exists(g => g.entityType == "player" && g.name.equalsIgnoreCase(charName))
-              if (customSortPlayerCheck) {
-                embedColor = 14397256 // yellow
-              }
-              // ally player
-              val allyPlayers = alliedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(charName))
-              if (allyPlayers) {
-                embedColor = 13773097 // bright red
-              }
-              // hunted player
-              val huntedPlayers = huntedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(charName))
-              if (huntedPlayers) {
-                embedColor = 36941 // bright green
-                if (context == "Died") {
-                  notablePoke = "fullbless" // PVE fullbless opportuniy
-                }
-              }
-
-              // poke if killer is in notable-creatures config
-              val poke = Config.notableCreatures.contains(killer.toLowerCase())
-              if (poke) {
-                notablePoke = "nemesis"
-                embedColor = presentation.Embeds.NemesisPurple
-              }
-
-              if (killerList.nonEmpty) {
-                killerList.foreach { k =>
-                  if (k.player) {
-                    if (k.name != charName) { // ignore 'self' entries on deathlist
-                      context = "Killed"
-                      if (allyPlayers || allyGuilds) {
-                        notablePoke = "allypk"
-                      } else if (huntedPlayers || huntedGuilds) {
-                        notablePoke = "screenshot"
-                      } else {
-                        notablePoke = "" // reset poke as its not a fullbless
-                      }
-                      if (embedColor == 3092790 || embedColor == 4540237) {
-                        embedColor = 14869218 // bone white
-                      }
-                      embedThumbnail = presentation.DeathEffect.pvp
-                      domain.Killers.parseSummon(k.name) match {
-                        case Some((creature, summoner)) => // e.g: fire elemental of Violent Beams
-                          val vowel = domain.Killers.article(creature)
-                          val summonerLevelText = getKillerLevel(summoner, killerLevelsAt).map(level => s" [$level]").getOrElse("")
-                          killerBuffer += s"$vowel ${Config.summonEmoji} **$creature of [$summoner$summonerLevelText](${charUrl(summoner)})**"
-                          if (embedColor == 13773097) {
-                            if (exivaListCheck == "true") {
-                              exivaBuffer += summoner
-                            }
-                          }
-                        case None => // a player (incl. names with " of " like "Knight of Flame") or an undetected summon
-                          val levelText = getKillerLevel(k.name, killerLevelsAt).map(level => s" [$level]").getOrElse("")
-                          killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**"
-                          if (embedColor == 13773097) {
-                            if (exivaListCheck == "true") {
-                              exivaBuffer += k.name
-                            }
-                          }
-                      }
-                    }
-                  } else {
-                    // map boss lists to their respective emojis (built once in BossEmoji)
-                    val bossIcon = presentation.BossEmoji.of(k.name)
-
-                    // add "an" or "a" depending on first letter of creatures name
-                    // ignore capitalized names (nouns) as they are bosses
-                    // if player dies to a neutral source show 'died by energy' instead of 'died by an energy'
-                    if (!k.name.exists(_.isUpper)) {
-                      vowelCheck = domain.Killers.sourceArticle(k.name)
-                    }
-                    killerBuffer += s"$vowelCheck$bossIcon**${k.name}**"
-                  }
-                }
-              }
-
-              if (exivaBuffer.nonEmpty) {
-                exivaBuffer.zipWithIndex.foreach { case (exiva, i) =>
-                  if (i == 0) {
-                    exivaList += s"""\n${Config.exivaEmoji} `exiva "$exiva"`""" // add exiva emoji
-                  } else {
-                    exivaList += s"""\n${Config.indentEmoji} `exiva "$exiva"`""" // just use indent emoji for further player names
+                    notablePoke = "fullbless" // PVE fullbless opportuniy
                   }
                 }
 
-                // see if detectHunted is toggled on or off
-                val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
-                if (detectHunteds == "on") {
-                  // scan exiva list for enemies to be added to hunted
-                  val exivaBufferFlow = Source(exivaBuffer.toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
-                  val futureResults: Future[Seq[Either[String, CharacterResponse]]] = exivaBufferFlow.run()
-                  futureResults.onComplete {
-                    case Success(output) =>
-                      val huntedBuffer = ListBuffer[(String, String, String, Int)]()
-                      output.foreach {
-                        case Right(charResponse) =>
-                          val killerName = charResponse.character.character.name
-                          val killerGuild = charResponse.character.character.guild
-                          val killerWorld = charResponse.character.character.world
-                          val killerVocation = vocEmoji(charResponse.character.character.vocation)
-                          val killerLevel = charResponse.character.character.level.toInt
-                          val killerGuildName = if(killerGuild.isDefined) killerGuild.head.name else ""
-                          var guildCheck = true
-                          if (killerGuildName != "") {
-                            if (alliedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerGuildName)) || huntedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerGuildName))) {
-                              guildCheck = false // player guild is already ally/hunted
-                            }
-                          }
-                          if (guildCheck) { // player is not in a guild or is in a guild that is not tracked
-                            if (alliedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerName)) || huntedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerName))) {
-                              // already tracked, nothing to do
-                            } else {
-                              if (!huntedBuffer.exists(_._1.equalsIgnoreCase(killerName))) {
-                                huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
+                // poke if killer is in notable-creatures config
+                val poke = Config.notableCreatures.contains(killer.toLowerCase())
+                if (poke) {
+                  notablePoke = "nemesis"
+                  embedColor = presentation.Embeds.NemesisPurple
+                }
+
+                if (killerList.nonEmpty) {
+                  killerList.foreach { k =>
+                    if (k.player) {
+                      if (k.name != charName) { // ignore 'self' entries on deathlist
+                        context = "Killed"
+                        if (allyPlayers || allyGuilds) {
+                          notablePoke = "allypk"
+                        } else if (huntedPlayers || huntedGuilds) {
+                          notablePoke = "screenshot"
+                        } else {
+                          notablePoke = "" // reset poke as its not a fullbless
+                        }
+                        if (embedColor == 3092790 || embedColor == 4540237) {
+                          embedColor = 14869218 // bone white
+                        }
+                        embedThumbnail = presentation.DeathEffect.pvp
+                        domain.Killers.summonBehind(k.name, k.summon) match {
+                          case Some((creature, summoner)) => // e.g: fire elemental of Violent Beams
+                            val vowel = domain.Killers.article(creature)
+                            val summonerLevel = getKillerLevel(summoner, killerLevelsAt)
+                            val summonerLevelText = summonerLevel.map(level => s" [$level]").getOrElse("")
+                            killerBuffer += s"$vowel ${Config.summonEmoji} **$creature of [$summoner$summonerLevelText](${charUrl(summoner)})**"
+                            if (embedColor == 13773097) {
+                              if (exivaListCheck == "true") {
+                                exivaBuffer += ((summoner, summonerLevel))
                               }
                             }
-                          }
-                        case Left(_) => // do nothing
-                      }
-
-                      // process the new batch of players to add to hunted list
-                      if (huntedBuffer.nonEmpty) {
-                        val adminTextChannel = guild.getTextChannelById(adminChannel)
-                        if (adminTextChannel != null) {
-                          huntedBuffer.foreach { case (player, world, vocation, level) =>
-                            val playerString = player.toLowerCase()
-                            BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: m.getOrElse(guildId, List()))))
-                            // add them to the database
-                            BotApp.huntedAlliedService.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
-                            val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
-                            val adminEmbed = new EmbedBuilder()
-                            adminEmbed.setTitle(":robot: enemy automatically detected:")
-                            adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
-                            adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
-                            adminEmbed.setColor(14397256) // orange for bot auto command
-                            sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
-                          }
+                          case None => // a player (incl. names with " of " like "Knight of Flame") or an undetected summon
+                            val killerLevel = getKillerLevel(k.name, killerLevelsAt)
+                            val levelText = killerLevel.map(level => s" [$level]").getOrElse("")
+                            killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**"
+                            if (embedColor == 13773097) {
+                              if (exivaListCheck == "true") {
+                                exivaBuffer += ((k.name, killerLevel))
+                              }
+                            }
                         }
                       }
-                    case Failure(exception) =>
-                      logger.warn(s"Failed to scan the exiva list for auto-hunt detection on world '$world': ${exception.getMessage}")
+                    } else {
+                      // map boss lists to their respective emojis (built once in BossEmoji)
+                      val bossIcon = presentation.BossEmoji.of(k.name)
+
+                      // add "an" or "a" depending on first letter of creatures name
+                      // ignore capitalized names (nouns) as they are bosses
+                      // if player dies to a neutral source show 'died by energy' instead of 'died by an energy'
+                      if (!k.name.exists(_.isUpper)) {
+                        vowelCheck = domain.Killers.sourceArticle(k.name)
+                      }
+                      killerBuffer += s"$vowelCheck$bossIcon**${k.name}**"
+                    }
                   }
                 }
-              }
 
-              // convert formatted killer list to one string ("a, b and c")
-              var killerText = domain.Killers.joinNatural(killerBuffer.toSeq)
-
-              // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
-              if (killerText == "") {
-                  embedThumbnail = presentation.DeathEffect.suicide
-                  killerText = s"""`suicide`"""
-              }
-
-              val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
-
-              // this is the actual embed description
-              var embedText = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}\nby $killerText.$exivaList"
-
-              // if the length is over 4065 truncate it
-              val embedLength = embedText.length
-              val limit = 4065
-              if (embedLength > limit) {
-                val newlineIndex = embedText.lastIndexOf('\n', limit)
-                embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
-              }
-
-              val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
-              val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
-              val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
-              val embedCheck = presentation.DeathEmbeds.shouldShow(embedColor, showNeutralDeaths, showAlliesDeaths, showEnemiesDeaths)
-              val embed = presentation.DeathEmbeds.build(charName, charDeath.char.character.character.vocation, embedText, embedThumbnail, embedColor)
-
-              // return embed + poke
-              (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond, charDeath.char.character.character.vocation, killer)
-            }
-            val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
-            val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(20)
-            // Deaths are top priority — send immediately, no artificial pacing. JDA's
-            // own rate limiter already queues/paces REST calls safely against Discord's
-            // real limits; this used to add its own delay on top (up to ~25s for a
-            // burst of 20), which only worked against the "post fast" goal without
-            // buying any real additional protection.
-            val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
-            def recordDeath(charName: String, level: Int, vocation: String, killer: String): Unit = {
-              worldMetrics.incrementDeaths()
-              // Plain Unicode here, not vocEmoji's Discord shortcode text (":shield:" etc.) —
-              // Discord auto-renders shortcodes as emoji, but a browser won't. Real HTML
-              // markup (not Discord markdown) since the dashboard injects this text as-is.
-              val vocationEmoji = vocation.toLowerCase.split(' ').last match {
-                case "knight"   => "🛡️"
-                case "druid"    => "❄️"
-                case "sorcerer" => "🔥"
-                case "paladin"  => "🏹"
-                case "monk"     => "👊🏽"
-                case "none"     => "🐣"
-                case _          => ""
-              }
-              val nameLink = s"""<a href="${charUrl(charName)}" target="_blank">$charName</a>"""
-              // The same death posts once per discord tracking this world, so without
-              // identifying which one, the feed shows what looks like duplicate rows —
-              // this is the enclosing discordsList.foreach's discord, not a repeat.
-              val discordLabel = s"""<span class="muted" title="Discord ID: $guildId">&middot; ${guild.getName}</span>"""
-              recentEvents.record("death", s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
-            }
-            validEmbeds.foreach { embed =>
-              try {
-                // Create screenshot button
-                val screenshotButton = Button.secondary(
-                  s"death_screenshot_${embed._3}_${embed._7}_placeholder",
-                  "Add Screenshot"
-                )
-                val actionRow = ActionRow.of(screenshotButton)
-
-                // nemesis and enemy fullbless ignore the level filter
-                if (embed._2 == "nemesis") {
-                  val shouldPing = guild.getRoleById(nemesisRole) != null && canPing(deathsTextChannel.getId)
-                  if (shouldPing) {
-                    deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
-                      .setEmbeds(embed._1.build())
-                      .queue()
-                  } else {
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                      .queue()
+                if (exivaBuffer.nonEmpty) {
+                  // Not everyone in the kill: only the few worth chasing, hardest first.
+                  domain.Killers.exivaTargets(exivaBuffer.toSeq).zipWithIndex.foreach { case (exiva, i) =>
+                    if (i == 0) {
+                      exivaList += s"""\n${Config.exivaEmoji} `exiva "$exiva"`""" // add exiva emoji
+                    } else {
+                      exivaList += s"""\n${Config.indentEmoji} `exiva "$exiva"`""" // just use indent emoji for further player names
+                    }
                   }
-                  recordDeath(embed._3, embed._5, embed._8, embed._9)
-                } else if (embed._2 == "allypk") {
-                  if (embed._5 >= minimumLevel) {
-                    val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
+
+                  // see if detectHunted is toggled on or off
+                  val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
+                  if (detectHunteds == "on") {
+                    // scan exiva list for enemies to be added to hunted
+                    // Every killer, not just the listed few — this feeds the hunted list
+                    // rather than the embed, and an enemy it skips is never added at all.
+                    val exivaBufferFlow = Source(exivaBuffer.map(_._1).toSet).mapAsyncUnordered(16)(tibiaDataClient.getCharacter).toMat(Sink.seq)(Keep.right)
+                    val futureResults: Future[Seq[Either[String, CharacterResponse]]] = exivaBufferFlow.run()
+                    futureResults.onComplete {
+                      case Success(output) =>
+                        val huntedBuffer = ListBuffer[(String, String, String, Int)]()
+                        output.foreach {
+                          case Right(charResponse) =>
+                            val killerName = charResponse.character.character.name
+                            val killerGuild = charResponse.character.character.guild
+                            val killerWorld = charResponse.character.character.world
+                            val killerVocation = vocEmoji(charResponse.character.character.vocation)
+                            val killerLevel = charResponse.character.character.level.toInt
+                            val killerGuildName = if(killerGuild.isDefined) killerGuild.head.name else ""
+                            var guildCheck = true
+                            if (killerGuildName != "") {
+                              if (alliedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerGuildName)) || huntedGuildsData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerGuildName))) {
+                                guildCheck = false // player guild is already ally/hunted
+                              }
+                            }
+                            if (guildCheck) { // player is not in a guild or is in a guild that is not tracked
+                              if (alliedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerName)) || huntedPlayersData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(killerName))) {
+                                // already tracked, nothing to do
+                              } else {
+                                if (!huntedBuffer.exists(_._1.equalsIgnoreCase(killerName))) {
+                                  huntedBuffer += ((killerName, killerWorld, killerVocation, killerLevel))
+                                }
+                              }
+                            }
+                          case Left(_) => // do nothing
+                        }
+
+                        // process the new batch of players to add to hunted list
+                        if (huntedBuffer.nonEmpty) {
+                          val adminTextChannel = guild.getTextChannelById(adminChannel)
+                          if (adminTextChannel != null) {
+                            huntedBuffer.foreach { case (player, world, vocation, level) =>
+                              val playerString = player.toLowerCase()
+                              BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(playerString, "false", "killed an allied player", BotApp.botUser) :: m.getOrElse(guildId, List()))))
+                              // add them to the database
+                              BotApp.huntedAlliedService.addHuntedToDatabase(guild, "player", playerString, "false", "killed an allied player", BotApp.botUser)
+                              val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
+                              val adminEmbed = new EmbedBuilder()
+                              adminEmbed.setTitle(":robot: enemy automatically detected:")
+                              adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
+                              adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
+                              adminEmbed.setColor(14397256) // orange for bot auto command
+                              sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
+                            }
+                          }
+                        }
+                      case Failure(exception) =>
+                        logger.warn(s"Failed to scan the exiva list for auto-hunt detection on world '$world': ${exception.getMessage}")
+                    }
+                  }
+                }
+
+                val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
+                val limit = 4065
+                val header = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}"
+
+                // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
+                val killerParts = if (killerBuffer.isEmpty) {
+                  embedThumbnail = presentation.DeathEffect.suicide
+                  Seq(s"""`suicide`""")
+                } else killerBuffer.toSeq
+
+                // Fit the killer list to the room actually left for it, rather than
+                // letting it overrun and be cut below: it is one line, so the cut can
+                // only drop it whole. The exiva list is a handful of lines and takes
+                // its space first; the half-room floor below only bites if that list
+                // ever grows, and keeps the killers from being squeezed out if it does.
+                val room = limit - s"$header\nby .".length
+                // convert formatted killer list to one string ("a, b and c")
+                val killerText = domain.Killers.joinWithin(killerParts, room - math.min(exivaList.length, room / 2))
+
+                // this is the actual embed description
+                var embedText = s"$header\nby $killerText.$exivaList"
+
+                // if the length is over 4065 truncate it
+                if (embedText.length > limit) {
+                  val newlineIndex = embedText.lastIndexOf('\n', limit)
+                  embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
+                }
+
+                val showNeutralDeaths = worldData.headOption.map(_.showNeutralDeaths).getOrElse("true")
+                val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
+                val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
+                val embedCheck = presentation.DeathEmbeds.shouldShow(embedColor, showNeutralDeaths, showAlliesDeaths, showEnemiesDeaths)
+                val embed = presentation.DeathEmbeds.build(charName, charDeath.char.character.character.vocation, embedText, embedThumbnail, embedColor)
+
+                // return embed + poke
+                (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond, charDeath.char.character.character.vocation, killer)
+              }
+              val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
+              val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(20)
+              // Deaths are top priority — send immediately, no artificial pacing. JDA's
+              // own rate limiter already queues/paces REST calls safely against Discord's
+              // real limits; this used to add its own delay on top (up to ~25s for a
+              // burst of 20), which only worked against the "post fast" goal without
+              // buying any real additional protection.
+              val validEmbeds = embeds.filter(_._6) // Filter only valid embeds
+              def recordDeath(charName: String, level: Int, vocation: String, killer: String): Unit = {
+                worldMetrics.incrementDeaths()
+                // Plain Unicode here, not vocEmoji's Discord shortcode text (":shield:" etc.) —
+                // Discord auto-renders shortcodes as emoji, but a browser won't. Real HTML
+                // markup (not Discord markdown) since the dashboard injects this text as-is.
+                val vocationEmoji = vocation.toLowerCase.split(' ').last match {
+                  case "knight"   => "🛡️"
+                  case "druid"    => "❄️"
+                  case "sorcerer" => "🔥"
+                  case "paladin"  => "🏹"
+                  case "monk"     => "👊🏽"
+                  case "none"     => "🐣"
+                  case _          => ""
+                }
+                val nameLink = s"""<a href="${charUrl(charName)}" target="_blank">$charName</a>"""
+                // The same death posts once per discord tracking this world, so without
+                // identifying which one, the feed shows what looks like duplicate rows —
+                // this is the enclosing discordsList.foreach's discord, not a repeat.
+                val discordLabel = s"""<span class="muted" title="Discord ID: $guildId">&middot; ${guild.getName}</span>"""
+                recentEvents.record("death", s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
+              }
+              validEmbeds.foreach { embed =>
+                try {
+                  // Create screenshot button
+                  val screenshotButton = Button.secondary(
+                    s"death_screenshot_${embed._3}_${embed._7}_placeholder",
+                    "Add Screenshot"
+                  )
+                  val actionRow = ActionRow.of(screenshotButton)
+
+                  // nemesis and enemy fullbless ignore the level filter
+                  if (embed._2 == "nemesis") {
+                    val shouldPing = guild.getRoleById(nemesisRole) != null && canPing(deathsTextChannel.getId)
                     if (shouldPing) {
-                      deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
+                      deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
                         .setEmbeds(embed._1.build())
                         .queue()
                     } else {
@@ -1196,52 +1287,62 @@ class TibiaBot(
                         .queue()
                     }
                     recordDeath(embed._3, embed._5, embed._8, embed._9)
-                  }
-                } else if (embed._2 == "fullbless") {
-                  if (embed._5 >= minimumLevel) {
-                    // send adjusted embed for fullblesses
-                    val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-                    val adjustedEmbed = embed._1.setDescription(adjustedMessage)
-                    if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
-                      deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
-                        .setEmbeds(adjustedEmbed.build())
-                        .queue()
-                    } else {
-                      deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
-                        .queue()
+                  } else if (embed._2 == "allypk") {
+                    if (embed._5 >= minimumLevel) {
+                      val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
+                      if (shouldPing) {
+                        deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
+                          .setEmbeds(embed._1.build())
+                          .queue()
+                      } else {
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                          .queue()
+                      }
+                      recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
-                    recordDeath(embed._3, embed._5, embed._8, embed._9)
-                  }
-                } else if (embed._2 == "screenshot") {
-                  if (embed._5 >= minimumLevel) {
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                      .setComponents(actionRow)
-                      .queue()
-                    recordDeath(embed._3, embed._5, embed._8, embed._9)
+                  } else if (embed._2 == "fullbless") {
+                    if (embed._5 >= minimumLevel) {
+                      // send adjusted embed for fullblesses
+                      val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
+                      val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+                      if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
+                        deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
+                          .setEmbeds(adjustedEmbed.build())
+                          .queue()
+                      } else {
+                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
+                          .queue()
+                      }
+                      recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
-                } else {
-                  // for regular deaths check if level > /filter deaths <level>
-                  if (embed._5 >= minimumLevel) {
-                    deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                      .setSuppressedNotifications(true)
-                      .queue()
-                    recordDeath(embed._3, embed._5, embed._8, embed._9)
+                  } else if (embed._2 == "screenshot") {
+                    if (embed._5 >= minimumLevel) {
+                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                        .setComponents(actionRow)
+                        .queue()
+                      recordDeath(embed._3, embed._5, embed._8, embed._9)
+                      }
+                  } else {
+                    // for regular deaths check if level > /filter deaths <level>
+                    if (embed._5 >= minimumLevel) {
+                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                        .setSuppressedNotifications(true)
+                        .queue()
+                      recordDeath(embed._3, embed._5, embed._8, embed._9)
+                    }
                   }
+                } catch {
+                  case ex: Exception => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
+                  case _: Throwable => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
                 }
-              } catch {
-                case ex: Exception => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}': ${ex.getMessage}")
-                case _: Throwable => logger.error(s"Failed to send message to 'deaths' channel for Guild ID: '${guildId}' Guild Name: '${guild.getName}'")
               }
             }
           }
+          }
         }
-        }
-      }
+
+      cleanUp()
     }
-
-    cleanUp()
-
-    Future.successful(())
   }.withAttributes(logAndResume)
 
   private def onlineList(onlineData: List[tracking.OnlinePlayer], guildId: String, alliesChannel: String, neutralsChannel: String, enemiesChannel: String, categoryChannel: String, onlineCombined: String, world: String): Unit = {
@@ -1262,6 +1363,33 @@ class TibiaBot(
     val huntedGuildNames = huntedGuildsData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
     val alliedPlayerNames = alliedPlayersData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
     val huntedPlayerNames = huntedPlayersData.getOrElse(guildId, Nil).iterator.map(_.name.toLowerCase).toSet
+    // Name -> tag for this guild's hunted entries, so a row can show the tag as
+    // well as the fact of being hunted. Built once per list build, from data
+    // already in memory - see panels.ListTags.
+    val huntedPlayerTags = huntedPlayersData.getOrElse(guildId, Nil).iterator
+      .filter(_.tag.nonEmpty).map(player => player.name.toLowerCase -> player.tag).toMap
+
+    // The online-list floors, per category. 0 is off, which is where every world
+    // starts and what every world had before these existed.
+    val worldConfig = worldsData.getOrElse(guildId, Nil).find(_.name.equalsIgnoreCase(world))
+    val alliesMin = worldConfig.map(_.onlineAlliesMin).getOrElse(0)
+    val enemiesMin = worldConfig.map(_.onlineEnemiesMin).getOrElse(0)
+    val neutralsMin = worldConfig.map(_.onlineNeutralsMin).getOrElse(0)
+
+    // Who belongs in each list, floor included. Named once because the same
+    // three questions are asked in six places below — the counts, the combined
+    // channel, and the three separate channels — and a floor applied to some of
+    // them would show a channel a count that disagrees with the rows under it.
+    //
+    // Membership is per list rather than per character: nothing stops an allied
+    // player being in a hunted guild, and such a character has always appeared
+    // in both lists. Each list therefore applies its own floor rather than one
+    // "is this character shown" answer deciding for both.
+    def visibleAllies(c: CharSort): Boolean = (c.allyPlayer || c.allyGuild) && c.level >= alliesMin
+    def visibleEnemies(c: CharSort): Boolean = (c.huntedPlayer || c.huntedGuild) && c.level >= enemiesMin
+    def visibleNeutrals(c: CharSort): Boolean =
+      !c.huntedPlayer && !c.huntedGuild && !c.allyPlayer && !c.allyGuild && c.level >= neutralsMin
+    def visibleAnywhere(c: CharSort): Boolean = visibleAllies(c) || visibleEnemies(c) || visibleNeutrals(c)
 
     val sortedList = onlineData.sortWith(_.level > _.level)
     var zapCount = 0
@@ -1282,10 +1410,17 @@ class TibiaBot(
       // less than tracking.MasslogDetector.RecentLoginSeconds. That constant is
       // shared with the per-user mass-log DM below, whose threshold is a count
       // of exactly these people.
-      val justLogged = durationInSec < tracking.MasslogDetector.RecentLoginSeconds && (huntedGuildCheck || huntedPlayerCheck)
+      // Filtered on the same floor as the list itself, so a wave of level-8
+      // throwaways cannot trip a mass-log alert about an enemy list they are no
+      // longer part of. Leaving them in the numerator while the floor took them
+      // out of the denominator would make the alert fire far more readily than
+      // before the filter, not less — a shrinking enemy count raises the
+      // required fraction (see tracking.MasslogDetector.basePercentage).
+      val justLogged = durationInSec < tracking.MasslogDetector.RecentLoginSeconds &&
+        (huntedGuildCheck || huntedPlayerCheck) && player.level.toInt >= enemiesMin
       val masslogIcon = if (justLogged) " :zap:" else if (durationInSec > 18000 && (huntedGuildCheck || huntedPlayerCheck)) " :zzz:" else ""
       if (justLogged) zapCount += 1
-      vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}"
+      vocationBuffers(voc) += CharSort(player.guildName,allyGuildCheck,huntedGuildCheck,allyPlayerCheck,huntedPlayerCheck,voc,player.level.toInt,s"$vocationEmoji **${player.level}** — **[${player.name}](${charUrl(player.name)})** $guildIcon $durationString ${player.flag}${masslogIcon}${com.tibiabot.panels.ListTags.mark(huntedPlayerTags.getOrElse(playerNameLower, ""))}"
       )
     }
 
@@ -1294,15 +1429,15 @@ class TibiaBot(
 
     // default online list
     val alliesList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => charSort.allyPlayer || charSort.allyGuild))
+      .flatMap(_.filter(visibleAllies))
       .map(_.message)
       .toList
     val enemiesList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => charSort.huntedPlayer || charSort.huntedGuild))
+      .flatMap(_.filter(visibleEnemies))
       .map(_.message)
       .toList
     val neutralsList: List[String] = vocationBuffers.values
-      .flatMap(_.filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild))
+      .flatMap(_.filter(visibleNeutrals))
       .map(_.message)
       .toList
 
@@ -1334,9 +1469,14 @@ class TibiaBot(
       if (combinedTextChannel != null) {
         if (combinedTextChannel.canTalk() || (!Config.prod)) {
 
-          // neutrals grouped by Guild
+          // neutrals grouped by Guild.
+          //
+          // Counted over who is actually shown, so the "fewer than three online
+          // folds into no-guild" rule below is about the rows on screen. Counting
+          // hidden characters would leave a guild header standing over one
+          // visible name, which is the header this rule exists to prevent.
           val guildNameCounts: Map[String, Int] = vocationBuffers.values
-            .flatMap(_.map(_.guildName))
+            .flatMap(_.filter(visibleAnywhere).map(_.guildName))
             .groupBy(identity)
             .view.mapValues(_.size)
             .toMap
@@ -1354,7 +1494,7 @@ class TibiaBot(
 
           val neutralsGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
             updatedVocationBuffers.values.flatten
-              .filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild)
+              .filter(visibleNeutrals)
               .map(charSort => charSort.guildName -> charSort.message))
 
           val flattenedNeutralsList: List[String] =
@@ -1408,7 +1548,7 @@ class TibiaBot(
       // allies grouped by Guild
       val alliesGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
         vocationBuffers.values.flatten
-          .filter(charSort => charSort.allyPlayer || charSort.allyGuild)
+          .filter(visibleAllies)
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedAlliesList: List[String] =
@@ -1431,7 +1571,7 @@ class TibiaBot(
       // neutrals grouped by Guild
       val neutralsGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
         vocationBuffers.values.flatten
-          .filter(charSort => !charSort.huntedPlayer && !charSort.huntedGuild && !charSort.allyPlayer && !charSort.allyGuild)
+          .filter(visibleNeutrals)
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedNeutralsList: List[String] =
@@ -1454,7 +1594,7 @@ class TibiaBot(
       // enemies grouped by Guild
       val enemiesGroupedByGuild: List[(String, List[String])] = presentation.OnlineListGrouping.groupByGuild(
         vocationBuffers.values.flatten
-          .filter(charSort => charSort.huntedPlayer || charSort.huntedGuild)
+          .filter(visibleEnemies)
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedEnemiesList: List[String] =
@@ -1503,7 +1643,17 @@ class TibiaBot(
     // hours, which is preferable to racing the timers across threads.
     val purgeDue = onlineListPurgeDue(purgeType, guildId)
     val channelId = channel.getId
-    val fields = presentation.OnlineListEmbeds.packFields(values)
+    // Packed against what is already posted, so a login lands on the message it
+    // belongs to instead of shunting every message after it along by a line —
+    // see packMessagesStable. The purge is what re-tightens that layout, so it
+    // packs from scratch, as does a channel not synced yet. Reading the state
+    // outside plan's own lock races only with a send reporting its id, which
+    // leaves descriptions alone: the worst case is one loose packing.
+    val previous = if (purgeDue) None else onlineListState.posted(channelId).filter(_.nonEmpty)
+    val messages = previous match {
+      case Some(posted) => presentation.OnlineListEmbeds.packMessagesStable(values, posted.map(_.descriptions))
+      case None => presentation.OnlineListEmbeds.packMessages(values)
+    }
 
     // The steady-state path: we already know which messages we posted here and
     // what we last put in them, so the whole update is decided locally with no
@@ -1511,10 +1661,10 @@ class TibiaBot(
     // or after the cache was invalidated) or the 6-hourly purge falls through
     // to reading history.
     if (!purgeDue && onlineListState.isWarm(channelId)) {
-      dispatchOnlineListUpdate(channel, fields, guildId, guildName)
+      dispatchOnlineListUpdate(channel, messages, guildId, guildName)
     } else {
       resyncOnlineListCache(channel, purgeDue, guildId, guildName) { () =>
-        dispatchOnlineListUpdate(channel, fields, guildId, guildName)
+        dispatchOnlineListUpdate(channel, messages, guildId, guildName)
       }
     }
   }
@@ -1539,7 +1689,11 @@ class TibiaBot(
               Nil
             } else {
               existing.map { m =>
-                tracking.OnlineListMessage(Some(m.getId), m.getEmbeds.asScala.headOption.map(_.getDescription).getOrElse(""))
+                // Every embed, not just the first: one message carries several.
+                tracking.OnlineListMessage(
+                  Some(m.getId),
+                  m.getEmbeds.asScala.toList.map(e => Option(e.getDescription).getOrElse(""))
+                )
               }
             }
           onlineListState.seed(channel.getId, seeded)
@@ -1556,36 +1710,35 @@ class TibiaBot(
   /** Diff `fields` against what we believe is posted and enqueue whatever makes
    *  Discord match.
    *
-   *  Sends go through their own dedicated lane (onlineListSender), separate
-   *  from the general background lane — Discord rate-limits message-edit PATCH
-   *  calls far harder than the general REST budget (confirmed via live 429s),
-   *  so this traffic needs a slower, isolated pace. Each send is keyed by
-   *  (channel id, message index): demand here can exceed what that slower pace
-   *  can drain, so without keying, a backed-up queue fills with many stale
-   *  updates to the same handful of channels, each superseded by the next
-   *  before it ever sends (observed depth in the thousands, 25+ minute average
-   *  wait). Keying caps the backlog at one pending update per channel/message
-   *  and guarantees whatever finally sends is current.
+   *  Sends use their own lane (onlineListSender): Discord rate-limits message-edit
+   *  PATCH calls far harder than the general REST budget, so this traffic needs a
+   *  slower, isolated pace. Each send is keyed by (channel id, message index),
+   *  because demand can exceed what that pace drains — unkeyed, the queue filled
+   *  with stale updates to a handful of channels, each superseded before it sent
+   *  (observed: thousands deep, 25+ minute waits). Keying caps the backlog at one
+   *  pending update per message and keeps whatever sends current.
    *
-   *  Each send is also grouped by channel id, because Discord's limit here is
-   *  per-channel while the lane's pace is bot-wide. A list that packs into
-   *  several embeds enqueues them all at once and in FIFO they would drain
-   *  back-to-back, putting 5+ edits into one channel inside a second; the group
-   *  makes the lane spend those slots on other channels and come back to this
-   *  one after its gap. */
-  private def dispatchOnlineListUpdate(channel: TextChannel, fields: List[String], guildId: String, guildName: String): Unit = {
+   *  Also grouped by channel id, since Discord's limit is per-channel while the
+   *  lane's pace is bot-wide: a list packing into several messages would otherwise
+   *  drain back-to-back, putting 5+ edits into one channel in a second. */
+  private def dispatchOnlineListUpdate(channel: TextChannel, messages: List[List[String]], guildId: String, guildName: String): Unit = {
     val channelId = channel.getId
-    val lastIndex = fields.size - 1
+    val lastIndex = messages.size - 1
 
-    def buildEmbed(field: String, last: Boolean): net.dv8tion.jda.api.entities.MessageEmbed = {
-      val embed = new EmbedBuilder()
-      embed.setDescription(field)
-      embed.setColor(3092790)
-      if (last) {
-        embed.setFooter("Last updated")
-        embed.setTimestamp(OffsetDateTime.now())
+    def buildEmbeds(descriptions: List[String], last: Boolean): List[net.dv8tion.jda.api.entities.MessageEmbed] = {
+      val lastEmbed = descriptions.size - 1
+      descriptions.zipWithIndex.map { case (description, embedIndex) =>
+        val embed = new EmbedBuilder()
+        embed.setDescription(description)
+        embed.setColor(3092790)
+        // The stamp is the whole list's, so it goes on the final embed of the
+        // final message and nowhere else.
+        if (last && embedIndex == lastEmbed) {
+          embed.setFooter("Last updated")
+          embed.setTimestamp(OffsetDateTime.now())
+        }
+        embed.build()
       }
-      embed.build()
     }
     def failed(ex: Throwable): Unit = {
       // Whatever went wrong, our picture of the channel may no longer match
@@ -1594,30 +1747,57 @@ class TibiaBot(
       logger.error(s"Failed to update online list for Guild ID: '$guildId' Guild Name: '$guildName': ${ex.getMessage}")
     }
 
-    onlineListState.plan(channelId, fields).foreach {
-      case tracking.EditOnlineListMessage(index, messageId, field) =>
+    def enqueueSend(index: Int, descriptions: List[String]): Unit = {
+      worldMetrics.incrementEdits()
+      onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
+        try channel.sendMessageEmbeds(buildEmbeds(descriptions, index == lastIndex).asJava).setSuppressedNotifications(true)
+          .queue(
+            message => onlineListState.recordMessageId(channelId, index, message.getId),
+            // A send that never lands would otherwise leave its slot pending
+            // forever (see OnlineListState.plan), so this must invalidate.
+            (ex: Throwable) => failed(ex)
+          )
+        catch { case ex: Throwable => failed(ex) }
+      }
+    }
+
+    // Whether a repost is even open to this channel. Without MESSAGE_MANAGE the
+    // bulk delete degrades to one request per message on the tightest route
+    // Discord has, which is worse than the edits it set out to avoid.
+    val canDelete = channel.getGuild.getSelfMember.hasPermission(channel, Permission.MESSAGE_MANAGE)
+
+    onlineListState.plan(channelId, messages, onlineListSender.queueDepth, canDelete).foreach {
+      case tracking.EditOnlineListMessage(index, messageId, descriptions) =>
         worldMetrics.incrementEdits()
         onlineListSender.enqueue("editmessage", Some(s"$channelId:$index"), Some(channelId)) { () =>
-          try channel.editMessageEmbedsById(messageId, buildEmbed(field, index == lastIndex))
+          try channel.editMessageEmbedsById(messageId, buildEmbeds(descriptions, index == lastIndex).asJava)
             .queue(null, onlineListErrorHandler(channelId))
           catch { case ex: Throwable => failed(ex) }
         }
-      case tracking.SendOnlineListMessage(index, field) =>
-        worldMetrics.incrementEdits()
-        onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
-          try channel.sendMessageEmbeds(buildEmbed(field, index == lastIndex)).setSuppressedNotifications(true)
-            .queue(
-              message => onlineListState.recordMessageId(channelId, index, message.getId),
-              // A send that never lands would otherwise leave its slot pending
-              // forever (see OnlineListState.plan), so this must invalidate.
-              (ex: Throwable) => failed(ex)
-            )
-          catch { case ex: Throwable => failed(ex) }
-        }
+      case tracking.SendOnlineListMessage(index, descriptions) =>
+        enqueueSend(index, descriptions)
       case tracking.DeleteOnlineListMessages(messageIds) =>
         // Left over from a previously longer list.
         try channel.purgeMessagesById(messageIds.asJava)
         catch { case ex: Throwable => failed(ex) }
+      case tracking.RepostOnlineList(deleteIds, reposted) =>
+        logger.info(s"Reposting the online list in channel $channelId (${deleteIds.size} messages, " +
+          s"lane depth ${onlineListSender.queueDepth}) for Guild ID: '$guildId' Guild Name: '$guildName'")
+        // Anything still queued for this channel edits a message about to be
+        // deleted: it would spend the very edits this is avoiding and then fail
+        // on a message that is gone, dropping the cache with it.
+        onlineListSender.cancelGroup(channelId)
+        try {
+          val deletions: Array[CompletableFuture[_]] = channel.purgeMessagesById(deleteIds.asJava).asScala.toArray
+          // Posted only once the delete has landed. Posting over a list that is
+          // still there would leave the channel holding it twice, with the bot
+          // aware of only the new half until the next 6-hourly purge.
+          CompletableFuture.allOf(deletions: _*).whenComplete { (_: Void, ex: Throwable) =>
+            if (ex != null) failed(ex)
+            else reposted.zipWithIndex.foreach { case (descriptions, index) => enqueueSend(index, descriptions) }
+          }
+          ()
+        } catch { case ex: Throwable => failed(ex) }
     }
   }
 
@@ -1676,24 +1856,30 @@ class TibiaBot(
   /** Resolve, in one bounded parallel batch, the killer levels this death batch
    *  needs and does not already have.
    *
-   *  This used to happen lazily inside the embed builder as a blocking
-   *  `Await.result(..., 10.seconds)` per killer — and the embed builder runs
-   *  once per discord tracking the world, so a world tracked by five discords
-   *  made five separate blocking lookups for the same killer, serially, inside
-   *  the stream's mapAsync(1) stage. That stalled not just the deaths but the
-   *  next poll tick behind them.
+   *  This used to happen lazily in the embed builder as a blocking
+   *  `Await.result(..., 10.seconds)` per killer — and that builder runs once per
+   *  discord tracking the world, so five discords made five serial lookups for the
+   *  same killer inside the stream's mapAsync(1), stalling the next poll tick too.
+   *
+   *  Batching it fixed the duplication but kept one `Await`, which was worse than
+   *  it looked: the caller is a dispatcher thread, and it sat on that thread for
+   *  the whole batch while the batch's own fetches needed dispatcher threads to
+   *  read their responses — waiting on work that needed the resource being held.
+   *  With every world's stream on one ActorSystem, enough of them waiting at once
+   *  starved the pool that pekko-http subscribes response entities on, and world
+   *  polls began failing at `response-entity-subscription-timeout`. So the bound
+   *  is a timer raced against the batch now, and nothing blocks.
    *
    *  Names already in `onlineListTable` or freshly cached are skipped, so the
-   *  common case (every killer online on this world) fetches nothing and waits
-   *  for nothing. A single mass-PvP tick is capped: past the cap the remaining
-   *  killers simply render without a level, which is strictly better than
-   *  delaying the deaths themselves. */
-  private def prefetchKillerLevels(charDeaths: Set[CharDeath], now: ZonedDateTime): Unit = {
+   *  common case fetches nothing. A mass-PvP tick is capped; past the cap killers
+   *  render without a level, which beats delaying the deaths. */
+  private def prefetchKillerLevels(charDeaths: Set[CharDeath], now: ZonedDateTime): Future[Unit] = {
     killerLevelCache.prune(now)
     val wanted = killerNamesNeedingLevels(charDeaths).filter { name =>
       !onlineListTable.contains(name.toLowerCase) && killerLevelCache.needsLookup(name, now)
     }
-    if (wanted.nonEmpty) {
+    if (wanted.isEmpty) Future.unit
+    else {
       val batch = wanted.take(killerLevelBatchCap)
       if (wanted.size > batch.size)
         logger.debug(s"Death batch on world '$world' needs ${wanted.size} killer-level lookups; resolving ${batch.size} and showing the rest without a level")
@@ -1716,11 +1902,13 @@ class TibiaBot(
             }
         }
         .runWith(Sink.ignore)
-      try {
-        // One bounded wait for the whole batch, in place of the per-killer,
-        // per-discord serial waits this replaces.
-        Await.result(resolved, killerLevelBatchTimeout)
-      } catch {
+      // One bound for the whole batch, in place of the per-killer, per-discord
+      // serial waits this replaces — expressed as a timer raced against the
+      // batch rather than as a wait, so no thread is held while it runs.
+      val expiry = after(killerLevelBatchTimeout, system.scheduler)(
+        Future.failed(new TimeoutException(
+          s"killer-level batch did not finish within ${killerLevelBatchTimeout.toSeconds}s")))
+      Future.firstCompletedOf(Seq(resolved, expiry)).map(_ => ()).recover {
         case ex: Throwable =>
           // Cache a miss for whatever still hasn't answered. When the API is
           // merely slow or hung (rather than refusing quickly) the requests
@@ -1799,31 +1987,64 @@ class TibiaBot(
     )
   }
 
-  /** Renames a world's online-list category to reflect the live ally/enemy
-   *  counts (and the mass-log ⚡), throttled to at most once per 6-minute
-   *  window *actually spent renaming* — the window only advances when a
-   *  rename is genuinely dispatched, not on every check, so a channel whose
-   *  name is already correct doesn't burn its window and go stale later.
-   *  The name-change guard intentionally ignores the ⚡ suffix, matching the
-   *  original — so the category re-renames once after a mass-log toggle.
-   *  The actual send goes through the shared bot-wide background lane
-   *  (`outboundSender`), keyed by category id so a burst of many entities
-   *  coming due at once (many guilds sharing a world) drains at a safe
-   *  shared pace instead of firing all at once — and if this category
-   *  somehow gets re-queued before an earlier rename for it has sent, the
-   *  older one is superseded rather than both firing. */
+  /** How long a channel or category must wait between renames.
+   *
+   *  Discord limits a channel's *name or topic* to 2 changes per 10 minutes — far
+   *  tighter than the 10-per-15s every other field gets, and undocumented. Seven
+   *  minutes fits two in any ten-minute window with room for jitter; six fitted
+   *  exactly two and left none. Spent against the clock the rename *sent* on, not
+   *  the one it was queued on — see [[markRenameSent]]. */
+  private val RenameCooldownMinutes = 7L
+
+  /** Open this channel's rename cooldown when the rename is queued, and store it,
+   *  so a rename decided just before a restart still holds afterwards.
+   *
+   *  The stored time is the queued one, the earlier of the two, so a restart can
+   *  only restore a cooldown that opened too early. A rename queued and never sent
+   *  leaves a stale name for one window, which is the cheap failure. */
+  private def markRenameQueued(entityId: String, at: ZonedDateTime): Unit = {
+    markRenameSent(entityId, at)
+    BotApp.recordRenameCooldown(world, entityId, at)
+  }
+
+  /** Re-open the cooldown from the moment the rename actually left, since
+   *  Discord's bucket measures the spacing of requests it sees, not of our
+   *  decisions — and the shared lane can hold an item for a while.
+   *
+   *  In memory only: this runs on the lane's drain thread, and
+   *  [[markRenameQueued]]'s store is a blocking database write, which there would
+   *  let a slow database stall every other post the lane carries. */
+  private def markRenameSent(entityId: String, at: ZonedDateTime): Unit =
+    renameTimerLock.synchronized { onlineListCategoryTimer = onlineListCategoryTimer + (entityId -> at) }
+
+  /** When this channel or category was last renamed. A time long past for one
+   *  this process has never renamed and that carried no stored cooldown, so a
+   *  first rename is always due. */
+  private def lastRenamedAt(entityId: String): ZonedDateTime =
+    renameTimerLock.synchronized {
+      onlineListCategoryTimer.getOrElse(entityId, TibiaBot.NeverRenamed)
+    }
+
+  /** Rename a world's online-list category to the live ally/enemy counts (and the
+   *  mass-log ⚡), throttled to one rename per [[RenameCooldownMinutes]] *actually
+   *  spent renaming*: the window advances only on a real dispatch, so a channel
+   *  already correctly named doesn't burn its window and go stale later.
+   *
+   *  The name-change guard ignores the ⚡ suffix, so the category re-renames once
+   *  after a mass-log toggle. The send goes through `outboundSender` keyed by
+   *  category id, so many guilds sharing a world drain at a safe pace and a
+   *  re-queued rename supersedes the older one rather than both firing. */
   private def renameOnlineCategoryIfDue(guild: Guild, categoryId: String, world: String, alliesCount: Int, enemiesCount: Int, masslogIcon: String): Unit = {
     val category = guild.getCategoryById(categoryId)
     if (category != null) {
-      val lastRename = onlineListCategoryTimer.getOrElse(categoryId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-      if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
+      val lastRename = lastRenamedAt(categoryId)
+      if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(RenameCooldownMinutes))) {
         val baseName = presentation.OnlineListEmbeds.categoryName(world, alliesCount, enemiesCount)
         if (category.getName != baseName) {
-          val renamedAt = ZonedDateTime.now()
-          onlineListCategoryTimer = onlineListCategoryTimer + (categoryId -> renamedAt)
-          BotApp.recordRenameCooldown(world, categoryId, renamedAt)
+          markRenameQueued(categoryId, ZonedDateTime.now())
           outboundSender.enqueue("editchannel", Some(categoryId)) { () =>
             try {
+              markRenameSent(categoryId, ZonedDateTime.now())
               category.getManager.setName(s"$baseName$masslogIcon").queue(null, ignoreDeletedTarget)
             } catch {
               case ex: Throwable => logger.warn(s"Failed to rename the category channel for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}'", ex)
@@ -1835,22 +2056,21 @@ class TibiaBot(
   }
 
   /** Renames an online-list text channel to `targetName`, throttled to at most
-   *  once per 6-minute window *actually spent renaming* (tracked in
-   *  onlineListCategoryTimer, only advanced when a rename is genuinely
-   *  dispatched — see renameOnlineCategoryIfDue) and skipped when the name is
-   *  already correct. The actual send goes through the shared bot-wide
+   *  one rename per [[RenameCooldownMinutes]] *actually spent renaming*
+   *  (tracked in onlineListCategoryTimer, only advanced when a rename is
+   *  genuinely dispatched — see renameOnlineCategoryIfDue) and skipped when the
+   *  name is already correct. The actual send goes through the shared bot-wide
    *  background lane (`outboundSender`), keyed by channel id, same reasoning
    *  as above. Rename failures (e.g. missing Manage Channels) are logged,
    *  not fatal — `label` names the channel in the log line. */
   private def renameOnlineChannelIfDue(channel: TextChannel, targetName: String, label: String, guildId: String, guildName: String): Unit = {
-    val lastRename = onlineListCategoryTimer.getOrElse(channel.getId, ZonedDateTime.parse("2022-01-01T01:00:00Z"))
-    if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(6))) {
+    val lastRename = lastRenamedAt(channel.getId)
+    if (ZonedDateTime.now().isAfter(lastRename.plusMinutes(RenameCooldownMinutes))) {
       if (channel.getName != targetName) {
-        val renamedAt = ZonedDateTime.now()
-        onlineListCategoryTimer = onlineListCategoryTimer + (channel.getId -> renamedAt)
-        BotApp.recordRenameCooldown(world, channel.getId, renamedAt)
+        markRenameQueued(channel.getId, ZonedDateTime.now())
         outboundSender.enqueue("editchannel", Some(channel.getId)) { () =>
           try {
+            markRenameSent(channel.getId, ZonedDateTime.now())
             channel.getManager.setName(targetName).queue(null, ignoreDeletedTarget)
           } catch {
             case ex: Throwable => logger.warn(s"Failed to rename the $label for Guild ID: '$guildId' Guild Name: '$guildName'", ex)
@@ -1889,6 +2109,11 @@ class TibiaBot(
 }
 
 object TibiaBot {
+  /** Stands in for "this has never been renamed" in the rename cooldown map.
+   *  Any time far enough in the past that the first rename is always due; the
+   *  literal it replaces was repeated at both call sites. */
+  val NeverRenamed: ZonedDateTime = ZonedDateTime.parse("2022-01-01T01:00:00Z")
+
   /** How often a world re-polls. Named because two things depend on it and
    *  they must not drift apart: the stream's own tick, and the character age
    *  cache, which rounds each character's next fetch to the nearest poll and
@@ -1899,20 +2124,25 @@ object TibiaBot {
   /** A moment for the process to finish starting before any world polls. */
   private[tibiabot] val SettleDelay: FiniteDuration = 2.seconds
 
-  /** How long a world waits before its first poll: the settle delay, plus a
-   *  random offset spread across one whole interval.
+  /** How long a world waits before its first poll: the settle delay plus a random
+   *  offset across one whole interval.
    *
-   *  Every stream is built in the same startup loop and used to wait the same
-   *  two seconds, so every world polled on the same second and went on doing so
-   *  forever — tens of thousands of character requests leaving in one burst a
-   *  second or two wide, then near silence until the next minute. Averaged over
-   *  the minute that looks modest; arriving at somebody else's gateway it is a
-   *  spike, and a spike from one address is what load shedding is for.
+   *  Every stream is built in the same startup loop, so with a fixed delay every
+   *  world polled on the same second forever — tens of thousands of character
+   *  requests in one burst a second or two wide, then near silence. Averaged over
+   *  the minute that looks modest; at someone else's gateway it is a spike, and a
+   *  spike from one address is what load shedding is for.
    *
-   *  Offsetting the start spreads those bursts across the interval instead.
-   *  Each world still polls exactly once per interval, so nothing waits any
-   *  longer than it did — only the phase differs, and phase is the one property
-   *  of a poll schedule nothing downstream depends on. */
+   *  Offsetting spreads those bursts across the interval. Each world still polls
+   *  once per interval, so nothing waits longer — only the phase differs, and
+   *  nothing downstream depends on phase. */
+  /** The same spreading applied to a fleet-fetch poller — see
+   *  [[com.tibiabot.app.FetchOnlyWorldPoller]]. A primary can take on several
+   *  of these at once when a secondary joins, and starting them together would
+   *  put every one of those worlds' characters on the wire in the same second. */
+  def fleetFetchFirstDelay(jitterSeconds: Int => Int): FiniteDuration =
+    firstPollDelay(jitterSeconds)
+
   private[tibiabot] def firstPollDelay(jitterSeconds: Int => Int): FiniteDuration =
     SettleDelay + jitterSeconds(PollInterval.toSeconds.toInt).seconds
 }

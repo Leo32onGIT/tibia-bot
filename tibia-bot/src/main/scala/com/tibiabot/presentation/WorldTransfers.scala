@@ -44,20 +44,15 @@ object WorldTransfers {
     else Some(arrivedFrom)
   }
 
-  /** The record this character's arrival was announced under, matched on the name
-   *  they carry now or on any name they have carried before.
+  /** The record this character's arrival was announced under, matched on their
+   *  current name or any former one. A rename does not undo an announcement, but
+   *  the record is keyed by whatever they were called when it was written — so
+   *  looking only under the live name reads a renamed character as a stranger and
+   *  reposts their months-old transfer. Former names come off the sheet fresh each
+   *  poll, so this holds across a restart with nothing extra stored.
    *
-   *  A rename does not undo an announcement, but the record is keyed by whatever
-   *  the character was called when it was written. Looking only under the live
-   *  name reads a renamed character as a stranger and posts their months-old
-   *  transfer a second time, which is what a name change used to do here. Former
-   *  names come off the character sheet fresh on every poll, so this holds across
-   *  a restart with nothing extra stored.
-   *
-   *  A record under the live name wins over one under a former name — that is the
-   *  character as they are now — and among former names the most recently detected
-   *  wins, so a character renamed twice before this matching existed is judged by
-   *  their latest transfer rather than by whichever row happens to come first. */
+   *  A record under the live name wins over one under a former name, and among
+   *  former names the most recently detected wins. */
   def postedFor(records: List[WorldTransfer], charName: String, formerNames: List[String]): Option[WorldTransfer] = {
     val stale = staleKeys(records, charName, formerNames).map(_.toLowerCase).toSet
     records

@@ -2,23 +2,19 @@ package com.tibiabot.domain
 
 /** Reading a length of time out of whatever somebody typed.
  *
- *  Every door into the claim ceiling goes through here — the dashboard's own
- *  field, the Discord modal, and anything relayed between bots — so `2h` means
- *  the same thing in all of them. It lived as `text.toInt` in two places before,
- *  which meant the dashboard and Discord disagreed about `2h` (one refused it,
- *  the other never saw it) and neither could read `1h30`.
+ *  Every door into the claim ceiling goes through here — the dashboard field, the
+ *  Discord modal, anything relayed between bots — so `2h` means one thing in all
+ *  of them. As `text.toInt` in two places, the dashboard and Discord disagreed
+ *  about `2h` and neither could read `1h30`.
  *
  *  ==The bare number==
- *  A number on its own is hours at or below [[HoursCutoff]] and minutes above
- *  it. That is a guess, and it is the right one: nobody sets a ceiling of two
- *  minutes, and `2` is overwhelmingly two hours. The cutoff is 24 because that
- *  is also the longest ceiling allowed, so every value expressible in hours is
- *  on the hours side of it and every value above is unambiguous as minutes.
+ *  A number alone is hours at or below [[HoursCutoff]] and minutes above it. A
+ *  guess, and the right one: nobody sets a ceiling of two minutes. The cutoff is
+ *  24 because that is also the longest ceiling allowed, so everything expressible
+ *  in hours is below it and everything above is unambiguous as minutes.
  *
- *  The cost is that a bare `20` reads as twenty hours rather than twenty
- *  minutes. Anybody who wants the short one says `20m`, which is exactly why
- *  the suffixes are accepted.
- */
+ *  The cost is that a bare `20` reads as twenty hours. Anybody wanting the short
+ *  one says `20m`, which is why the suffixes are accepted. */
 object ClaimDuration {
 
   /** At or below this, a bare number is read as hours. */

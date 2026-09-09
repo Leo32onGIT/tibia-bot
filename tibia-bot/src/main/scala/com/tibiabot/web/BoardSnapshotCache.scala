@@ -5,30 +5,22 @@ import com.tibiabot.respawn.RespawnBoardEntry
 import java.time.{Duration, Instant}
 import java.util.concurrent.ConcurrentHashMap
 
-/** The board of a guild, held for a few seconds and shared by everyone reading
- *  it.
+/** The board of a guild, held for a few seconds and shared by every reader.
  *
- *  A board is the same for every member of a guild — which spawn is taken, by
- *  whom, until when. Only the trimmings differ per reader, and those are worked
- *  out from the same rows. Yet every open tab polls every ten seconds and each
- *  poll went to the database for its own copy, so a guild with ten people
- *  watching paid for the whole board sixty times a minute to answer sixty
- *  identical questions.
+ *  A board is the same for every member — which spawn is taken, by whom, until
+ *  when — and only the trimmings differ, worked out from the same rows. Yet every
+ *  open tab polled every ten seconds for its own copy, so ten people watching paid
+ *  for the whole board sixty times a minute to answer sixty identical questions.
  *
- *  Held in this process rather than in Redis, deliberately. The database is on
- *  the same host and the rows are small; a Redis round trip is not obviously
- *  cheaper than the reads it would replace, and it would buy the one thing not
- *  wanted here — an answer outliving a restart. A cold process reads the board
- *  once and is warm.
+ *  In this process rather than Redis, deliberately: the database is on the same
+ *  host and the rows are small, so a round trip is not obviously cheaper, and it
+ *  would buy the one thing not wanted — an answer outliving a restart.
  *
  *  ==Staleness==
- *  Bounded by the shorter of two things: this TTL, and a write going through
- *  the dashboard, which clears the guild's entry so whoever made it sees their
- *  own change at once. What is left is a change made somewhere this cannot see
- *  — a Claim button pressed in Discord, or another bot's sweep — which shows up
- *  within the TTL. That is well inside the poll it is answering, so nobody sees
- *  a board older than they would have anyway.
- */
+ *  Bounded by the shorter of this TTL and a dashboard write, which clears the
+ *  guild's entry so whoever made it sees their own change at once. What is left is
+ *  a change made where this cannot see — a Claim pressed in Discord, another bot's
+ *  sweep — which shows up within the TTL, well inside the poll it answers. */
 final class BoardSnapshotCache(
   read: String => List[RespawnBoardEntry],
   ttl: Duration = BoardSnapshotCache.DefaultTtl,

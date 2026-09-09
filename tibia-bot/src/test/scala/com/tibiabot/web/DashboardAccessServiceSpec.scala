@@ -99,8 +99,8 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     ))
   }
 
-  /** A gateway whose every lookup takes real time, so serial and concurrent
-   *  resolution can be told apart by the clock. */
+  /** A gateway whose every lookup takes real time, so a test can hold work in
+   *  flight or make one guild slower than another. */
   private class SlowGateway(botGuilds: List[(String, String)], perLookup: Long)
       extends FakeGateway(botGuilds, botGuilds.map { case (id, _) => (id, "u1") -> member() }.toMap) {
     override def memberAccess(guildId: String, userId: String,
@@ -110,15 +110,48 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     }
   }
 
-  private def slowService(guilds: List[(String, String)], perLookup: Long,
-                          on: scala.concurrent.ExecutionContext) = {
-    val gateway = new SlowGateway(guilds, perLookup)
-    (gateway, new DashboardAccessService(
+  /** A gateway that lets no lookup finish until every one of them has started:
+   *  each arrival waits for the rest before answering.
+   *
+   *  This is what makes the fan-out provable without a stopwatch. Resolved one
+   *  at a time, the first lookup waits for guilds that will not be asked about
+   *  until it returns — so nobody joins it, and [[resolvedAlone]] records that
+   *  rather than the suite hanging on it. Concurrently, all three meet as soon
+   *  as the pool schedules them and the wait is never approached, however busy
+   *  the machine.
+   */
+  private class RendezvousGateway(botGuilds: List[(String, String)], waitFor: java.time.Duration)
+      extends FakeGateway(botGuilds, botGuilds.map { case (id, _) => (id, "u1") -> member() }.toMap) {
+    private val allStarted = new java.util.concurrent.CountDownLatch(botGuilds.size)
+    /** Whether any lookup gave up waiting for the others to join it, which is
+     *  what a serialised fan-out looks like from inside one. */
+    @volatile var resolvedAlone = false
+    override def memberAccess(guildId: String, userId: String,
+                              channelIds: List[String]): Option[MemberAccess] = {
+      allStarted.countDown()
+      // Once one lookup has waited alone the answer is settled, so the rest go
+      // straight through: a failing test costs one wait rather than one each.
+      if (!resolvedAlone &&
+          !allStarted.await(waitFor.toMillis, java.util.concurrent.TimeUnit.MILLISECONDS))
+        resolvedAlone = true
+      super.memberAccess(guildId, userId, channelIds)
+    }
+  }
+
+  /** The service under test over a gateway of the caller's choosing, fanning
+   *  its lookups out onto `on`. */
+  private def serviceOver(gateway: FakeGateway, on: scala.concurrent.ExecutionContext) =
+    new DashboardAccessService(
       gateway,
       respawnForumExists = _ => true,
       worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
       moderatorRoleOf = _ => "0",
-      lookupOn = on))
+      lookupOn = on)
+
+  private def slowService(guilds: List[(String, String)], perLookup: Long,
+                          on: scala.concurrent.ExecutionContext) = {
+    val gateway = new SlowGateway(guilds, perLookup)
+    (gateway, serviceOver(gateway, on))
   }
 
   "localAccessFor" should {
@@ -127,22 +160,30 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     // bears on any other's, so somebody in three of them should wait for the
     // slowest rather than for the sum. This is what decides how many visitors
     // one small refresh pool can keep up with.
+    //
+    // Asserted by having the lookups meet each other rather than by timing
+    // them. A stopwatch measures the machine as much as the code: a bound wide
+    // enough to survive a loaded one sits barely under the serial time it is
+    // meant to rule out, so it fails on a busy suite while a real regression
+    // squeaks past it.
     "ask about a visitor's guilds at the same time, not one after another" in {
       val pool = scala.concurrent.ExecutionContext.fromExecutorService(
         java.util.concurrent.Executors.newFixedThreadPool(4))
       try {
-        val (gateway, svc) = slowService(
-          List("g1" -> "One", "g2" -> "Two", "g3" -> "Three"), perLookup = 200, on = pool)
-        val started = System.nanoTime()
-        val granted = svc.accessFor("u1", Set("g1", "g2", "g3"))
-        val took = (System.nanoTime() - started) / 1000000L
+        // Only ever waited out by a test that has already failed, so it can be
+        // as generous as it likes; well under the service's own lookup
+        // backstop, which would otherwise be what reported the failure.
+        val gateway = new RendezvousGateway(
+          List("g1" -> "One", "g2" -> "Two", "g3" -> "Three"),
+          waitFor = java.time.Duration.ofSeconds(5))
+        val granted = serviceOver(gateway, pool).accessFor("u1", Set("g1", "g2", "g3"))
 
+        withClue("a lookup waited for the others and none arrived, so the " +
+                 "guilds were resolved one at a time: ") {
+          gateway.resolvedAlone shouldBe false
+        }
         granted.map(_.guildId).sorted shouldBe List("g1", "g2", "g3")
         gateway.lookups should contain theSameElementsAs List("g1", "g2", "g3")
-        // Serially this is 600ms and cannot be less; concurrently it is one
-        // lookup plus overhead. Halfway between is a wide enough gate to be
-        // stable on a loaded machine and still fail if the fan-out is lost.
-        took should be < 450L
       } finally pool.shutdown()
     }
 
@@ -174,7 +215,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     }
 
     // A wedged Discord call has no timeout of its own, so before the backstop
-    // it held the request until akka gave up. Reported as unreachable rather
+    // it held the request until pekko gave up. Reported as unreachable rather
     // than as a visitor with fewer servers than they have.
     "report guilds as unanswered rather than hanging on a lookup that never returns" in {
       val pool = scala.concurrent.ExecutionContext.fromExecutorService(
@@ -207,7 +248,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
         worldsOf = _ => List(WorldChannel("Antica", AnticaCategory)),
         moderatorRoleOf = _ => "0",
         remote = Some(new RemoteGuildAccess(
-          com.tibiabot.persistence.NoopRedisCache, akka.actor.ActorSystem(
+          com.tibiabot.persistence.NoopRedisCache, org.apache.pekko.actor.ActorSystem(
             "access-in-spec", com.typesafe.config.ConfigFactory.defaultReference()).scheduler,
           isLocal = _ => { asked = true; false })(scala.concurrent.ExecutionContext.global)))
 
@@ -256,7 +297,7 @@ class DashboardAccessServiceSpec extends AnyWordSpec with Matchers {
     // considered, so a visitor whose cache had aged out still saw their board.
     // Each candidate costs a blocking member lookup, though, and after a restart
     // every visitor's list is empty at once — which took GET /dashboard past
-    // akka's request timeout in production. The narrowing is what makes this
+    // pekko's request timeout in production. The narrowing is what makes this
     // affordable, so an empty list resolves to no access and the cache going
     // empty is fixed where it happens instead.
     "skip every guild when the visitor's list is missing" in {

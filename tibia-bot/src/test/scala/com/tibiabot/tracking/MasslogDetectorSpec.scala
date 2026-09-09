@@ -34,4 +34,25 @@ class MasslogDetectorSpec extends AnyFunSuite with Matchers {
     MasslogDetector.isMasslog(zapCount = 4, enemyCount = 5) shouldBe true
     MasslogDetector.isMasslog(zapCount = 3, enemyCount = 5) shouldBe false
   }
+
+  test("a floor applied to the enemy count alone would make this fire more, not less") {
+    // Why TibiaBot.onlineList filters the zap count on the same level floor as
+    // the enemies list itself (`/filter online`).
+    //
+    // Twenty-five enemies online, twenty of them level-8 throwaways that have
+    // just logged in. Unfiltered that is well short of a mass log.
+    MasslogDetector.isMasslog(zapCount = 20, enemyCount = 25) shouldBe true
+
+    // Hide the throwaways from the list and the denominator falls to 5, which
+    // *raises* the required fraction from 32% to 60%. Keeping them in the
+    // numerator would then clear a requirement they no longer belong to — a
+    // filter meant to quieten the list would have made the alert louder.
+    MasslogDetector.requiredZapCount(25) shouldBe 10
+    MasslogDetector.requiredZapCount(5) shouldBe 4
+    MasslogDetector.isMasslog(zapCount = 20, enemyCount = 5) shouldBe true
+
+    // Filtered on both sides, the five real enemies are judged on their own and
+    // none of them logged in recently.
+    MasslogDetector.isMasslog(zapCount = 0, enemyCount = 5) shouldBe false
+  }
 }

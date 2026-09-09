@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Violent Bot - Dashboard</title>
+<title>Violent Bot - Status</title>
 <link rel="icon" type="image/png" href="/status/images/avatar.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>
@@ -619,6 +619,7 @@ function renderDetail(worlds) {
     <div class="detail-stat"><i class="ti ti-arrow-big-up-lines" style="color:var(--good)" aria-hidden="true"></i><div><div class="num">${world.levels15m}</div><div class="num-label">Levels (15m)</div></div></div>
     <div class="detail-stat"><i class="ti ti-edit" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${world.edits15m}</div><div class="num-label">Edits (15m)</div></div></div>
     <div class="detail-stat" title="Average gap between a death happening and this bot first seeing it, over ${world.deathDetections15m || 0} deaths. Includes delays upstream of the bot (Tibia publishing the death, TibiaData scraping it, its cache holding the sheet), so read it for changes rather than as an absolute.${world.deathLagMax15m ? ` Worst in this window: ${fmtLag(world.deathLagMax15m)}.` : ''}"><i class="ti ti-hourglass-low" style="color:var(--bad)" aria-hidden="true"></i><div><div class="num">${world.deathDetections15m ? fmtLag(world.deathLagAvg15m) : '—'}</div><div class="num-label">Death lag (15m)</div></div></div>
+    <div class="detail-stat" title="The same measurement, over just the ${world.fansiteDeathDetections15m || 0} deaths of characters holding a fansite budget slot. Read it against the figure to its left: if the second source is buying anything, this one is lower. Equal or absent means the budget is not earning its place."><i class="ti ti-hourglass-high" style="color:var(--accent)" aria-hidden="true"></i><div><div class="num">${world.fansiteDeathDetections15m ? fmtLag(world.fansiteDeathLagAvg15m) : '—'}</div><div class="num-label">Death lag (watched)</div></div></div>
     <div class="detail-stat"><i class="ti ti-clock" style="color:var(--muted)" aria-hidden="true"></i><div><div class="num">${timeAgo(world.lastPollAt)}</div><div class="num-label">Last poll</div></div></div>
   `;
 
@@ -726,9 +727,16 @@ function sparklineSvg(history, color) {
 // same approach as expandedSupporters on the Patreon panel.
 const expandedApiRows = new Set();
 
+// The two TibiaData rows are the same software behind two hosts, and the row
+// that was simply "TibiaData" is now only half the story — so both carry the
+// qualifier rather than leaving the familiar one to be read as the whole.
+// `roll` is the same label for the multi-bot summary, where five columns of
+// full names would not fit.
 const API_SOURCES = [
-  { key: 'discord', label: 'Discord', icon: 'ti-brand-discord', color: '#a78bfa' },
-  { key: 'tibiadata', label: 'TibiaData', icon: 'ti-api', color: '#5b8cff' }
+  { key: 'discord', label: 'Discord', roll: 'Discord', icon: 'ti-brand-discord', color: '#a78bfa' },
+  { key: 'tibiadata', label: 'TibiaData · public', roll: 'TD public', icon: 'ti-api', color: '#5b8cff' },
+  { key: 'tibiadataLocal', label: 'TibiaData · local', roll: 'TD local', icon: 'ti-server', color: '#22d3ee' },
+  { key: 'fansiteapi', label: 'Fansite API', roll: 'Fansite', icon: 'ti-api', color: '#3fb98f' }
 ];
 
 // One breakdown table. `share` is normally computed within the group, which is
@@ -795,20 +803,22 @@ function renderLaneGroup(lanes) {
   </div>`;
 }
 
-// Cache-age buckets read as a lifecycle, not a leaderboard: the request that
-// refilled the upstream entry, then that entry ageing out bucket by bucket,
-// then the responses that never had an age to report. Sorting these by size
-// (the default for detail groups) would scramble a histogram, so they keep
-// this order instead. Anything unrecognised sorts to the end rather than
-// silently vanishing.
-const CACHE_AGE_ORDER = ['fresh', '0-59s', '60-119s', '120-179s', '180-239s', '240-299s', '300-359s', '360s+', 'error'];
+// Cache-age buckets read as a lifecycle, not a leaderboard: a character sheet
+// ageing out bucket by bucket, then the sheets that could not say how old they
+// were. Sorting these by size (the default for detail groups) would scramble a
+// histogram, so they keep this order instead. Anything unrecognised sorts to
+// the end rather than silently vanishing.
+const CACHE_AGE_ORDER = ['0-59s', '60-119s', '120-179s', '180-239s', '240-299s', '300-359s', '360s+', 'unknown'];
 
-// 'fresh' is the only bucket that actually learned something new, so it reads
-// as the good one; 'error' is a wasted call. The ageing buckets are deliberately
-// uncoloured — a high age is not a fault, it is just what a cache does.
+// The whole point of the breakdown is the tail. A copy can legitimately be
+// observed at any age up to the upstream TTL, so the buckets below it are just
+// what a cache does and stay uncoloured — but a sheet handed to us at 300s+ is
+// older than character-cache.ttl assumes it can be, which means the bot is
+// reusing sheets past the point the copy behind them turned over. Those rows
+// warn. 'unknown' warns too: it is a sheet that arrived with no origin
+// timestamp, so it is not evidence of anything either way.
 function cacheAgeColor(name) {
-  if (name === 'fresh') return 'var(--good)';
-  if (name === 'error') return 'var(--warn)';
+  if (name === '300-359s' || name === '360s+' || name === 'unknown') return 'var(--warn)';
   return null;
 }
 
@@ -819,7 +829,34 @@ function cacheAgeRows(throughput) {
     .map(r => ({ ...r, color: cacheAgeColor(r.name) }));
 }
 
-function renderApiDetail(sourceKey, throughput, lanes) {
+// The second character source's own health. None of it is in the throughput
+// numbers above, which count only requests that actually left: on a rationed
+// lane the interesting figure is what it decided not to send, and a refusal
+// there is invisible by design — it becomes a Left that TibiaData quietly
+// covers, so the bot looks healthy while half the design contributes nothing.
+function renderFansiteGroup(fansite) {
+  if (!fansite) return '';
+  const r = fansite.roster || {};
+  const until = fansite.circuitOpenUntil;
+  const minsLeft = until ? Math.max(0, Math.round((new Date(until) - Date.now()) / 60000)) : 0;
+  let state = ['sending', 'var(--good)', 'Requests are flowing to the fansite API.'];
+  if (!fansite.enabled) state = ['off', 'var(--muted)', 'FANSITE_API_MODE is off, or no token is configured.'];
+  else if (until) state = [`blocked ${minsLeft}m`, 'var(--bad)', 'The edge returned 403 or 429, so every request is suppressed until this clears. TibiaData is covering character fetches meanwhile.'];
+  const cutoff = r.saturated ? `level ${r.cutoffLevel}` : 'none';
+  const cutoffTitle = r.saturated
+    ? `More hunted characters are online than the budget covers, so everyone below level ${r.cutoffLevel} is served by TibiaData alone.`
+    : 'Every hunted character online fits in the budget, so nothing is being dropped and the level ranking is inert.';
+  const stats = `<div class="detail-stats">
+    <div class="detail-stat" title="${state[2]}"><i class="ti ti-plug-connected" style="color:${state[1]}" aria-hidden="true"></i><div><div class="num">${state[0]}</div><div class="num-label">Second source</div></div></div>
+    <div class="detail-stat" title="Hunted characters holding a fansite slot, against how many were offered across every world. Equal means nothing is being dropped."><i class="ti ti-users" style="color:var(--accent)" aria-hidden="true"></i><div><div class="num">${fmtCount(r.admitted || 0)} / ${fmtCount(r.offered || 0)}</div><div class="num-label">Budget used</div></div></div>
+    <div class="detail-stat" title="${cutoffTitle}"><i class="ti ti-arrow-bar-down" style="color:var(--warn)" aria-hidden="true"></i><div><div class="num">${cutoff}</div><div class="num-label">Level cutoff</div></div></div>
+  </div>`;
+  return `<div class="detail-group"><div class="detail-group-title">Second source <span class="note">selection and state</span></div>${stats}</div>`
+    + renderDetailGroup('Refused', 'decided against, never sent', 'Reason',
+        dimensionRows(fansite.refused || {}, 'reason'), 'var(--warn)');
+}
+
+function renderApiDetail(sourceKey, throughput, lanes, fansite, color) {
   if (sourceKey === 'discord') {
     // Catch-all dropped from the view (see DiscordApiRoute.Other): it is
     // gateway/user GETs, reaction PUTs and channel creation, all a rounding
@@ -829,13 +866,46 @@ function renderApiDetail(sourceKey, throughput, lanes) {
     return renderLaneGroup(lanes)
       + renderDetailGroup('By operation', '', 'Call', operations, '#a78bfa', throughput.total)
       + renderDetailGroup('By response', '', 'Status',
-          dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#a78bfa');
+          dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#a78bfa')
+      + renderRateLimitedGroup(throughput, operations);
   }
-  return renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), '#5b8cff')
+  const secondSource = sourceKey === 'fansiteapi' ? renderFansiteGroup(fansite) : '';
+  // Drawn in the source's own colour rather than a hardcoded blue: three
+  // sources share this branch now, and identical bars under differently
+  // coloured headline rows read as one merged figure.
+  return secondSource
+    + renderDetailGroup('By endpoint', '', 'Endpoint', dimensionRows(throughput, 'endpoint'), color)
     + renderDetailGroup('By response', '', 'Status',
-        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), '#5b8cff')
-    + renderDetailGroup('By cache age', 'how old the upstream copy was', 'Age',
-        cacheAgeRows(throughput), '#5b8cff', throughput.total, true);
+        dimensionRows(throughput, 'status').map(r => ({ ...r, color: statusColor(r.name) })), color)
+    // Shared within the group rather than against the call total: this dimension
+    // counts character sheets parsed, not requests sent, so a share of all
+    // traffic would silently fold in every other endpoint and every error and
+    // stop reading as a distribution. Empty groups render as nothing, so the
+    // sources that never parse a character sheet simply do not show this.
+    + renderDetailGroup('By cache age', 'how old the sheet was when we got it', 'Age',
+        cacheAgeRows(throughput), color, undefined, true);
+}
+
+// Which call Discord actually throttled. The two groups above cannot answer
+// this between them — each sums to the whole call total on its own, so a 10%
+// 429 share sitting under a 73% PATCH-message share says nothing about whose
+// 429s those were. Every route here sits in a different Discord bucket, so the
+// operation that is hitting its ceiling is the one whose pacing has to change.
+//
+// Shared against the call total, like the operation group, so a row reads as a
+// fraction of all Discord traffic and lines up with the operation row above it.
+// The note carries the number that actually decides anything: how often THIS
+// call is throttled, which a share of the total cannot show — a busy operation
+// and a rare one can post the same share at wildly different failure rates.
+function renderRateLimitedGroup(throughput, operations) {
+  const attempts = new Map(operations.map(r => [r.name, r.total]));
+  const rows = dimensionRows(throughput, 'ratelimited')
+    .filter(r => r.total > 0)
+    .map(r => {
+      const of = attempts.get(r.name);
+      return { ...r, color: 'var(--bad)', note: of ? `${(r.total / of * 100).toFixed(1)}% of its calls` : '' };
+    });
+  return renderDetailGroup('Rate limited', '429s by call', 'Call', rows, 'var(--bad)', throughput.total);
 }
 
 function renderApiSourceRow(bot, source, throughput, lanes) {
@@ -872,7 +942,7 @@ function renderApiSourceRow(bot, source, throughput, lanes) {
 
   const detail = document.createElement('div');
   detail.className = 'api-detail';
-  detail.innerHTML = renderApiDetail(source.key, throughput, lanes);
+  detail.innerHTML = renderApiDetail(source.key, throughput, lanes, bot.fansite, source.color);
   row.appendChild(detail);
   return row;
 }
@@ -960,8 +1030,7 @@ function renderApiThroughput(bots) {
         <span class="bot-meta" title="${bot.bot.userId} &middot; ${fmtCount(bot.population)} tracked players">&middot; ${bot.worldCount} worlds &middot; ${bot.discordCount} discords &middot; ${timeAgo(bot.publishedAt)}</span>
       </div>
       <div class="bot-roll">
-        <div class="r"><div class="v">${rollFor('discord')}</div><div class="k">Discord</div></div>
-        <div class="r"><div class="v">${rollFor('tibiadata')}</div><div class="k">TibiaData</div></div>
+        ${API_SOURCES.map(s => `<div class="r"><div class="v">${rollFor(s.key)}</div><div class="k">${s.roll}</div></div>`).join('')}
         <div class="r"><div class="v">${combinedTotal}</div><div class="k">Total</div></div>
       </div>
       <i class="ti ti-chevron-down bot-chevron" aria-hidden="true"></i>

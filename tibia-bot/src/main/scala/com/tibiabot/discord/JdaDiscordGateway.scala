@@ -29,18 +29,16 @@ final class JdaDiscordGateway(jda: JDA) extends DiscordGateway with com.typesafe
 
   /** The lookup, with a refusal told apart from a failure to ask.
    *
-   *  Both used to come back as `None`. JDA throws `ErrorResponseException` for
-   *  a member who is not in the guild — a settled answer — and throws for a
-   *  rate limit, a gateway error or a timeout as well, which are not answers at
-   *  all. Reading the second as the first dropped guilds out of a visitor's
-   *  picker at random; see [[MemberLookup]].
+   *  Both used to come back as `None`. JDA throws `ErrorResponseException` for a
+   *  member who is not in the guild — a settled answer — and equally for a rate
+   *  limit, gateway error or timeout, which are not answers at all. Reading the
+   *  second as the first dropped guilds out of a picker at random; see
+   *  [[MemberLookup]].
    *
-   *  The one error code that means "there is no such member" is the whole of
-   *  the distinction. Anything else is taken as unreachable, deliberately: an
-   *  unrecognised failure is far more likely to be transient than to be a
-   *  quiet, permanent no, and being wrong that way costs a retry rather than a
-   *  guild.
-   */
+   *  The one error code meaning "no such member" is the whole distinction.
+   *  Anything else is taken as unreachable, deliberately: an unrecognised failure
+   *  is far likelier transient than a quiet permanent no, and being wrong that way
+   *  costs a retry rather than a guild. */
   override def memberLookup(guildId: String, userId: String,
                             channelIds: List[String]): MemberLookup = {
     val guild = guildById(guildId)

@@ -2,29 +2,24 @@ package com.tibiabot.tracking
 
 import scala.collection.mutable
 
-/** Turns "who is on the online list" into "who just logged in", for the handful
- *  of characters somebody has put a bounty on.
+/** Turns "who is on the online list" into "who just logged in", for the characters
+ *  somebody has put a bounty on.
  *
- *  A DM has to go out once per login, not once per sweep — so a plain "is this
- *  name online?" test is not enough, and neither is the online list's own
- *  `duration`: it is a wall-clock age, so a character who stays on for an hour
- *  keeps looking recent. This holds the previous observation of each target and
- *  reports the transitions.
+ *  A DM goes out once per login, not once per sweep, so "is this name online?" is
+ *  not enough — and neither is the list's own `duration`, a wall-clock age that
+ *  keeps looking recent for an hour. This holds the previous observation of each
+ *  target and reports the transitions.
  *
- *  A target seen for the very first time is only recorded, never reported. That
- *  covers both cold starts — every tracked character looks like an arrival after
- *  a restart — and someone adding a bounty on a character already online, where
- *  "has logged in" would simply be untrue.
+ *  A target seen for the first time is recorded, never reported: that covers both
+ *  a cold start, where everything looks like an arrival, and a bounty added on
+ *  somebody already online.
  *
- *  A relog is caught by the duration going *backwards*: presence is rebuilt from
- *  the world poll, and a character who drops off and returns starts counting
- *  from zero again. That matters because the gap can easily be shorter than a
- *  sweep, so the absence itself is never observed.
+ *  A relog is caught by the duration going *backwards*, since presence is rebuilt
+ *  from the world poll and a returning character counts from zero. That matters
+ *  because the gap is often shorter than a sweep, so the absence is never seen.
  *
- *  One instance per world (the roster it reads is a world's), keyed by lowercase
- *  name. Not thread-safe: the online-list sweep is single-threaded by
- *  construction and is the only caller.
- */
+ *  One instance per world, keyed by lowercase name. Not thread-safe: the
+ *  online-list sweep is single-threaded and the only caller. */
 final class BountyPresence {
 
   /** Last observation per target: `Some(duration)` online, `None` offline.

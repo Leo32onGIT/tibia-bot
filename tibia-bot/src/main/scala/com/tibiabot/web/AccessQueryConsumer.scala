@@ -7,27 +7,20 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-/** Answers another bot's question about who somebody is in a guild this one is
- *  in — see [[AccessQuery]] for why that question has to be asked at all.
+/** Answers another bot's question about who somebody is in a guild this one is in
+ *  — see [[AccessQuery]] for why the question has to be asked at all. Every bot
+ *  runs one, and a question names its guild, so each process answers only for
+ *  guilds it can see.
  *
- *  Every bot runs one. A question names its guild, so each process answers only
- *  for guilds it can actually see and the rest are left alone.
- *
- *  Unlike the write consumer this takes no lease and keeps no record of what it
- *  has handled. Answering twice is harmless — the reply is the same each time,
- *  and it describes rather than performs — so the machinery that makes a write
- *  at-most-once would be cost for nothing here.
+ *  Unlike the write consumer this takes no lease and records nothing: answering
+ *  twice is harmless, since the reply describes rather than performs.
  *
  *  ==Two ways in==
- *  Questions arrive either on this bot's own channel ([[listen]]) or, from a
- *  bot too old to publish, as a key found by [[sweep]]. The channel is the one
- *  that matters: it costs nothing until somebody asks, and it arrives the
- *  instant it is sent. The sweep is the compatibility path and is on its way
- *  out — see [[AccessQueryConsumer.SweepEvery]].
- *
- *  Either way the answer goes back where the question says to send it, so how
- *  it arrived and how it is answered are decided separately.
- */
+ *  Questions arrive on this bot's own channel ([[listen]]) or, from a bot too old
+ *  to publish, as a key found by [[sweep]]. The channel is the one that matters —
+ *  free until somebody asks, and instant. The sweep is a compatibility path on its
+ *  way out (see [[AccessQueryConsumer.SweepEvery]]). Either way the answer goes
+ *  where the question says, so arrival and reply are decided separately. */
 final class AccessQueryConsumer(
   cache: RedisCache,
   /** Resolves a visitor in one guild, exactly as the dashboard would for a
@@ -41,14 +34,10 @@ final class AccessQueryConsumer(
   selfBotId: String = ""
 )(implicit ec: ExecutionContext) extends StrictLogging {
 
-  /** Start listening for questions addressed to this bot.
-   *
-   *  Answers whether it worked, because the roster this bot publishes has to
-   *  say whether it is listening and that claim must be true: a bot advertising
-   *  a channel it never subscribed to would have every other bot publishing
-   *  into silence and waiting out a deadline to find out — strictly worse than
-   *  the sweep it replaced.
-   */
+  /** Start listening for questions addressed to this bot. Answers whether it
+   *  worked, because the roster has to say whether this bot is listening and that
+   *  claim must be true — advertising a channel it never subscribed to would leave
+   *  every other bot publishing into silence until a deadline expired. */
   def listen(): Future[Boolean] =
     if (selfBotId.isEmpty) Future.successful(false)
     else cache.subscribe(AccessQuery.questionChannel(selfBotId)) { raw =>
@@ -148,27 +137,22 @@ object AccessQueryConsumer {
 
   /** How often the compatibility sweep runs.
    *
-   *  Was a quarter of a second, and had to be: a question sitting in a key was
-   *  invisible until the next sweep, so the beat was part of the asker's
-   *  deadline. A published question is delivered the moment it is sent, so
-   *  nothing waits on this any more and the only thing it still serves is a bot
-   *  in the fleet old enough to be writing keys.
+   *  Was a quarter of a second, and had to be while a question sitting in a key
+   *  was invisible until the next sweep. A published question arrives the instant
+   *  it is sent, so this now serves only a bot old enough to write keys.
    *
-   *  Which makes the cost worth cutting. Each beat is a Redis `KEYS` — a walk
-   *  of the *entire* keyspace, which on this deployment is dominated by a key
-   *  per character name, while the single-threaded server does nothing else —
-   *  and every bot in the fleet was running four of them a second.
+   *  Worth cutting, because each beat is a Redis `KEYS` — a walk of the *entire*
+   *  keyspace, dominated here by a key per character name, while the
+   *  single-threaded server does nothing else — and every bot ran four a second.
    *
-   *  Not cut as far as it will go, though, because this beat is still inside an
-   *  old asker's deadline and that is the one thing it must not break. A key
-   *  written the instant after a sweep is not seen until the next one, and the
-   *  blocking Discord lookup that follows is worth a few hundred milliseconds
-   *  more; against a three-second deadline, a two-second beat left about half a
-   *  second of margin and one slow lookup ate it. A second leaves three times
-   *  that and still takes three quarters of the `KEYS` away.
+   *  Not cut as far as it will go, since this beat is still inside an old asker's
+   *  deadline. A key written just after a sweep waits for the next, and the
+   *  blocking Discord lookup adds a few hundred milliseconds more; against three
+   *  seconds, a two-second beat left half a second of margin that one slow lookup
+   *  ate. A second leaves three times that and still removes three quarters of the
+   *  `KEYS`.
    *
-   *  Once no roster advertises anything but `pubSub`, nothing writes a key at
-   *  all and this whole path can go — which is where the rest of the saving is.
-   */
+   *  Once no roster advertises anything but `pubSub`, nothing writes a key and this
+   *  whole path can go. */
   val SweepEvery: FiniteDuration = 1.second
 }

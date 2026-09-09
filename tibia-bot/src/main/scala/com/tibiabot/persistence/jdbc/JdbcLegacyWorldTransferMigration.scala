@@ -6,26 +6,21 @@ import com.typesafe.scalalogging.StrictLogging
 /** One-shot carry-forward of the old per-guild `world_transfers` tables into the
  *  world-scoped one in `bot_cache`.
  *
- *  Announced transfers used to be filed per guild, which is why a discord adding
- *  a world it had never tracked found an empty table and announced every
- *  former-world flag Tibia still had set. Moving the record to world scope fixes
- *  that, but leaves every existing guild's history stranded: without carrying it
- *  over, the first sweep after the deploy would replay that same backlog for
- *  every world at once — the very burst the move exists to stop.
+ *  Filing announcements per guild is why a discord adding an untracked world found
+ *  an empty table and announced every former-world flag Tibia still had set. Moving
+ *  to world scope fixes that but strands existing history, so without this the
+ *  first sweep after the deploy would replay that backlog for every world at once
+ *  — the burst the move exists to stop.
  *
- *  Only guilds configured with exactly one world are carried over, because the
- *  old table has no world column: for a single-world guild every row can only
- *  have come from that world, so the attribution is exact rather than guessed. A
- *  guild tracking several is skipped and takes one burst per world, which is the
- *  honest outcome — filing its rows under all of its worlds would suppress real
- *  arrivals on the ones the character never came to.
+ *  Only single-world guilds are carried over, because the old table has no world
+ *  column: for those the attribution is exact rather than guessed. A guild
+ *  tracking several is skipped and takes one burst per world, which is honest —
+ *  filing its rows under all of them would suppress real arrivals.
  *
- *  Either way the legacy table is renamed out of the way afterwards, so this runs
- *  once and only once per guild. Renamed rather than dropped: nothing reads it
- *  any more, but a skipped guild's history is the only copy there is, and a
- *  rename keeps it recoverable if a better migration is ever wanted. The rename
- *  is also what makes the outcome deterministic — a guild that later drops from
- *  two worlds to one cannot have its ambiguous rows migrated onto the survivor.
+ *  Either way the legacy table is renamed out of the way, so this runs once per
+ *  guild. Renamed rather than dropped: a skipped guild's history is the only copy
+ *  there is. The rename also makes the outcome deterministic — a guild later
+ *  dropping to one world cannot have its ambiguous rows migrated onto it.
  *
  *  Delete this class (and its call in BotApp) once every deployment has booted
  *  past the cutover. */

@@ -1,25 +1,19 @@
 package com.tibiabot.web
 
-/** Turning a creature name into a file name that is safe to put on disk and in
- *  a URL.
+/** Turning a creature name into a file name safe to put on disk and in a URL.
  *
- *  This exists because the input is not trusted. A spawn's creature is part of
- *  a guild's own catalogue, editable by that guild's admins, and it ends up
- *  naming a file we write, read and serve. `StatusRoute`'s images are safe by
- *  being a fixed allow-list of three names; that guarantee does not carry over
- *  to a set that grows with whatever anybody types, so the checking has to be
- *  done here instead.
+ *  The input is not trusted: a spawn's creature is part of a guild's own
+ *  catalogue, editable by its admins, and it names a file we write, read and
+ *  serve. `StatusRoute`'s images are safe by being a fixed allow-list of three;
+ *  that does not carry to a set growing with whatever anybody types.
  *
- *  The rule is an allow-list of characters rather than a search for bad ones.
- *  Every real creature name is covered by it — `Orc Warlord`, `Sign (Library)`,
- *  `Mooh'Tah Warrior`, `Two-Headed Turtle` — and anything outside it is refused
- *  rather than stripped, because silently rewriting an attacker's input into
- *  something that passes is how mistakes get made.
+ *  An allow-list of characters rather than a search for bad ones — every real name
+ *  is covered (`Orc Warlord`, `Sign (Library)`, `Mooh'Tah Warrior`) — and anything
+ *  outside it is refused rather than stripped, since silently rewriting an
+ *  attacker's input into something that passes is how mistakes get made.
  *
- *  Note the dot is *not* allowed. The extension is appended by us, so a name
- *  never needs one, and forbidding it outright means `..` cannot be expressed
- *  at all — no traversal check to get subtly wrong.
- */
+ *  The dot is *not* allowed. The extension is appended by us, so forbidding it
+ *  means `..` cannot be expressed at all — no traversal check to get subtly wrong. */
 object CreatureSprites {
 
   /** Long enough for the longest real creature name several times over, short

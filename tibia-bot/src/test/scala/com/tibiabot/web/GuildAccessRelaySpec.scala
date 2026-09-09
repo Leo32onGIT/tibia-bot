@@ -11,7 +11,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 /** The relay that lets one bot's dashboard show a guild another bot runs.
  *
  *  Everything here is the wire format and the two halves talking to each other
- *  over a Redis that is a map — no JDA, no network, no scheduler beyond akka's.
+ *  over a Redis that is a map — no JDA, no network, no scheduler beyond pekko's.
  */
 class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
 
@@ -52,10 +52,10 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
 
   private val access = GuildAccess("g1", "Their Server", AccessTier.Moderator, List("Antica"), Some("icon.png"))
 
-  /** Akka's own reference config and nothing else. The default would load
+  /** Pekko's own reference config and nothing else. The default would load
    *  discord.conf, which substitutes environment variables this has no business
    *  needing — the same reason Config cannot initialise in a test. */
-  private lazy val system = akka.actor.ActorSystem(
+  private lazy val system = org.apache.pekko.actor.ActorSystem(
     "relay-spec", com.typesafe.config.ConfigFactory.defaultReference())
   private def scheduler = system.scheduler
 
@@ -143,7 +143,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => false)
       val answer = asking.accessFor("u1", Set("g1"))
       // The consumer sweeps on its own beat in production; here it is stepped.
-      Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
 
       Await.result(answer, 5.seconds).granted shouldBe List(access)
     }
@@ -205,7 +205,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => false, selfBotId = "bot-1")
       Await.result(asking.listen(), 2.seconds) shouldBe true
       val answer = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
 
       Await.result(answer, 5.seconds).granted shouldBe List(access)
     }
@@ -317,7 +317,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
         isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
 
       val first = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
       Await.result(first, 3.seconds).granted shouldBe List(access)
 
       val second = Await.result(asking.accessFor("u1", Set("g1")), 3.seconds)
@@ -332,7 +332,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
       val consumer = new AccessQueryConsumer(redis, resolve = (_, _) => None, canSee = _ == "g1")
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => false)
       val answer = asking.accessFor("stranger", Set("g1"))
-      Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
       // Empty *and* complete: a refusal is an answer, so the guild is absent
       // rather than missing, and the page says nothing about it. Only silence
       // is worth reporting.
@@ -347,7 +347,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
         resolve = (_, _) => throw new RuntimeException("JDA fell over"), canSee = _ == "g1")
       val asking = new RemoteGuildAccess(redis, scheduler, isLocal = _ => false)
       val answer = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(120.millis, scheduler)(consumer.sweep()), 3.seconds)
       // The asker gets a definite no instead of waiting out its timeout.
       Await.result(answer, 2.seconds).granted shouldBe Nil
       redis.store.keys.exists(_.startsWith("tibia:access-a:")) shouldBe true
@@ -382,7 +382,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
         isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
 
       val first = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
       Await.result(first, 3.seconds).granted shouldBe List(access)
 
       // Now nothing sweeps — a deploy, a busy beat, a page load that landed
@@ -402,12 +402,12 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
         isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
 
       val first = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
       Await.result(first, 3.seconds).granted shouldBe List(access)
 
       allowed = false
       val second = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
       Await.result(second, 3.seconds).granted shouldBe Nil
 
       // And the refusal sticks: losing access must not be undone by the next
@@ -424,7 +424,7 @@ class GuildAccessRelaySpec extends AnyWordSpec with Matchers {
         isLocal = _ => false, timeout = 300.millis, pollEvery = 50.millis)
 
       val first = asking.accessFor("u1", Set("g1"))
-      Await.result(akka.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
+      Await.result(org.apache.pekko.pattern.after(80.millis, scheduler)(consumer.sweep()), 3.seconds)
       Await.result(first, 3.seconds).granted shouldBe List(access)
 
       // A bot that cannot say now whether somebody is still a moderator is a

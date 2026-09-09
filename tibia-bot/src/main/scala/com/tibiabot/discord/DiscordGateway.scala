@@ -2,15 +2,10 @@ package com.tibiabot.discord
 
 import net.dv8tion.jda.api.entities.{Guild, User}
 
-/** What one member may do in one guild, resolved in a single lookup.
- *
- *  Deliberately plain data rather than a JDA `Member`. Everything the dashboard
- *  needs to decide access is here, so the decision itself can be written and
- *  tested without a Discord connection — and the JDA types stay behind the
- *  gateway instead of leaking into the authorization logic, where a fake would
- *  otherwise have to implement a very large interface to say "this person holds
- *  one role".
- */
+/** What one member may do in one guild, resolved in a single lookup. Plain data
+ *  rather than a JDA `Member`, so the access decision is testable without a
+ *  Discord connection and JDA types stay behind the gateway — otherwise a fake
+ *  would implement a very large interface to say "this person holds one role". */
 final case class MemberAccess(
   hasManageServer: Boolean,
   roleIds: Set[String],
@@ -18,17 +13,12 @@ final case class MemberAccess(
   visibleChannelIds: Set[String]
 )
 
-/** What a membership lookup produced, with a refusal told apart from a failure
- *  to ask.
- *
- *  [[MemberAccess]] as an `Option` could not say which had happened, and the
- *  dashboard needs to: "not a member here" is an answer that should quietly
- *  remove a guild from somebody's picker, where "Discord would not tell us" is
- *  a fault that should be reported rather than presented as an absence. Reading
- *  the second as the first is what let a rate-limited lookup silently shrink a
- *  visitor's server list — and a list shrunk to one is a list with nothing to
- *  choose from, which sent them into a board they never picked.
- */
+/** What a membership lookup produced, with a refusal told apart from a failure to
+ *  ask. An `Option` could not say which: "not a member here" should quietly remove
+ *  a guild from the picker, where "Discord would not tell us" is a fault to
+ *  report. Reading the second as the first let a rate-limited lookup silently
+ *  shrink a visitor's server list — and a list shrunk to one sent them into a
+ *  board they never picked. */
 sealed trait MemberLookup {
   /** The access, where there is any. `None` for both a refusal and a failure —
    *  for the callers that genuinely cannot act on the difference. */

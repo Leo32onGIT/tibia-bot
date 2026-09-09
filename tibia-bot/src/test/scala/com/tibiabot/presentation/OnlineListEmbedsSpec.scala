@@ -57,35 +57,304 @@ class OnlineListEmbedsSpec extends AnyFunSuite with Matchers {
     OnlineListEmbeds.categoryName("Antica", 0, 0) shouldBe "Antica"
   }
 
-  // --- packFields ---
+  // --- packMessages ---
 
-  test("packFields always returns at least one (empty) field") {
-    OnlineListEmbeds.packFields(Nil) shouldBe List("")
+  // Discord's own caps, which packMessages exists to stay under: a message's
+  // embed text summed, and any one description.
+  private val DiscordMessageCap = 6000
+  private val DiscordDescriptionCap = 4096
+
+  test("packMessages always returns at least one message holding one (empty) description") {
+    OnlineListEmbeds.packMessages(Nil) shouldBe List(List(""))
   }
 
-  test("packFields newline-joins short lines into a single field") {
-    OnlineListEmbeds.packFields(List("a", "b", "c")) shouldBe List("\na\nb\nc")
+  test("packMessages newline-joins short lines into a single description") {
+    OnlineListEmbeds.packMessages(List("a", "b", "c")) shouldBe List(List("\na\nb\nc"))
   }
 
-  test("packFields starts a new field at a section header, but not when the field is still empty") {
-    OnlineListEmbeds.packFields(List("a", "### Neutrals", "b")) shouldBe List("\na", "### Neutrals\nb")
-    OnlineListEmbeds.packFields(List("### Neutrals", "b")) shouldBe List("\n### Neutrals\nb")
+  test("a section header starts a new embed but stays on the same message") {
+    OnlineListEmbeds.packMessages(List("a", "### Neutrals", "b")) shouldBe List(List("\na", "### Neutrals\nb"))
   }
 
-  test("packFields keeps a guild header ('### [') with the preceding lines (no section break)") {
-    OnlineListEmbeds.packFields(List("a", "### [Guild](u)", "b")) shouldBe List("\na\n### [Guild](u)\nb")
+  test("a section header does not start a new embed while the current one is empty") {
+    OnlineListEmbeds.packMessages(List("### Neutrals", "b")) shouldBe List(List("\n### Neutrals\nb"))
   }
 
-  test("packFields breaks to a new field once a line would reach 4060 chars") {
-    val packed = OnlineListEmbeds.packFields(List("x" * 4000, "y" * 100))
+  test("a guild header ('### [') stays with the preceding lines") {
+    OnlineListEmbeds.packMessages(List("a", "### [Guild](u)", "b")) shouldBe List(List("\na\n### [Guild](u)\nb"))
+  }
+
+  test("a full embed starts a second embed on the same message, not a second message") {
+    val packed = OnlineListEmbeds.packMessages(List("x" * 2900, "y" * 100))
+    packed should have size 1
+    packed.head shouldBe List("\n" + ("x" * 2900), "y" * 100)
+  }
+
+  test("a second full embed fills the message, so the next line rolls to a new one") {
+    val packed = OnlineListEmbeds.packMessages(List("x" * 2900, "y" * 2900, "z" * 100))
     packed should have size 2
-    packed.head shouldBe "\n" + ("x" * 4000)
-    packed.last shouldBe "y" * 100
+    packed.head should have size 2
+    packed.last shouldBe List("z" * 100)
   }
 
-  test("packFields breaks earlier (3850) when the incoming line is a guild header") {
-    val packed = OnlineListEmbeds.packFields(List("x" * 3840, "### [G](u)"))
-    packed should have size 2
-    packed.last shouldBe "### [G](u)"
+  test("an incoming guild header breaks the embed early rather than being stranded") {
+    val packed = OnlineListEmbeds.packMessages(List("x" * 2730, "### [G](u)"))
+    packed shouldBe List(List("\n" + ("x" * 2730), "### [G](u)"))
+  }
+
+  test("a message never carries more than Discord's ten embeds") {
+    val packed = OnlineListEmbeds.packMessages(List.fill(11)("### Section"))
+    packed.map(_.size) shouldBe List(10, 1)
+  }
+
+  test("a realistic roster stays inside both Discord caps and beats one embed per message") {
+    // Section headers, guild buckets and ~140-char rows, which is what a
+    // rendered row costs (emoji, level, name + character URL, guild icon,
+    // duration, flag).
+    def rows(from: Int, n: Int) = (from until from + n).map(i => s"$i" + ("r" * 139)).toList
+    val lines =
+      ("### Allies 40" :: rows(0, 40)) :::
+      ("### Enemies 60" :: rows(40, 60)) :::
+      (1 to 8).toList.flatMap { g =>
+        s"### [Guild $g](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=Guild+$g) 45" ::
+          rows(100 + g * 45, 45)
+      }
+    val packed = OnlineListEmbeds.packMessages(lines)
+
+    packed.foreach { descriptions =>
+      descriptions.map(_.length).sum should be < DiscordMessageCap
+      descriptions.size should be <= 10
+      descriptions.foreach(_.length should be < DiscordDescriptionCap)
+    }
+    // No line is dropped, duplicated or reordered on the way through.
+    packed.flatten.flatMap(_.split("\n").filter(_.nonEmpty)) shouldBe lines
+
+    // The single-level packing fitted ~4060 chars per message, and paid a whole
+    // message for each of the ten headers above; this fits ~5800 and pays none.
+    val totalChars = lines.map(_.length + 1).sum
+    packed.size should be < totalChars / 4060
+  }
+
+  // --- packMessagesStable ---
+
+  /** ~142 chars, the cost of a rendered row. */
+  private def rows(n: Int, from: Int = 0): List[String] =
+    (from until from + n).map(i => "%05d".format(i) + ("r" * 137)).toList
+
+  private def linesOf(message: List[String]): List[String] =
+    message.flatMap(_.split("\n").filter(_.nonEmpty))
+
+  test("with nothing posted yet it packs from scratch") {
+    val lines = rows(120)
+    OnlineListEmbeds.packMessagesStable(lines, Nil) shouldBe OnlineListEmbeds.packMessages(lines)
+  }
+
+  test("an unchanged list repacks to exactly what is already posted") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    OnlineListEmbeds.packMessagesStable(lines, posted) shouldBe posted
+  }
+
+  test("durations ticking up move nothing") {
+    val lines = List("Bubble `5min`", "Cip `1hr 2min`")
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val ticked = List("Bubble `9min`", "Cip `1hr 6min`")
+    OnlineListEmbeds.packMessagesStable(ticked, posted) shouldBe List(List("\nBubble `9min`\nCip `1hr 6min`"))
+  }
+
+  test("a logout shrinks its own message and leaves every later one alone") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    posted.size should be >= 4
+    val goneFrom = linesOf(posted(2)).head
+    val packed = OnlineListEmbeds.packMessagesStable(lines.filterNot(_ == goneFrom), posted)
+
+    packed.take(2) shouldBe posted.take(2)
+    packed.drop(3) shouldBe posted.drop(3)
+    linesOf(packed(2)) shouldBe linesOf(posted(2)).tail
+  }
+
+  test("a login joins the message it belongs to, once a logout has left room there") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val target = linesOf(posted(2))
+    val loosened = OnlineListEmbeds.packMessagesStable(lines.filterNot(_ == target.head), posted)
+
+    // a new row sorting into the middle of that same message
+    val withLogin = lines.filterNot(_ == target.head).flatMap { l =>
+      if (l == target(4)) List(l, "99999" + ("n" * 137)) else List(l)
+    }
+    val packed = OnlineListEmbeds.packMessagesStable(withLogin, loosened)
+
+    packed.take(2) shouldBe loosened.take(2)
+    packed.drop(3) shouldBe loosened.drop(3)
+    linesOf(packed(2)) should contain("99999" + ("n" * 137))
+  }
+
+  test("a full message spills one line forward, and only as far as room") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    posted.size should be >= 4
+    // make room on the third message, then log somebody in at the very front
+    val loosened = OnlineListEmbeds.packMessagesStable(lines.filterNot(_ == linesOf(posted(2)).head), posted)
+    val remaining = lines.filterNot(_ == linesOf(posted(2)).head)
+    val packed = OnlineListEmbeds.packMessagesStable(("00000" + ("n" * 137)) :: remaining, loosened)
+
+    // the first two messages absorbed and passed on a line; the third took it
+    // and stopped there, so nothing beyond moved
+    packed.drop(3) shouldBe loosened.drop(3)
+    packed.head should not be loosened.head
+  }
+
+  test("a message emptied of everything disappears") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val second = linesOf(posted(1)).toSet
+    val packed = OnlineListEmbeds.packMessagesStable(lines.filterNot(second.contains), posted)
+
+    packed.size shouldBe posted.size - 1
+    packed.head shouldBe posted.head
+    packed(1) shouldBe posted(2)
+  }
+
+  test("a line that has moved backwards is dragged forward, keeping the order") {
+    val lines = rows(160)
+    val posted = OnlineListEmbeds.packMessages(lines)
+    val moved = linesOf(posted(2)).head
+    // that row now sorts to the very front, e.g. after a level-up
+    val reordered = moved :: lines.filterNot(_ == moved)
+    val packed = OnlineListEmbeds.packMessagesStable(reordered, posted)
+
+    packed.flatMap(linesOf) shouldBe reordered
+  }
+
+  test("a stably packed list still stays inside both Discord caps") {
+    var lines = rows(400)
+    var packed = OnlineListEmbeds.packMessages(lines)
+    // fifty refreshes of churn, packing against what the last one produced
+    (1 to 50).foreach { cycle =>
+      lines = lines.drop(3) ::: rows(3, 100000 + cycle * 3)
+      packed = OnlineListEmbeds.packMessagesStable(lines, packed)
+      packed.foreach { descriptions =>
+        descriptions.map(_.length).sum should be < DiscordMessageCap
+        descriptions.size should be <= 10
+        descriptions.foreach(_.length should be < DiscordDescriptionCap)
+      }
+      packed.flatMap(linesOf) shouldBe lines
+    }
+  }
+
+  test("staying put costs far fewer message rewrites than repacking each time") {
+    // The whole point of the function: pack fresh and one login shunts every
+    // message after it along by a line, so half the channel is rewritten.
+    val rng = new scala.util.Random(4)
+    var lines = rows(400)
+    var fresh = OnlineListEmbeds.packMessages(lines)
+    var stable = fresh
+    var freshEdits = 0
+    var stableEdits = 0
+
+    def changed(before: List[List[String]], after: List[List[String]]): Int =
+      (0 until math.max(before.size, after.size)).count(i => before.lift(i) != after.lift(i))
+
+    (1 to 60).foreach { cycle =>
+      // one logout and one login, both landing somewhere in the middle
+      lines = lines.patch(rng.nextInt(lines.size), Nil, 1)
+      lines = lines.patch(rng.nextInt(lines.size), rows(1, 900000 + cycle), 0)
+
+      val nextFresh = OnlineListEmbeds.packMessages(lines)
+      val nextStable = OnlineListEmbeds.packMessagesStable(lines, stable)
+      freshEdits += changed(fresh, nextFresh)
+      stableEdits += changed(stable, nextStable)
+      fresh = nextFresh
+      stable = nextStable
+    }
+
+    // Measured at roughly a third of the rewrites; asserted loosely so the
+    // figure can move without the guarantee going quietly missing.
+    info(s"fresh $freshEdits edits / ${fresh.size} msgs, stable $stableEdits edits / ${stable.size} msgs")
+    stableEdits.toDouble should be < (freshEdits * 0.75)
+    // and without buying that with a pile of extra messages
+    stable.size.toDouble should be < (fresh.size * 1.25)
+    stable.flatMap(linesOf) shouldBe lines
+  }
+
+  // --- a heading and the rows it introduces ---
+  //
+  // A heading is the one line whose meaning comes from what is under it, so
+  // being the last thing on an embed makes it read as a mistake: the reader gets
+  // a guild name with nothing beneath it and that guild's players opening the
+  // next message, as if they belonged to nobody.
+
+  private def guildHeading(name: String, count: Int) =
+    s"### [$name](https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=$name) $count"
+
+  private def guildRoster(guilds: Int, per: Int): List[String] =
+    (1 to guilds).flatMap(g => guildHeading(s"Guild$g", per) :: rows(per, from = g * 100)).toList
+
+  /** Headings left as the last line of the embed they sit in. */
+  private def strandedHeadings(messages: List[List[String]]): List[String] =
+    messages.flatMap(_.flatMap(_.split("\n").filter(_.nonEmpty).lastOption.filter(_.startsWith("### "))))
+
+  test("a fresh packing never ends an embed on a heading, at any roster shape") {
+    // Swept rather than sampled: the failure needs a heading to land within a
+    // row's length of the message budget, so a single shape proves very little
+    // and the shapes that hit it are not the ones anybody would pick by hand.
+    val offenders = for {
+      guilds <- 4 to 40
+      per <- 2 to 8
+      bad = strandedHeadings(OnlineListEmbeds.packMessages(guildRoster(guilds, per)))
+      if bad.nonEmpty
+    } yield s"$guilds guilds of $per -> ${bad.mkString(",")}"
+
+    offenders shouldBe empty
+  }
+
+  test("a heading rolled onto a new message takes its rows with it") {
+    val packed = OnlineListEmbeds.packMessages(guildRoster(22, 4))
+    // Wherever a message starts with a heading, the next line is one of its rows
+    // rather than another message boundary.
+    packed.foreach { message =>
+      val lines = linesOf(message)
+      if (lines.headOption.exists(_.startsWith("### "))) lines.size should be > 1
+    }
+    packed.flatMap(linesOf) shouldBe guildRoster(22, 4)
+  }
+
+  test("the stable packing does not strand a heading as churn spills rows forward") {
+    // The spill moves rows one at a time off the end of a full message. Taking
+    // the last of a guild's players while leaving the guild's name behind is the
+    // same separation as above, reached from the other direction.
+    val random = new scala.util.Random(7)
+    var lines = guildRoster(28, 5)
+    var stable = OnlineListEmbeds.packMessages(lines)
+
+    (1 to 60).foreach { round =>
+      lines = lines.patch(random.nextInt(lines.size), rows(1, from = 50000 + round), 0)
+      val victim = lines.indexWhere(line => !line.startsWith("### ") && random.nextBoolean())
+      if (victim >= 0) lines = lines.patch(victim, Nil, 1)
+      stable = OnlineListEmbeds.packMessagesStable(lines, stable)
+      withClue(s"round $round: ") { strandedHeadings(stable) shouldBe empty }
+    }
+    stable.flatMap(linesOf) shouldBe lines
+  }
+
+  test("a heading already separated from its rows is reunited, not preserved") {
+    // Keeping every line where it is is the point of the stable packing,
+    // and this is the one case where it is the wrong answer: both sides keep the
+    // position they are being read from, so the split cannot heal on its own and
+    // a channel stays wrong until the 6-hourly purge repacks it.
+    val lines = guildHeading("Alpha", 2) :: rows(2, from = 1) :::
+      guildHeading("NoDramas", 3) :: rows(3, from = 10)
+    val split = List(
+      List((guildHeading("Alpha", 2) :: rows(2, from = 1)).mkString("\n"), guildHeading("NoDramas", 3)),
+      List(rows(3, from = 10).mkString("\n"))
+    )
+    strandedHeadings(split) should have size 1
+
+    val healed = OnlineListEmbeds.packMessagesStable(lines, split)
+    strandedHeadings(healed) shouldBe empty
+    linesOf(healed.last).head shouldBe guildHeading("NoDramas", 3)
+    healed.flatMap(linesOf) shouldBe lines
   }
 }

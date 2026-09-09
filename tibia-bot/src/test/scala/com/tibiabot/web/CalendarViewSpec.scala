@@ -132,6 +132,49 @@ class CalendarViewSpec extends AnyWordSpec with Matchers {
         endedAt = Some(at(1, 9))))).slots shouldBe empty
     }
 
+    // A merged claim is the same evening as the hunt that absorbed it, which is
+    // already drawn in full under whoever holds it. Drawing both put the same
+    // time on the grid twice, reading as two people booked against each other.
+    "draw nothing for a claim folded into a hunt already running" in {
+      assemble(history = List(finished(1, at(1, 21), minutes = 150,
+        outcome = Some(RespawnClaim.Outcome.Merged),
+        endedAt = Some(at(1, 21, 1))))).slots shouldBe empty
+    }
+
+    // ...and not merely because it was brief. Even a merged claim that somehow
+    // ran long is a duplicate of the block beside it.
+    "draw nothing for a merged claim however long it lasted" in {
+      assemble(history = List(finished(1, at(1, 21), minutes = 150,
+        outcome = Some(RespawnClaim.Outcome.Merged),
+        endedAt = Some(at(1, 23, 30))))).slots shouldBe empty
+    }
+
+    "draw nothing for an evening dropped almost as soon as it started" in {
+      assemble(history = List(finished(1, at(1, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.Released),
+        endedAt = Some(at(1, 20, 14))))).slots shouldBe empty
+    }
+
+    // The boundary is inclusive: exactly the minimum is long enough to say
+    // something, so it is drawn.
+    "draw an evening that lasted exactly the minimum" in {
+      val slot = assemble(history = List(finished(1, at(1, 20), minutes = 120,
+        outcome = Some(RespawnClaim.Outcome.Released),
+        endedAt = Some(at(1, 20, 15))))).slots.loneElement
+      slot.endsAt shouldBe at(1, 20, 15)
+    }
+
+    // The floor is about finished claims only. A hunt in progress is short
+    // because it started recently, not because nobody turned up.
+    "draw a hunt that has only just started, since it is still running" in {
+      val live = finished(9, at(1, 20), minutes = 5, who = "u1",
+        outcome = None, status = RespawnClaim.StatusActive)
+      val slot = assemble(active = Some(live)).slots.loneElement
+      slot.startsAt shouldBe at(1, 20)
+      slot.endsAt shouldBe at(1, 20, 5)
+      slot.past shouldBe false
+    }
+
     // A slot the bot was down over is closed whenever the sweep next runs, which
     // can be long after the evening it belongs to. The block is the evening, not
     // the wait for somebody to notice.

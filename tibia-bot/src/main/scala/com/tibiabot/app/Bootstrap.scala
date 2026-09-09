@@ -21,26 +21,37 @@ object Bootstrap {
 
   /** Counts every Discord REST call for the dashboard's throughput panel.
    *
-   *  This sits inside JDA's own HTTP client rather than at any application call
-   *  site because a large share of this bot's Discord traffic never passes
-   *  through [[com.tibiabot.discord.RateLimitedSender]]: death posts and the
-   *  boosted-channel server-save post are deliberately unpaced, and command
-   *  replies never touch the queue at all. Counting at the queue would have
-   *  reported a number that looks authoritative and is materially short.
+   *  Inside JDA's own HTTP client rather than at an application call site, because
+   *  much of this bot's Discord traffic never passes through
+   *  [[com.tibiabot.discord.RateLimitedSender]]: death posts and the boosted
+   *  server-save post are deliberately unpaced, and command replies never touch
+   *  the queue. Counting at the queue would look authoritative and be short.
    *
-   *  Deliberately does nothing but count and pass the call through — no
-   *  buffering, no body inspection, no failing the request. A throwing
-   *  interceptor would turn a metrics bug into dropped Discord traffic, so the
-   *  recording is wrapped and swallowed. Retries and rate-limit re-sends are
-   *  separate calls at this layer and count separately, which is what "how many
+   *  Does nothing but count and pass through — no buffering, no body inspection,
+   *  no failing the request — and the recording is wrapped and swallowed, since a
+   *  throwing interceptor would turn a metrics bug into dropped Discord traffic.
+   *  Retries and rate-limit re-sends count separately, which is what "how many
    *  requests did we make" should mean. */
   private def countingInterceptor: okhttp3.Interceptor = (chain: okhttp3.Interceptor.Chain) => {
     val request = chain.request()
     val response = chain.proceed(request)
-    try ApiMetrics.discord.record(
-      "operation" -> DiscordApiRoute.operation(request.method(), request.url().encodedPath()),
-      "status" -> response.code().toString
-    ) catch { case _: Throwable => () }
+    try {
+      val status = response.code()
+      val operation = DiscordApiRoute.operation(request.method(), request.url().encodedPath())
+      // A third tag carrying the operation again, but only on rate-limited calls.
+      // "Which call is being throttled" is not answerable from the other two: each
+      // sums to the whole total on its own, so a 10% 429 share beside a 73%
+      // PATCH-message share says nothing about whether those 429s were that
+      // operation's. Every route sits in a different Discord bucket, so which is
+      // at its ceiling decides where the pacing has to change.
+      //
+      // Added to the same record call rather than made a second one: `record`
+      // counts the overall total once per call, so recording twice would
+      // inflate the headline throughput by the 429 count and leave the other
+      // two dimensions no longer summing to it.
+      val tags = Seq("operation" -> operation, "status" -> status.toString)
+      ApiMetrics.discord.record((if (status == 429) tags :+ ("ratelimited" -> operation) else tags): _*)
+    } catch { case _: Throwable => () }
     response
   }
 

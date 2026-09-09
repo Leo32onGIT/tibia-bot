@@ -4,29 +4,20 @@ import spray.json._
 
 /** Asking the bot that runs a guild who somebody is in it.
  *
- *  Several bot identities share this fleet, and a guild's respawns are run by
- *  whichever one built its forum. A dashboard served by one bot can already
- *  *write* into a guild another runs — that is [[RespawnCommand]] — because
- *  everything a write needs is either in the shared database or was decided
- *  before the command was sent.
- *
- *  Reading who somebody is is the one thing that cannot cross that way. A
- *  visitor's tier comes from their roles and from which channels they can see,
- *  and only a bot actually in the guild can be told either. So the dashboard
- *  could show a guild it was not in — its settings, its spawns and its bookings
- *  are all in the shared database — but could never work out whether the person
- *  looking was allowed to, and left it out of the picker entirely.
+ *  A dashboard served by one bot can already *write* into a guild another runs
+ *  ([[RespawnCommand]]), because everything a write needs is in the shared
+ *  database or was decided before the command was sent. Reading who somebody is
+ *  cannot cross that way: a visitor's tier comes from their roles and visible
+ *  channels, and only a bot in the guild can be told either — so such a guild was
+ *  left out of the picker entirely.
  *
  *  ==Which way permission travels==
- *  [[RespawnCommand]] states that the *issuer* decides permission and the
- *  executor re-checks nothing. This is the exact reverse: the issuer is the one
- *  that cannot decide, so the answering bot resolves the visitor and the asker
- *  takes what it is given. That inversion is deliberate and worth naming,
- *  because the two messages otherwise look alike. It rests on the same footing
- *  as the write relay — both ends are this bot's own processes on a private
- *  Redis — and it is the safer half of the pair anyway: a write performs
- *  something, where this only ever describes what somebody may already do.
- */
+ *  [[RespawnCommand]] has the *issuer* decide permission and the executor re-check
+ *  nothing. This is the reverse: the issuer cannot decide, so the answering bot
+ *  resolves the visitor and the asker takes what it is given. Worth naming, since
+ *  the two messages otherwise look alike. Same footing as the write relay — both
+ *  ends are this bot's own processes on a private Redis — and the safer half of
+ *  the pair, since this only describes what somebody may already do. */
 final case class AccessQuery(id: String, guildId: String, userId: String,
                             /** Where to send the answer: the asking bot's id,
                              *  which names its reply channel. Empty from a bot
@@ -43,13 +34,10 @@ final case class AccessQuery(id: String, guildId: String, userId: String,
   ).compactPrint
 }
 
-/** What the owning bot says about a visitor.
- *
- *  `None` for the access is a real answer — "this person cannot use the
- *  dashboard here" — and distinct from no answer at all, which means nobody who
- *  runs that guild was listening. The first excludes the guild from the picker
- *  for good; the second is worth retrying, and the caching reflects that.
- */
+/** What the owning bot says about a visitor. `None` is a real answer — "this
+ *  person cannot use the dashboard here" — distinct from no answer at all, which
+ *  means nobody running that guild was listening. The first excludes the guild for
+ *  good; the second is worth retrying, and the caching reflects that. */
 final case class AccessAnswer(access: Option[GuildAccess],
                              /** Which question this answers. Carried in the
                               *  body because a reply *channel* is shared by

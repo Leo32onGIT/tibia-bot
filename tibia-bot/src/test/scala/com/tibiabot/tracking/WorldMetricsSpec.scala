@@ -81,6 +81,41 @@ class WorldMetricsSpec extends AnyFunSuite with Matchers {
     snap.deathLagMaxSeconds shouldBe 300
   }
 
+  test("the watched subset keeps its own lag average, and the overall one still covers everything") {
+    val m = new WorldMetrics
+    m.recordDeathDetected(400, fansiteBacked = false)
+    m.recordDeathDetected(200, fansiteBacked = true)
+    m.recordDeathDetected(100, fansiteBacked = true)
+    val snap = m.snapshot()
+
+    snap.deathDetections shouldBe 3
+    snap.deathLagAvgSeconds shouldBe (700.0 / 3)
+    // The comparison the split exists to make: watched characters seen sooner.
+    snap.fansiteDeathDetections shouldBe 2
+    snap.fansiteDeathLagAvgSeconds shouldBe 150.0
+  }
+
+  test("a death nobody was watching leaves the watched average empty rather than zero") {
+    val m = new WorldMetrics
+    m.recordDeathDetected(400)
+    val snap = m.snapshot()
+
+    snap.deathDetections shouldBe 1
+    snap.fansiteDeathDetections shouldBe 0
+    // Zero detections, so the dashboard shows a dash instead of a flattering 0s.
+    snap.fansiteDeathLagAvgSeconds shouldBe 0.0
+  }
+
+  test("resetCounters clears the watched window too") {
+    val m = new WorldMetrics
+    m.recordDeathDetected(900, fansiteBacked = true)
+    m.resetCounters()
+    val snap = m.snapshot()
+
+    snap.fansiteDeathDetections shouldBe 0
+    snap.fansiteDeathLagAvgSeconds shouldBe 0.0
+  }
+
   test("death lag is counted per detection, not per post — incrementDeaths does not move it") {
     val m = new WorldMetrics
     m.recordDeathDetected(120)

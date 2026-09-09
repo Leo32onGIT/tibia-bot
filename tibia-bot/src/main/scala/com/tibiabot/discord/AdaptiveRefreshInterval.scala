@@ -1,20 +1,16 @@
 package com.tibiabot.discord
 
-/** Maps the online-list lane's current queue depth to how often each guild's
- *  online-list should be re-checked, so refresh frequency backs off under
- *  load instead of blindly enqueueing at a fixed cadence regardless of how
- *  backed up the lane already is.
+/** Maps the online-list lane's queue depth to how often each guild's list is
+ *  re-checked, so refresh frequency backs off under load rather than enqueueing at
+ *  a fixed cadence however backed up the lane is.
  *
- *  Cadence is the only lever that moves this bot's edit volume much: by the time
- *  a busy channel is refreshed, most of its embeds contain a roster change and
- *  have to be rewritten regardless of how the list is packed into messages, so
- *  edits/hour scale with refreshes/hour almost linearly.
+ *  Cadence is the only lever that moves edit volume much: by the time a busy
+ *  channel is refreshed most of its embeds contain a roster change and must be
+ *  rewritten anyway, so edits/hour scale with refreshes/hour almost linearly.
  *
- *  Thresholds come from observed production behaviour. Production settles at a
- *  depth of ~400, i.e. in the second tier — so that tier, not the healthy one,
- *  is what actually governs the bot's cadence, and it is the one to change to
- *  move real volume (raised 150s -> 200s on that basis).
- */
+ *  Thresholds come from production, which settles at a depth of ~400 — the second
+ *  tier, not the healthy one, is therefore what governs real cadence and the one
+ *  to change to move volume (raised 150s -> 200s on that basis). */
 object AdaptiveRefreshInterval {
   private val tiers: List[(Int, Int)] = List( // (maxQueueDepth, intervalSeconds)
     100 -> 120,

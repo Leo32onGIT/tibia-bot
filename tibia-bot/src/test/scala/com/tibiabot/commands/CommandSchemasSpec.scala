@@ -3,14 +3,17 @@ package com.tibiabot.commands
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import net.dv8tion.jda.api.Permission
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions
+
 import scala.jdk.CollectionConverters._
 
 class CommandSchemasSpec extends AnyFunSuite with Matchers {
 
   test("registered commands have the expected names") {
     CommandSchemas.commands.map(_.getName) should contain theSameElementsAs List(
-      "setup", "remove", "hunted", "allies", "neutral", "fullbless",
-      "filter", "exiva", "help", "repair", "online", "boosted", "galthen", "patreon", "stamina", "bookings")
+      "setup", "remove", "repair", "help", "hunted", "allies", "settings",
+      "boosted", "galthen", "patreon", "stamina", "bookings", "lootsplit")
   }
 
   test("admin command list adds /admin to the normal set") {
@@ -24,19 +27,55 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
     opts.head.isRequired shouldBe true
   }
 
-  test("hunted exposes the expected subcommands") {
-    CommandSchemas.huntedCommand.getSubcommands.asScala.map(_.getName) should contain allOf
-      ("guild", "player", "list", "clear", "info", "autodetect", "levels", "deaths")
+  /** The panel commands carry no subcommands and no options at all — that is the
+   *  whole point of them, and it is what keeps them to one row each in Discord's
+   *  command picker instead of twenty-four between them. */
+  test("the panel commands are bare — no subcommands, no options") {
+    List(CommandSchemas.huntedCommand, CommandSchemas.alliesCommand, CommandSchemas.settingsCommand)
+      .foreach { command =>
+        withClue(s"/${command.getName} should have no subcommands: ") {
+          command.getSubcommands.asScala shouldBe empty
+        }
+        withClue(s"/${command.getName} should have no subcommand groups: ") {
+          command.getSubcommandGroups.asScala shouldBe empty
+        }
+        withClue(s"/${command.getName} should have no options: ") {
+          command.getOptions.asScala shouldBe empty
+        }
+      }
   }
 
-  test("admin exposes the expected subcommands") {
-    CommandSchemas.adminCommand.getSubcommands.asScala.map(_.getName) should contain theSameElementsAs
-      List("leave", "info", "dreamscar", "boosted", "worldlist", "message")
+  /** /hunted and /allies must stay ungated by Discord: they are open to Manage
+   *  Server *or* the guild's moderator role, and Discord's default-permission
+   *  flags cannot say "or a role" — so the check lives in the handler and the
+   *  buttons, and the command itself has to be visible for that to be reachable.
+   *  See Permissions.isModerator. */
+  test("the list commands stay ungated, since their real check is a role") {
+    List(CommandSchemas.huntedCommand, CommandSchemas.alliesCommand).foreach { command =>
+      withClue(s"/${command.getName}: ") {
+        command.getDefaultPermissions shouldBe DefaultMemberPermissions.ENABLED
+      }
+    }
+  }
+
+  // Manage Server is what all five folded commands each carried, and the root
+  // has to keep it: it is the only gate on any of them (no handler re-checks).
+  test("settings keeps the Manage Server gate its commands had") {
+    CommandSchemas.settingsCommand.getDefaultPermissions shouldBe
+      DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)
+  }
+
+  /** Its six — leave, message, info, dreamscar, worldlist and boosted — are the
+   *  buttons of a panel now. See panels.PanelIds.adminActions. */
+  test("admin carries no subcommands, and keeps the Manage Server gate it had") {
+    CommandSchemas.adminCommand.getSubcommands.asScala shouldBe empty
+    CommandSchemas.adminCommand.getDefaultPermissions shouldBe
+      DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)
   }
 
   test("initialCommands is the minimal set visible before any world is configured") {
     CommandSchemas.initialCommands.map(_.getName) should contain theSameElementsAs
-      List("setup", "help", "galthen", "boosted", "patreon")
+      List("setup", "help", "galthen", "boosted", "patreon", "lootsplit")
   }
 
   test("commands is exactly initialCommands plus worldConfigCommands") {

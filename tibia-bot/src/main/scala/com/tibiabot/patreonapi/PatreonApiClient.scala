@@ -1,10 +1,10 @@
 package com.tibiabot.patreonapi
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
-import akka.http.scaladsl.model.{FormData, HttpMethods, HttpRequest}
-import akka.http.scaladsl.unmarshalling.Unmarshal
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
+import org.apache.pekko.http.scaladsl.model.{FormData, HttpMethods, HttpRequest}
+import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import com.tibiabot.Config
 import com.tibiabot.domain.PatreonMember
 import com.typesafe.scalalogging.StrictLogging
@@ -16,24 +16,19 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
-/** Pure JSON:API response parsing for PatreonApiClient, split out so it's
- *  testable with fixture JSON and no ActorSystem/HTTP involved — mirrors the
- *  `private[paywall]`-pure-function split already used by PaywallService.
+/** Pure JSON:API response parsing for PatreonApiClient, split out so it is
+ *  testable with fixture JSON and no ActorSystem or HTTP.
  *
- *  Parsed by hand (matching DiscordAuth's manual field-access style for
- *  Discord's OAuth responses) rather than case-class auto-derivation — the
- *  envelope's data/included/meta shape doesn't map onto one fixed case class
- *  the way TibiaData's endpoints do.
+ *  Parsed by hand rather than by case-class derivation: the envelope's
+ *  data/included/meta shape does not map onto one fixed class the way TibiaData's
+ *  endpoints do.
  *
- *  The `social_connections.discord` nested shape used below (an object with a
- *  `user_id` field, or absent/null when unlinked) isn't spelled out in
- *  Patreon's own v2 docs — it was inferred from their v1 API and ecosystem
- *  convention, then confirmed against the live campaign, which parsed real
- *  Discord snowflakes for every linked patron. Worth knowing it's an
- *  undocumented shape if Patreon ever changes it: `parseDiscordUserId`
- *  silently yields None rather than failing, and an unlinked patron and a
- *  changed response format look identical from here — but they no longer
- *  cost the same, since this is what the paywall matches supporters on. */
+ *  The `social_connections.discord` shape below — an object with a `user_id`, or
+ *  absent when unlinked — is '''not documented''' in Patreon's v2 docs. It was
+ *  inferred from v1 and confirmed against the live campaign. Worth knowing if
+ *  Patreon ever changes it: `parseDiscordUserId` yields None rather than failing,
+ *  so an unlinked patron and a changed response format look identical from here —
+ *  and this is what the paywall matches supporters on. */
 object PatreonApiClient {
 
   private[patreonapi] def parseDiscordUserId(userObj: Option[JsObject]): Option[String] =

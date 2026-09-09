@@ -13,6 +13,8 @@ final case class WorldSnapshot(
   deathDetections: Long,
   deathLagAvgSeconds: Double,
   deathLagMaxSeconds: Long,
+  fansiteDeathDetections: Long,
+  fansiteDeathLagAvgSeconds: Double,
   battleyeGreen: Boolean,
   pvpType: String
 )
@@ -22,7 +24,7 @@ object WorldSnapshot {
    *  every counter zero. Named rather than spelled out positionally at the
    *  call site so adding a field here can't quietly land in the wrong slot. */
   val empty: WorldSnapshot =
-    WorldSnapshot(0, None, None, 0, 0, 0, 0, 0.0, 0, battleyeGreen = true, pvpType = "")
+    WorldSnapshot(0, None, None, 0, 0, 0, 0, 0.0, 0, 0, 0.0, battleyeGreen = true, pvpType = "")
 }
 
 /** Per-world counters and poll timing for the monitoring dashboard. Population
@@ -49,6 +51,8 @@ final class WorldMetrics {
   private var deathDetections: Long = 0
   private var deathLagTotalSeconds: Long = 0
   private var deathLagMaxSeconds: Long = 0
+  private var fansiteDeathDetections: Long = 0
+  private var fansiteDeathLagTotalSeconds: Long = 0
 
   def recordPoll(currentPopulation: Int, polledAt: Instant, nextPollAt_ : Instant, battleyeGreen_ : Boolean, pvpType_ : String): Unit = {
     population = currentPopulation
@@ -64,22 +68,30 @@ final class WorldMetrics {
 
   /** Record how far behind a death this bot was when it first *detected* it.
    *
-   *  Deliberately not folded into [[incrementDeaths]], which counts posts, not
-   *  deaths: the same death posts once per discord tracking this world, so
-   *  `deaths` is already weighted by how many discords watch a world. This is
-   *  called once per death, at the point it first clears the recent-deaths
-   *  dedup, so the average is an average over deaths rather than over posts.
+   *  Not folded into [[incrementDeaths]], which counts posts: the same death posts
+   *  once per discord tracking the world, so `deaths` is weighted by audience.
+   *  This is called once per death, as it clears the dedup, so the average is over
+   *  deaths rather than posts.
    *
-   *  `lagSeconds` is measured from the death's own timestamp on the character
-   *  sheet, so it includes delays nobody here controls — Tibia publishing the
-   *  death, TibiaData scraping it, and the upstream cache holding the sheet.
-   *  That makes the absolute figure fairly large and not very interesting; what
-   *  it is for is comparison, since a change to how the bot schedules its
-   *  character fetches moves this number and little else does. */
-  def recordDeathDetected(lagSeconds: Long): Unit = synchronized {
+   *  `lagSeconds` runs from the death's own timestamp on the character sheet, so
+   *  it includes delays nobody here controls — Tibia publishing it, TibiaData
+   *  scraping it, the upstream cache holding the sheet. The absolute figure is
+   *  therefore large and uninteresting; it is for comparison, since little but a
+   *  change to fetch scheduling moves it. */
+  def recordDeathDetected(lagSeconds: Long, fansiteBacked: Boolean = false): Unit = synchronized {
     deathDetections += 1
     deathLagTotalSeconds += lagSeconds
     if (lagSeconds > deathLagMaxSeconds) deathLagMaxSeconds = lagSeconds
+    // Counted a second time for the subset the fansite budget was spent on, so
+    // the two averages can be read against each other. That comparison is the
+    // only evidence that the second source buys anything; without it the lane
+    // is a cost with no measured benefit. `fansiteBacked` means the character
+    // held a roster slot, not that a fansite answer actually won the race --
+    // the looser question, but the one that matches what the budget decides.
+    if (fansiteBacked) {
+      fansiteDeathDetections += 1
+      fansiteDeathLagTotalSeconds += lagSeconds
+    }
   }
 
   def resetCounters(): Unit = synchronized {
@@ -89,6 +101,8 @@ final class WorldMetrics {
     deathDetections = 0
     deathLagTotalSeconds = 0
     deathLagMaxSeconds = 0
+    fansiteDeathDetections = 0
+    fansiteDeathLagTotalSeconds = 0
   }
 
   def snapshot(): WorldSnapshot = synchronized {
@@ -97,6 +111,8 @@ final class WorldMetrics {
       deathDetections,
       if (deathDetections == 0) 0.0 else deathLagTotalSeconds.toDouble / deathDetections,
       deathLagMaxSeconds,
+      fansiteDeathDetections,
+      if (fansiteDeathDetections == 0) 0.0 else fansiteDeathLagTotalSeconds.toDouble / fansiteDeathDetections,
       battleyeGreen, pvpType)
   }
 }
