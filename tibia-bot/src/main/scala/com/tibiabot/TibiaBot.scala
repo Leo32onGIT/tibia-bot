@@ -177,6 +177,10 @@ class TibiaBot(
 
       // get online data with durations (carries over guild/duration/flag, drops log-offs)
       onlineTracker.updateFromOnline(online.map(player => (player.name, player.level.toInt, player.vocation)), now)
+      // How busy this world is, and how high its people are — the two figures the
+      // PVP bar sizes itself against. Free here: the poll already carries every
+      // online character and their level, so this costs a fold and a write.
+      BotApp.recordWorldOnline(world, online.size, online.map(_.level.toLong).sum, now)
       hasOnlineData = true
       val onlineWithVocLvlAndDuration = onlineTracker.snapshot
       // Best-effort, fire-and-forget: piggybacks on this world's existing poll

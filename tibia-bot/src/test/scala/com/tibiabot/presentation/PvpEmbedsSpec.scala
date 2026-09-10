@@ -12,14 +12,27 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
   /** Readable stand-ins for the nine bar emoji. */
   private val ink: ((String, String)) => String = { case (colour, _) => colour.head.toString }
 
+  /** Levels default to the reference level per death, so a tally built without
+   *  saying otherwise weighs exactly its own count and the older tests keep
+   *  meaning what they meant. */
   private def tally(
       enemies: Int = 9,
       allies: Int = 4,
       fraggers: List[Fragger] = Nil,
       mostWanted: List[Repeat] = Nil,
       topEnemy: Option[TopKill] = None,
-      topAlly: Option[TopKill] = None
-  ) = FragTally(enemies, allies, fraggers, mostWanted, topEnemy, topAlly)
+      topAlly: Option[TopKill] = None,
+      enemyLevels: Long = -1,
+      allyLevels: Long = -1
+  ) = FragTally(
+    enemies, allies,
+    if (enemyLevels >= 0) enemyLevels else enemies.toLong * Ref,
+    if (allyLevels >= 0) allyLevels else allies.toLong * Ref,
+    fraggers, mostWanted, topEnemy, topAlly)
+
+  /** The reference the scale below is built on: one death here weighs one. */
+  private val Ref = 150
+  private val scale = Bars.Scale(ceiling = 30, referenceLevel = Ref.toDouble)
 
   /** Only Bubble has a cached sheet, so every other row exercises the unknown
    *  case. Keyed lowercase, which is what the embed is expected to look up by. */
@@ -30,7 +43,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
       losses: List[ExperienceDelta] = Nil,
       jump: String => Option[String] = id => if (id.isEmpty) None else Some(s"https://discord.com/x/$id"),
       vocationOf: String => String = vocations
-  ) = PvpEmbeds.build("Antica", frags, losses, _ => "<:enemy:9>", vocationOf, ink, down, jump)
+  ) = PvpEmbeds.build("Antica", frags, losses, _ => "<:enemy:9>", vocationOf, ink, scale, down, jump)
 
   /** The one page an ordinary day produces. */
   private def build(
@@ -52,10 +65,37 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   test("the bar is one split run, not two bars") {
-    val embed = build(tally(enemies = 9, allies = 3))
+    // Green then red then track, in that order and once each — the two sides
+    // share a run rather than being drawn as separate bars.
+    val embed = build(tally(enemies = 9, allies = 3, enemyLevels = 9L * Ref, allyLevels = 3L * Ref))
     val bar = embed.getDescription.linesIterator.toList(1)
-    bar.count(_ == 'g') shouldBe 9
-    bar.count(_ == 'r') shouldBe 3
+    bar.count(_ == 'g') should be > bar.count(_ == 'r')
+    bar.count(_ == 'r') should be > 0
+    bar.replaceAll("[^gre]", "") should fullyMatch regex "g+r+e*"
+  }
+
+  test("a quiet day leaves the rest of the bar as track") {
+    val embed = build(tally(enemies = 1, allies = 0, enemyLevels = Ref.toLong, allyLevels = 0))
+    val bar = embed.getDescription.linesIterator.toList(1)
+    bar.count(_ == 'e') should be > 0
+    bar.count(_ == 'r') shouldBe 0
+  }
+
+  test("a day of killing nobodies barely moves the bar") {
+    // Twenty deaths, all of them a tenth of an ordinary local. The line below
+    // still says twenty, because that is what happened; the bar says it was not
+    // a war, because it was not.
+    val embed = build(tally(enemies = 20, allies = 0, enemyLevels = 20L * (Ref / 10), allyLevels = 0))
+    val description = embed.getDescription
+    description should include("**20** enemies killed")
+    description.linesIterator.toList(1).count(_ == 'g') should be <= 4
+  }
+
+  test("nobody died at all and the bar is all track") {
+    val bar = build(tally(enemies = 0, allies = 0)).getDescription.linesIterator.toList(1)
+    bar.count(_ == 'e') shouldBe Bars.Segments
+    bar.count(_ == 'g') shouldBe 0
+    bar.count(_ == 'r') shouldBe 0
   }
 
   // --- the fragger list ----------------------------------------------------

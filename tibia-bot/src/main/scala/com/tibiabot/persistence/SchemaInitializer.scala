@@ -370,6 +370,29 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS kill_statistics_boss_save_day
            |ON kill_statistics_boss (save_day);""".stripMargin
 
+      // How busy a world was and how high its people are, one row a day. Running
+      // sums and a count rather than averages, so a sample can be added without
+      // reading anything back and every bot polling the world can contribute to
+      // the same figure — two bots recording the same minute inflate both halves
+      // equally and leave the quotient where it was.
+      //
+      // level_total sums every online character's level, so dividing it by
+      // `total` gives the average level of somebody on that world rather than an
+      // average of per-poll averages, which a quiet hour would skew.
+      val createWorldOnlineDailyTable =
+        s"""CREATE TABLE IF NOT EXISTS world_online_daily (
+           |world VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |samples INT NOT NULL DEFAULT 0,
+           |total BIGINT NOT NULL DEFAULT 0,
+           |level_total BIGINT NOT NULL DEFAULT 0,
+           |PRIMARY KEY (world, save_day)
+           |);""".stripMargin
+
+      val createWorldOnlineDailyIndex =
+        s"""CREATE INDEX IF NOT EXISTS world_online_daily_save_day
+           |ON world_online_daily (save_day);""".stripMargin
+
       val createKillStatisticsSummaryIndex =
         s"""CREATE INDEX IF NOT EXISTS kill_statistics_summary_save_day
            |ON kill_statistics_summary (save_day);""".stripMargin
@@ -392,6 +415,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createKillStatisticsSummaryTable)
       newStatement.executeUpdate(createKillStatisticsBossIndex)
       newStatement.executeUpdate(createKillStatisticsSummaryIndex)
+      newStatement.executeUpdate(createWorldOnlineDailyTable)
+      newStatement.executeUpdate(createWorldOnlineDailyIndex)
 
       newStatement.close()
     }

@@ -32,7 +32,16 @@ final case class DailyReport(
      *  to count from. `awaitingSighting` says how many are in that position, so
      *  a short list is legible as a young history rather than a quiet world. */
     predictions: List[BossPrediction] = Nil,
-    awaitingSighting: Int = 0
+    awaitingSighting: Int = 0,
+    /** How many players were on this world on average that day, and what level
+     *  one of them was.
+     *
+     *  Only the PVP bar reads them: population decides how much fighting the
+     *  world could plausibly have held, and level decides what one death of a
+     *  local is worth. None for a day nothing sampled it, where the bar falls
+     *  back to a default scale rather than going missing. */
+    averageOnline: Option[Double] = None,
+    averageLevel: Option[Double] = None
 ) {
 
   /** Nothing to say. The ordinary cause is a cold start rather than a quiet day:

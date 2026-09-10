@@ -13,7 +13,9 @@ import net.dv8tion.jda.api.entities.MessageEmbed
  *  ==The bar==
  *  One run split where the day was won, rather than two bars to compare. It
  *  answers "did we win today?" before the numbers underneath answer "by how
- *  much?", which is the order a reader actually wants them in.
+ *  much?", which is the order a reader actually wants them in. How much of it is
+ *  coloured at all answers a third question — how big the day was — against a
+ *  ceiling the caller sizes to the world.
  *
  *  ==Counts against kills==
  *  The two figures under the bar count *deaths* — a victim killed by eight
@@ -31,7 +33,9 @@ object PvpEmbeds {
    *  half of the pair the board above it opens with. */
   val PvpColor: Int = Embeds.EnemyRed
 
-  /** @param vocationOf the vocation of a character, by lowercased name, from the
+  /** @param barScale  how this world turns frags into a bar — what fills it, and
+   *                   what an ordinary character on it is worth; see [[Bars.Scale]]
+   *  @param vocationOf the vocation of a character, by lowercased name, from the
    *                   sheets the hunted and allied lists are drawn from; empty
    *                   for somebody nothing has recorded, which renders as no
    *                   icon rather than a guessed one
@@ -46,13 +50,17 @@ object PvpEmbeds {
       sideIcon: String => String,
       vocationOf: String => String,
       barEmoji: ((String, String)) => String,
+      barScale: Bars.Scale,
       xpDown: String,
       jumpUrl: String => Option[String]
   ): List[MessageEmbed] = {
     val sections = List(
       Some(List(
         "## :dagger: PVP",
-        Bars.split(frags.enemiesKilled, frags.alliesKilled, barEmoji),
+        Bars.split(
+          Bars.weigh(frags.enemyLevels, frags.enemiesKilled, barScale.referenceLevel),
+          Bars.weigh(frags.allyLevels, frags.alliesKilled, barScale.referenceLevel),
+          barEmoji, barScale.ceiling),
         s"**${frags.enemiesKilled}** enemies killed vs **${frags.alliesKilled}** allies killed").mkString("\n")),
       if (frags.fraggers.isEmpty) None
       else Some(section("Most Kills", frags.fraggers.map(fraggerLine(_, sideIcon, vocationOf)))),

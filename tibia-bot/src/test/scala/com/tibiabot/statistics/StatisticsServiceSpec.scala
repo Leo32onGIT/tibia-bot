@@ -11,6 +11,14 @@ import java.time.{Instant, LocalDate, ZonedDateTime}
 import scala.collection.mutable
 
 /** When the daily post fires, how often, and what it does when it cannot. */
+/** A world nothing has ever sampled, so the bar falls back to its default
+ *  scale — which is what every world looks like until the poll has run a day. */
+object NoWorldOnline extends com.tibiabot.persistence.WorldOnlineRepository {
+  def recordSample(world: String, saveDay: java.time.LocalDate, online: Int, levelTotal: Long): Unit = ()
+  def averages(world: String, saveDay: java.time.LocalDate): Option[com.tibiabot.persistence.WorldOnlineAverage] = None
+  def removeExpired(before: java.time.LocalDate): Unit = ()
+}
+
 class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   private val yesterday = LocalDate.of(2026, 9, 10)
@@ -108,6 +116,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       highscores = NoopHighscores,
       killStatistics = kills,
       frags = frags,
+      worldOnline = NoWorldOnline,
       targets = () => targets,
       announce = (target, report, tally, losses) => {
         if (announceFails) throw new RuntimeException("channel is gone")
@@ -201,8 +210,8 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     // frags, and both are right — so this is the one thing that cannot be
     // computed once and handed to everybody.
     val frags = new StubFrags(Map(
-      ("a", "Antica") -> FragTally(3, 1, Nil, Nil, None, None),
-      ("b", "Antica") -> FragTally(1, 3, Nil, Nil, None, None)))
+      ("a", "Antica") -> FragTally(3, 1, 0L, 0L, Nil, Nil, None, None),
+      ("b", "Antica") -> FragTally(1, 3, 0L, 0L, Nil, Nil, None, None)))
     val harness = new Harness(List(target("a"), target("b")), frags = frags)
     harness.service.tick()
     frags.reads should contain theSameElementsAs List(("a", "Antica"), ("b", "Antica"))
@@ -212,7 +221,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   test("frags alone are worth a post") {
     // A world can have a quiet day in the highscores and a war in it.
-    val frags = new StubFrags(Map(("a", "Antica") -> FragTally(4, 2, Nil, Nil, None, None)))
+    val frags = new StubFrags(Map(("a", "Antica") -> FragTally(4, 2, 0L, 0L, Nil, Nil, None, None)))
     val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), frags = frags)
     harness.service.tick()
     harness.posts.map(_._1) shouldBe List("a")
@@ -322,6 +331,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       highscores = NoopHighscores,
       killStatistics = new StubKillStatistics(),
       frags = new StubFrags(),
+      worldOnline = NoWorldOnline,
       targets = () => List(target("broken"), target("fine")),
       announce = (target, _, _, _) =>
         if (target.guildId == "broken") throw new RuntimeException("channel is gone") else posts += target.guildId,

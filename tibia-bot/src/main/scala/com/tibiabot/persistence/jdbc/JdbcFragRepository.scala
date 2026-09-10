@@ -105,8 +105,10 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
       val ours = fraggers(conn, world, saveDay, FragSide.Enemy, topFraggers)
       val theirs = fraggers(conn, world, saveDay, FragSide.Ally, topFraggers)
       FragTally(
-        enemiesKilled = counts.getOrElse(FragSide.Enemy.stored, 0),
-        alliesKilled = counts.getOrElse(FragSide.Ally.stored, 0),
+        enemiesKilled = counts.getOrElse(FragSide.Enemy.stored, (0, 0L))._1,
+        alliesKilled = counts.getOrElse(FragSide.Ally.stored, (0, 0L))._1,
+        enemyLevels = counts.getOrElse(FragSide.Enemy.stored, (0, 0L))._2,
+        allyLevels = counts.getOrElse(FragSide.Ally.stored, (0, 0L))._2,
         fraggers = (ours ++ theirs).sortBy(row => (-row.kills, row.name.toLowerCase)),
         mostWanted = repeats(conn, world, saveDay, topRepeats),
         topEnemyKilled = topKill(conn, world, saveDay, FragSide.Enemy),
@@ -114,15 +116,15 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
       )
     }
 
-  /** How many players died on each side.
+  /** How many players died on each side, and what their levels added up to.
    *
    *  Counted over a DISTINCT subquery rather than COUNT(DISTINCT (a, b)). The
    *  row-constructor form works in Postgres, but it is exotic enough not to want
    *  to depend on in a query no test can exercise without a live database. */
-  private def sideCounts(conn: Connection, world: String, saveDay: LocalDate): Map[String, Int] = {
+  private def sideCounts(conn: Connection, world: String, saveDay: LocalDate): Map[String, (Int, Long)] = {
     val statement = conn.prepareStatement(
-      """SELECT victim_side, COUNT(*) AS deaths FROM (
-        |  SELECT DISTINCT victim_side, victim, occurred_at
+      """SELECT victim_side, COUNT(*) AS deaths, COALESCE(SUM(victim_level), 0) AS levels FROM (
+        |  SELECT DISTINCT victim_side, victim, victim_level, occurred_at
         |  FROM frag_event
         |  WHERE world = ? AND save_day = ?
         |) deaths
@@ -130,8 +132,9 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
     statement.setString(1, world)
     statement.setDate(2, SqlDate.valueOf(saveDay))
     val result = statement.executeQuery()
-    var counts = Map.empty[String, Int]
-    while (result.next()) counts += (result.getString("victim_side") -> result.getInt("deaths"))
+    var counts = Map.empty[String, (Int, Long)]
+    while (result.next())
+      counts += (result.getString("victim_side") -> ((result.getInt("deaths"), result.getLong("levels"))))
     statement.close()
     counts
   }

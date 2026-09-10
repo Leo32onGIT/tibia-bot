@@ -126,6 +126,11 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcDeathScreenshotRepository(connectionProvider)
   private val cacheRepository: persistence.CacheRepository =
     new persistence.jdbc.JdbcCacheRepository(connectionProvider)
+
+  /** Written by every world stream on its ordinary poll, read once a day by the
+   *  statistics post. Public because the writer is TibiaBot, not this object. */
+  val worldOnlineRepository: persistence.WorldOnlineRepository =
+    new persistence.jdbc.JdbcWorldOnlineRepository(connectionProvider)
   private val activityRepository: persistence.ActivityRepository =
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
   private val worldTransferRepository: persistence.WorldTransferRepository =
@@ -1276,6 +1281,24 @@ object BotApp extends App with StrictLogging {
     logger.info("Daily statistics post enabled for this bot's guilds")
   }
 
+  /** File one reading of how busy a world is, from the poll that already has it.
+   *
+   *  Fire-and-forget off the stream thread for the same reason recordFrags is:
+   *  the world's poll must not wait on a write it has no use for. A failure
+   *  costs one sample out of the fourteen hundred a day, which moves an average
+   *  by nothing, so it is logged at debug and forgotten.
+   *
+   *  Every bot tracking the world writes its own samples into the same row. That
+   *  is safe by construction — the row holds a sum and a count, so a duplicated
+   *  minute lifts both and leaves the average where it was. */
+  def recordWorldOnline(world: String, online: Int, levelTotal: Long, at: ZonedDateTime): Unit = {
+    val saveDay = scheduler.ServerSaveSchedule.lastServerSave(at).toLocalDate
+    Future {
+      worldOnlineRepository.recordSample(world, saveDay, online, levelTotal)
+    }(ex).failed.foreach(error =>
+      logger.debug(s"Could not record the online sample for '$world': ${error.getMessage}"))(ex)
+  }
+
   /** File a death's frags for one guild.
    *
    *  Called from the death path, which runs on the world's stream thread and
@@ -1470,6 +1493,7 @@ object BotApp extends App with StrictLogging {
     highscores = highscoreRepository,
     killStatistics = killStatisticsRepository,
     frags = fragRepository,
+    worldOnline = worldOnlineRepository,
     targets = () => statisticsTargets(),
     announce = (target, report, frags, enemyLosses) =>
       Option(discordGateway.guildById(target.guildId))
@@ -1488,7 +1512,9 @@ object BotApp extends App with StrictLogging {
                 Config.levelUpEmoji, Config.levelDownEmoji) :::
               presentation.PvpEmbeds.build(
                 target.world, frags, enemyLosses, side, statisticsVocation(target.world),
-                Config.barEmoji, Config.levelDownEmoji, jumpToDeath(target)) :::
+                Config.barEmoji,
+                presentation.Bars.Scale.forWorld(report.averageOnline, report.averageLevel),
+                Config.levelDownEmoji, jumpToDeath(target)) :::
               presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
             replaceStatisticsPost(channel, presentation.EmbedPages.messages(embeds))
           }
@@ -1908,6 +1934,10 @@ object BotApp extends App with StrictLogging {
         .minusSeconds(Config.Statistics.KillStatistics.retention.toSeconds)
         .atZone(domain.time.Clock.Berlin).toLocalDate
       killStatisticsRepository.removeExpired(before)
+      // The online rollup rides the same cutoff. It is one row per world per day
+      // against the boss history's thousands, so a retention of its own would be
+      // a second setting to keep in step for no saving worth having.
+      worldOnlineRepository.removeExpired(before)
     }
 
   /** Drop frag rows older than the retention, per guild.

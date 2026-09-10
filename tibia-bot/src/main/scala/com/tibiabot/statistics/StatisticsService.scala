@@ -2,7 +2,7 @@ package com.tibiabot.statistics
 
 import com.tibiabot.domain.time.Clock
 import com.tibiabot.domain.{ExperienceDelta, FragTally}
-import com.tibiabot.persistence.{ExperienceRepository, FragRepository, HighscoreRepository, KillStatisticsRepository}
+import com.tibiabot.persistence.{ExperienceRepository, FragRepository, HighscoreRepository, KillStatisticsRepository, WorldOnlineRepository}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
@@ -62,6 +62,7 @@ final class StatisticsService(
     highscores: HighscoreRepository,
     killStatistics: KillStatisticsRepository,
     frags: FragRepository,
+    worldOnline: WorldOnlineRepository,
     targets: () => List[StatisticsTarget],
     announce: (StatisticsTarget, DailyReport, FragTally, List[ExperienceDelta]) => Unit,
     recordPosted: (StatisticsTarget, LocalDate) => Unit,
@@ -137,6 +138,7 @@ final class StatisticsService(
       // is the whole retained history: a world boss counts in months, so
       // narrowing this to recent days would hide exactly the bosses worth
       // predicting.
+      val average = worldOnline.averages(world, day)
       val sightings = killStatistics.sightings(world, killStatistics.earliestDay(world).getOrElse(day))
       val predictions = BossPredictor.predictAll(sightings, day)
       Some(DailyReport(
@@ -150,7 +152,13 @@ final class StatisticsService(
         // experience figures and no kill figures is worth more than silence.
         kills = killStatistics.summary(world, day),
         predictions = predictions,
-        awaitingSighting = BossPredictor.awaitingFirstSighting(sightings)
+        awaitingSighting = BossPredictor.awaitingFirstSighting(sightings),
+        // Absent on a world nothing ever sampled, which the bar answers with a
+        // default scale rather than by going missing. Read here rather than in
+        // the announce so it is fetched once per world like everything else in
+        // the report, not once per discord watching it.
+        averageOnline = average.map(_.online),
+        averageLevel = average.map(_.level)
       ))
     } catch {
       case NonFatal(error) =>

@@ -218,7 +218,7 @@ object Config {
   *  asks for them: a colour and a position in the run. */
  val barEmoji: Map[(String, String), String] = (
    for {
-     colour <- List("green", "red")
+     colour <- List("green", "red", "empty")
      shape <- List("start", "mid", "end")
    } yield (colour, shape) -> discord.getString(s"bar-$colour-$shape-emoji")
  ).toMap

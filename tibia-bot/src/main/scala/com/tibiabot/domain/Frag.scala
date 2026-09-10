@@ -73,6 +73,15 @@ final case class TopKill(name: String, level: Int, side: FragSide, deathMessageI
 final case class FragTally(
     enemiesKilled: Int,
     alliesKilled: Int,
+    /** The victims' levels, added up per side.
+     *
+     *  Kept beside the counts rather than instead of them because the two answer
+     *  different questions and the post asks both: the counts are what the line
+     *  under the bar says, and these are what the bar's length is drawn from.
+     *  Thirty level eights and thirty level four hundreds are the same number of
+     *  deaths and nothing like the same day. */
+    enemyLevels: Long,
+    allyLevels: Long,
     fraggers: List[Fragger],
     mostWanted: List[Repeat],
     topEnemyKilled: Option[TopKill],
@@ -80,10 +89,11 @@ final case class FragTally(
 ) {
   def isEmpty: Boolean = enemiesKilled == 0 && alliesKilled == 0
   def nonEmpty: Boolean = !isEmpty
+
 }
 
 object FragTally {
-  val empty: FragTally = FragTally(0, 0, Nil, Nil, None, None)
+  val empty: FragTally = FragTally(0, 0, 0L, 0L, Nil, Nil, None, None)
 
   /** How many names each side contributes to the merged fragger list, and how
    *  long Most Wanted runs. Five a side rather than ten overall, so a one-sided
