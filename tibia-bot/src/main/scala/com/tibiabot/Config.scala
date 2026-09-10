@@ -124,7 +124,6 @@ object Config {
 
     val scoreRetention: FiniteDuration = dur("score-retention")
     val eventRetention: FiniteDuration = dur("event-retention")
-    val experienceRawRetention: FiniteDuration = dur("experience-raw-retention")
     val experienceDailyRetention: FiniteDuration = dur("experience-daily-retention")
 
     /** The stretch of a snapshot the sweep may spread its requests over.

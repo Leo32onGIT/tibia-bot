@@ -6,7 +6,7 @@ import com.tibiabot.persistence.{ConnectionProvider, ExperienceRepository}
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
 import java.sql.{Date => SqlDate, Timestamp}
-import java.time.{Instant, LocalDate}
+import java.time.LocalDate
 import scala.collection.mutable.ListBuffer
 
 /** JDBC implementation of ExperienceRepository against the shared bot_cache
@@ -14,29 +14,6 @@ import scala.collection.mutable.ListBuffer
 final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) extends ExperienceRepository {
 
   private val batchSize = 500
-
-  def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit =
-    if (entries.nonEmpty) JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      // ON CONFLICT DO NOTHING rather than an update: the key already carries the
-      // snapshot, so a second write of the same one is a re-run of work already
-      // done, not a correction.
-      val statement = conn.prepareStatement(
-        s"""
-           |INSERT INTO experience_reading(world, name, observed, char_level, experience)
-           |VALUES (?,?,?,?,?)
-           |ON CONFLICT (world, name, observed) DO NOTHING;
-           |""".stripMargin
-      )
-      val at = Timestamp.from(observed)
-      write(statement, dedupe(entries)) { case (key, entry) =>
-        statement.setString(1, world)
-        statement.setString(2, key)
-        statement.setTimestamp(3, at)
-        statement.setInt(4, entry.level)
-        statement.setLong(5, entry.value)
-      }
-      statement.close()
-    }
 
   def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit =
     if (entries.nonEmpty) JdbcSupport.withConnection(connectionProvider.cache) { conn =>
@@ -205,14 +182,6 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
 
       statement.close()
       deltas.toList
-    }
-
-  def removeExpiredReadings(before: Instant): Unit =
-    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.prepareStatement("DELETE FROM experience_reading WHERE observed < ?;")
-      statement.setTimestamp(1, Timestamp.from(before))
-      statement.executeUpdate()
-      statement.close()
     }
 
   def removeExpiredDaily(before: LocalDate): Unit =

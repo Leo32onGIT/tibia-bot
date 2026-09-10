@@ -73,17 +73,13 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
   }
 
   private class StubExperience extends ExperienceRepository {
-    val readings = mutable.ListBuffer.empty[(String, Int, Instant)]
     val dailies = mutable.ListBuffer.empty[(String, Int, LocalDate)]
-    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit =
-      readings += ((world, entries.size, observed))
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit =
       dailies += ((world, entries.size, saveDay))
     def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
     def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
     def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
-    def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
@@ -177,7 +173,7 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     result.characters shouldBe 1
   }
 
-  test("the experience list feeds the history tables and announces nothing") {
+  test("the experience list feeds the rollup and announces nothing") {
     val experience = HighscoreLists.experience
     val previous = Map("bubble" -> HighscoreRecord("bubble", "Bubble", "Elite Knight", 400, 1000L, snapshot.minusSeconds(3600)))
     val api = new StubApi(fullList(List(entry("Bubble", 2000L))))
@@ -187,17 +183,15 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
 
     result.advances shouldBe empty
     repo.filed shouldBe empty
-    history.readings.map(_._3).toList shouldBe List(snapshot)
     history.dailies should have size 1
     // 05:40 UTC is 07:40 Berlin, before the 10:00 save, so it belongs to the
     // previous save day rather than the calendar one.
     history.dailies.head._3 shouldBe LocalDate.parse("2026-09-01")
   }
 
-  test("a skill list never touches the history tables") {
+  test("a skill list never touches the rollup") {
     val history = new StubExperience
     await(sweeper(new StubApi(fullList(List(entry("Bubble", 116)))), new StubRepo, history).sweepList(world, sword, snapshot))
-    history.readings shouldBe empty
     history.dailies shouldBe empty
   }
 }

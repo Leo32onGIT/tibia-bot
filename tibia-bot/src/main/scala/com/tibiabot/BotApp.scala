@@ -1910,7 +1910,6 @@ object BotApp extends App with StrictLogging {
   private def pruneHighscoreHistory(): Unit =
     if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
       val now = Instant.now()
-      experienceRepository.removeExpiredReadings(now.minusSeconds(Config.Highscores.experienceRawRetention.toSeconds))
       experienceRepository.removeExpiredDaily(
         now.minusSeconds(Config.Highscores.experienceDailyRetention.toSeconds)
           .atZone(domain.time.Clock.Berlin).toLocalDate)

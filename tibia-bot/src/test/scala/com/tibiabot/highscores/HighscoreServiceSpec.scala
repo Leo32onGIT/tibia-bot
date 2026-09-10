@@ -50,13 +50,11 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
   }
 
   private object NoopExperience extends ExperienceRepository {
-    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
     def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
     def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
     def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
-    def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 

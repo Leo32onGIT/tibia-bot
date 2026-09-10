@@ -3,22 +3,18 @@ package com.tibiabot.persistence
 import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint}
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
-import java.time.{Instant, LocalDate}
+import java.time.LocalDate
 
-/** Persistence port for the experience history — the half of this feature that
- *  posts nothing and exists only so the Statistics channel has something to
- *  read when it is built.
+/** Persistence port for the experience history the Statistics channel reads.
  *
- *  Two tables rather than one, because the honest hourly reading and the thing
- *  worth keeping for a year are different sizes. A snapshot is a thousand rows
- *  per world; at 68 worlds and 24 snapshots that is 1.63M rows a day, which is
- *  58 GB a year on a disk already at 80%. So the raw readings live a week —
- *  enough for any intra-day curve — and a rollup carries one row per character
- *  per server-save day for the long term at about a fortieth of the volume. */
+ *  One table, holding one row per character per server-save day. There used to
+ *  be a second one keeping every hourly reading behind it, on the reasoning that
+ *  an intra-day curve would want them. Nothing was ever built that read it, and
+ *  measured against real Postgres it was 30 MB per world of the 58 this feature
+ *  uses — more than half the disk, for a table whose only statements were an
+ *  INSERT and a DELETE. If the curve is ever wanted, the readings are fifteen
+ *  lines to bring back; the year of them nobody looked at is not. */
 trait ExperienceRepository {
-
-  /** File one snapshot's readings. */
-  def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit
 
   /** Fold the same readings into the day's rollup.
    *
@@ -61,8 +57,6 @@ trait ExperienceRepository {
    *  tracked enemies are ordinary players who are not in it. An enemy with no row
    *  has no figure at all, not a figure of zero. */
   def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta]
-
-  def removeExpiredReadings(before: Instant): Unit
 
   def removeExpiredDaily(before: LocalDate): Unit
 }

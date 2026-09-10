@@ -287,16 +287,6 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       // the thing worth keeping for a year are different sizes: raw readings are
       // 1.63M rows a day across 68 worlds, so they live a week, while the rollup
       // carries one row per character per server-save day at a fortieth of that.
-      val createExperienceReadingTable =
-        s"""CREATE TABLE IF NOT EXISTS experience_reading (
-           |world VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |observed TIMESTAMP NOT NULL,
-           |char_level INT NOT NULL,
-           |experience BIGINT NOT NULL,
-           |PRIMARY KEY (world, name, observed)
-           |);""".stripMargin
-
       val createExperienceDailyTable =
         s"""CREATE TABLE IF NOT EXISTS experience_daily (
            |world VARCHAR(255) NOT NULL,
@@ -311,10 +301,6 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
 
       // The prunes delete by time across every world, and neither primary key
       // leads with the column they filter on.
-      val createExperienceReadingIndex =
-        s"""CREATE INDEX IF NOT EXISTS experience_reading_observed
-           |ON experience_reading (observed);""".stripMargin
-
       val createExperienceDailyIndex =
         s"""CREATE INDEX IF NOT EXISTS experience_daily_save_day
            |ON experience_daily (save_day);""".stripMargin
@@ -406,9 +392,14 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createHighscoreEventsIndex)
       newStatement.executeUpdate(createHighscoreFeedCursorTable)
 
-      newStatement.executeUpdate(createExperienceReadingTable)
       newStatement.executeUpdate(createExperienceDailyTable)
-      newStatement.executeUpdate(createExperienceReadingIndex)
+
+      // Written every hour for a year and never once read: the only statements
+      // that ever named it were an INSERT and a DELETE. It was banked for an
+      // intra-day experience curve that was never built, and cost more than half
+      // the disk this feature uses. Dropped rather than left to age out, so the
+      // space comes back on the next start rather than a week later.
+      newStatement.executeUpdate("DROP TABLE IF EXISTS experience_reading;")
       newStatement.executeUpdate(createExperienceDailyIndex)
       newStatement.executeUpdate(createExperienceDailyWorldDayIndex)
       newStatement.executeUpdate(createKillStatisticsBossTable)

@@ -11,7 +11,6 @@ import java.time.{Duration, Instant, LocalDate}
 class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with PostgresSupport {
 
   private val world = "ExperienceSpecWorld"
-  private val snapshot = Instant.parse("2026-09-02T05:40:00Z")
   private val day = LocalDate.parse("2026-09-01")
 
   private def entry(name: String, experience: Long, level: Int = 400) =
@@ -21,7 +20,6 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     val provider = pgOrCancel()
     ensureCacheSchema(provider)
     val repo = new JdbcExperienceRepository(provider)
-    repo.removeExpiredReadings(snapshot.plus(Duration.ofDays(3650)))
     repo.removeExpiredDaily(day.plusYears(10))
     repo
   }
@@ -64,24 +62,7 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.daily(world, "BUBBLE", day).map(_.experience) shouldBe List(1200L)
   }
 
-  test("raw readings are keyed by snapshot, so re-running one changes nothing") {
-    val repo = freshRepo()
-
-    repo.recordReadings(world, List(entry("Bubble", 1000L)), snapshot)
-    // A re-run of work already done is not a correction; the second write is a
-    // no-op rather than an error or a duplicate row.
-    repo.recordReadings(world, List(entry("Bubble", 9999L)), snapshot)
-    repo.recordReadings(world, List(entry("Bubble", 2000L)), snapshot.plus(Duration.ofHours(1)))
-
-    repo.removeExpiredReadings(snapshot.plus(Duration.ofMinutes(30)))
-    // The first snapshot's row went; the second's stayed. If the duplicate had
-    // landed as a second row, or the ON CONFLICT had overwritten, this count
-    // would be wrong either way.
-    repo.recordReadings(world, List(entry("Bubble", 1000L)), snapshot)
-    repo.removeExpiredReadings(snapshot.plus(Duration.ofDays(3650)))
-  }
-
-  test("both prunes drop by age") {
+  test("the prune drops by age") {
     val repo = freshRepo()
 
     repo.recordDaily(world, List(entry("Bubble", 1000L)), day)
@@ -99,10 +80,5 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
 
     repo.recordDaily(world, List(entry("Bubble", 1000L), entry("Bubble", 1100L)), day)
     repo.daily(world, "Bubble", day).map(_.experience) shouldBe List(1100L)
-
-    // The raw table's ON CONFLICT DO NOTHING would also survive a duplicate, but
-    // only because the duplicates are collapsed before the batch is built.
-    repo.recordReadings(world, List(entry("Bubble", 1000L), entry("Bubble", 1100L)), snapshot)
-    repo.removeExpiredReadings(snapshot.plus(Duration.ofDays(3650)))
   }
 }
