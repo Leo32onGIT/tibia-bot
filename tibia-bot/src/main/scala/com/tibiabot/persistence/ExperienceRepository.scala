@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint}
+import com.tibiabot.domain.ExperienceDelta
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
 import java.time.LocalDate
@@ -23,10 +23,6 @@ trait ExperienceRepository {
    *  one after it, needs no schedule of its own, and heals itself after a
    *  restart — where a single timed write would simply miss the day. */
   def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit
-
-  /** One character's daily points from `from` onward, oldest first — the shape
-   *  an "experience gained" series wants. */
-  def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint]
 
   /** The day's biggest experience gains on one world, largest first.
    *

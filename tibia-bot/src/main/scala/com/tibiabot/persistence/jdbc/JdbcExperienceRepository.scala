@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.{ExperienceDelta, ExperiencePoint}
+import com.tibiabot.domain.ExperienceDelta
 import com.tibiabot.highscores.HighscoreDiff
 import com.tibiabot.persistence.{ConnectionProvider, ExperienceRepository}
 import com.tibiabot.tibiadata.response.HighscoreEntry
@@ -40,38 +40,6 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
         statement.setLong(7, entry.value)
       }
       statement.close()
-    }
-
-  def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] =
-    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.prepareStatement(
-        s"""
-           |SELECT name,display_name,vocation,char_level,experience,save_day
-           |FROM experience_daily
-           |WHERE world = ? AND name = ? AND save_day >= ?
-           |ORDER BY save_day ASC;
-           |""".stripMargin
-      )
-      statement.setString(1, world)
-      statement.setString(2, HighscoreDiff.key(name))
-      statement.setDate(3, SqlDate.valueOf(from))
-      val result = statement.executeQuery()
-
-      val points = new ListBuffer[ExperiencePoint]()
-      while (result.next()) {
-        val key = Option(result.getString("name")).getOrElse("")
-        points += ExperiencePoint(
-          name = key,
-          displayName = Option(result.getString("display_name")).getOrElse(key),
-          vocation = Option(result.getString("vocation")).getOrElse(""),
-          level = result.getInt("char_level"),
-          experience = result.getLong("experience"),
-          saveDay = result.getDate("save_day").toLocalDate
-        )
-      }
-
-      statement.close()
-      points.toList
     }
 
   def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
