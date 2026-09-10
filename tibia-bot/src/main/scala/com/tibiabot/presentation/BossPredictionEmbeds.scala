@@ -27,8 +27,9 @@ import java.time.Instant
  */
 object BossPredictionEmbeds {
 
-  /** Deep green — a forecast rather than a record. */
-  val PredictionColor: Int = 2400045
+  /** Nemesis purple, the colour a rare boss already wears wherever else the bot
+   *  mentions one. */
+  val PredictionColor: Int = Embeds.NemesisPurple
 
   /** Empty when there is nothing worth posting: no boss due, and no history to
    *  explain why. A world still waiting for its first sightings gets the note

@@ -9,6 +9,15 @@ object Embeds {
   /** The standard embed colour used across the bot. */
   val BrandColor: Int = 3092790
 
+  /** The allegiance pair, as the activity channel uses them: an allied thing is
+   *  green and a hunted one is red.
+   *
+   *  Not the deaths channel's pair, which looks the same but means the opposite —
+   *  there the colour is the *news*, so an enemy dying is green. See
+   *  [[DeathEmbeds]], which keeps its own constants for exactly that reason. */
+  val AllyGreen: Int = 36941
+  val EnemyRed: Int = 13773097
+
   /** Bright purple — nemesis/notable-creature death embeds, and anything
    *  else that should read as a distinct "something's wrong" signal rather
    *  than routine brand-coloured output (e.g. the Patreon paywall's pause

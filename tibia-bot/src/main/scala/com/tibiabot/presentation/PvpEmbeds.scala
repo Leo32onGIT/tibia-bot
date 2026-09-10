@@ -27,8 +27,9 @@ import net.dv8tion.jda.api.entities.MessageEmbed
  */
 object PvpEmbeds {
 
-  /** Deep red. The one embed in the post that is about people fighting. */
-  val PvpColor: Int = 12621115
+  /** Enemy red, the same the activity channel gives a hunted guild — the other
+   *  half of the pair the board above it opens with. */
+  val PvpColor: Int = Embeds.EnemyRed
 
   /** @param vocationOf the vocation of a character, by lowercased name, from the
    *                   sheets the hunted and allied lists are drawn from; empty

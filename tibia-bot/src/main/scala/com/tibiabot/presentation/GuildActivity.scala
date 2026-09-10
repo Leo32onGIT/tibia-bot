@@ -12,7 +12,7 @@ object GuildActivity {
   /** Embed colour for a guild-join/swap activity: a hunted guild is red, an
    *  allied guild is green, and anything else is yellow. */
   def activityColor(huntedGuild: Boolean, alliedGuild: Boolean): Int =
-    if (huntedGuild) 13773097 else if (alliedGuild) 36941 else 14397256
+    if (huntedGuild) Embeds.EnemyRed else if (alliedGuild) Embeds.AllyGreen else 14397256
 
   /** Dark grey — what a neutral with no guild gets in the deaths channel (the
    *  `embedColor` default in TibiaBot's death block), reused for an event about

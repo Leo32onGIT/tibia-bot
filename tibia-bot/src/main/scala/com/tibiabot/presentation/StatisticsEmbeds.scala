@@ -32,10 +32,10 @@ import java.util.Locale
  */
 object StatisticsEmbeds {
 
-  /** Deep blue — a daily digest, not an event. Told apart at a glance from the
-   *  brand colour of an ordinary reply and from the allegiance colours the
-   *  deaths and levels channels use, none of which mean anything here. */
-  val WorldColor: Int = 2201331
+  /** Ally green, the same the activity channel gives an allied guild. The board
+   *  is the world doing well — experience gained, a skill reached — and the PVP
+   *  embed under it answers in the other half of the pair. */
+  val WorldColor: Int = Embeds.AllyGreen
 
   private val dayFormat = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH)
 
