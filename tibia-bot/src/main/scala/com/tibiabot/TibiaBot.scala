@@ -5,7 +5,7 @@ import org.apache.pekko.pattern.after
 import org.apache.pekko.stream.ActorAttributes.supervisionStrategy
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import org.apache.pekko.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, customSortData, Players}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
@@ -409,8 +409,22 @@ class TibiaBot(
                 }
               }
 
+              // This discord's activity rows, as a name lookup rather than a list
+              // to scan. Taken once and shared by the three questions below: on
+              // the busiest world the discords watching it hold ~52,000 rows
+              // between them, and asking each question with equalsIgnoreCase
+              // walked all of them, for every character, every poll.
+              //
+              // One snapshot for all three rather than one read each, which is
+              // both cheaper and steadier: a row dropped by another world's
+              // stream mid-block used to be able to make `currentNameCheck`
+              // true and the lookup right after it empty. Deciding from a
+              // snapshot is what this block already does — every write below
+              // re-reads inside the lock before applying.
+              val activityRows = BotApp.activityIndex(guildId)
+
               val rename = presentation.GuildActivity.renameFromFormerNames(
-                activityData.getOrElse(guildId, List()),
+                activityRows,
                 charName,
                 formerNamesList,
                 formerName => onlineTracker.find(formerName).isDefined
@@ -472,7 +486,8 @@ class TibiaBot(
               if (!skipJoinLeave) {
 
                 // Check charName
-                val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(charName))
+                val matchingActivityOption = activityRows.get(charName)
+                val currentNameCheck = matchingActivityOption.isDefined
 
                 // Did they just join one the tracked guilds?
                 var joinGuild = false
@@ -484,7 +499,6 @@ class TibiaBot(
 
                 // Player is already tracked
                 if (currentNameCheck) {
-                  val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.equalsIgnoreCase(charName))
                   val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
                   val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 

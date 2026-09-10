@@ -1,6 +1,6 @@
 package com.tibiabot.presentation
 
-import com.tibiabot.domain.PlayerCache
+import com.tibiabot.domain.{ActivityIndex, PlayerCache}
 
 import java.time.ZonedDateTime
 
@@ -49,22 +49,33 @@ object GuildActivity {
    *     character can be.
    *
    *  Also skips a character carrying their own current name in former_names (cause
-   *  unclear, possibly a namelock), which is not a rename. */
+   *  unclear, possibly a namelock), which is not a rename.
+   *
+   *  Takes an [[com.tibiabot.domain.ActivityIndex]] rather than the row list
+   *  because both of its questions are exact name lookups, and asking them of a
+   *  list meant two passes over every row the discord has ever tracked — up to
+   *  21,000 of them — for every character of every poll.
+   *
+   *  Where more than one former name still has a row, the answer is now the
+   *  first such *former name* rather than the first matching row in list order.
+   *  That only arises for a character renamed twice whose intermediate name was
+   *  never reclaimed, and it swaps an arbitrary choice for a stable one: the
+   *  row list has no meaningful order — it is rebuilt from an unordered select
+   *  on restart, and prepended to in between. */
   def renameFromFormerNames(
-    activity: List[PlayerCache],
+    activity: ActivityIndex,
     charName: String,
     formerNames: List[String],
     stillOnline: String => Boolean
   ): Option[Rename] = {
-    val trackedUnderCurrentName = activity.exists(_.name.equalsIgnoreCase(charName))
     val selfReferential = formerNames.exists(_.equalsIgnoreCase(charName))
-    if (charName.isEmpty || trackedUnderCurrentName || selfReferential) None
-    else {
-      val reclaimable = formerNames.filter(name => name.nonEmpty && !stillOnline(name))
-      activity
-        .find(row => reclaimable.exists(_.equalsIgnoreCase(row.name)))
+    if (charName.isEmpty || selfReferential || activity.contains(charName)) None
+    else
+      formerNames.iterator
+        .filter(name => name.nonEmpty && !stillOnline(name))
+        .flatMap(activity.get)
+        .nextOption()
         .map(row => Rename(row.name, row.updatedTime, row.guild))
-    }
   }
 
   /** Move the `oldName` row onto `newName`, applied to whatever the list looks

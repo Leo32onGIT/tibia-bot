@@ -18,6 +18,15 @@
     --code: #f0b232;
     --spawn-name: #e8e9ea;
 
+    /* Whoever a row is about. Discord's own blurple lifted a quarter of the way
+       to white: #5865F2 measures 4.22:1 on this ground, which is not only under
+       AA but under the 5.29:1 of the muted grey it has to stand out from — the
+       highlighted name would come out dimmer than the sentence around it. This
+       is 6.50:1, and still unmistakably the brand hue. Kept as a triplet as well
+       so the plate behind it derives from the colour rather than repeating it. */
+    --claimant-rgb: 130,140,245;
+    --claimant: rgb(var(--claimant-rgb));
+
     /* One definition for every state, used by the cards and by the calendar
        inside the spawn window. Booked and confirmed share a hue deliberately: a
        confirmed slot is the same booking with the question settled, so it reads
@@ -415,6 +424,32 @@
      The rows under "up next" are already drawn in this colour, so there it is
      the weight doing the work. */
   .at-name { font-weight: 700; color: var(--text); }
+
+  /* On a state line — the card's, and the strip at the top of an open panel —
+     the name is a Discord person, and says so: the brand mark, and the name on a
+     wash of the brand colour.
+
+     Scoped to .who rather than put on .at-name itself, because the same class is
+     on the "up next" rows, and a plate there would put a second box inside a row
+     that is already a box. Those two already override the colour half of
+     .at-name (.up-who by order, .up-peek b by specificity), so the only thing
+     that would have leaked is the background — which is exactly the part that
+     does not belong there.
+
+     A wash and no border, deliberately. The bordered version reads as a second
+     chip on a card whose top line already has one, and at 11px two outlined
+     plates stacked four pixels apart is a busier card than the name is worth. */
+  .who .at-name {
+    color: var(--claimant);
+    background: rgba(var(--claimant-rgb), 0.12);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  /* Explicitly the name's colour rather than currentColor: the mark sits outside
+     the plate, where currentColor is the muted grey of the line. */
+  .who .d-mark {
+    width: 11px; height: 11px; flex-shrink: 0;
+    vertical-align: -1px; margin-right: 3px; fill: var(--claimant);
+  }
   .tick { font-size: 11px; color: var(--st-confirmed); flex-shrink: 0; }
   .queue { font-family: var(--mono); font-size: 10px; color: var(--muted); flex-shrink: 0; }
   .card-state .queue { margin-left: auto; }
@@ -1616,10 +1651,25 @@ function holderText(spawn) {
   return called(spawn.holder);
 }
 
-/** The same name, set apart from the sentence around it. Escaped as it is
- *  wrapped, since it is the half of the line that comes off the wire. */
+/** Discord's mark, inline.
+ *
+ *  Inline rather than an <img>: it is eleven pixels of two-colour artwork drawn
+ *  on every card of every render, and a file for it would be a request and a
+ *  cache entry to save nothing. Its colour comes from the stylesheet, not from
+ *  here. */
+const DISCORD_MARK = '<svg class="d-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>';
+
+/** The same name, set apart from the sentence around it, and marked as the
+ *  Discord person it is. Escaped as it is wrapped, since it is the half of the
+ *  line that comes off the wire.
+ *
+ *  The mark goes on only where there is an actual account behind the name. "you"
+ *  and "someone" are this page's own words for the reader and for nobody in
+ *  particular, and putting Discord's logo against either would be claiming a
+ *  handle that was never read off anything. */
 function atName(spawn) {
-  return `<b class="at-name">${esc(holderText(spawn))}</b>`;
+  const mark = spawn.holder ? DISCORD_MARK : '';
+  return `${mark}<b class="at-name">${esc(holderText(spawn))}</b>`;
 }
 
 const STATE_TEXT = {
