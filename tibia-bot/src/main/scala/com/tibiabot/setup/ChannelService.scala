@@ -177,123 +177,12 @@ final class ChannelService(
    *  channels use. */
   private val statisticsChannelName = "📊・sᴛᴀᴛɪsᴛɪᴄs"
 
-  /** Turn the daily statistics post on or off for one world.
-   *
-   *  Turning it on makes the channel, which is why this lives here and not in
-   *  WorldSettingsService with the other `/settings` writes: those change a value
-   *  on a row, this one creates a channel and has to cope with the category
-   *  having been deleted since `/setup` ran.
-   *
-   *  Turning it off only clears the id. The channel is left where it is, exactly
-   *  as `setCommandLogChannel` leaves the old command log: by then it holds a
-   *  history somebody may want, and deleting a channel nobody asked us to delete
-   *  is not a thing to do on a toggle.
-   *
-   *  A world that is switched back on and still has its channel keeps it — the
-   *  stored id is checked against a live channel first, so this never leaves a
-   *  guild with two.
-   */
-  def setStatisticsChannel(guild: Guild, user: User, world: String, enabled: Boolean): MessageEmbed = {
-    val embedBuild = new EmbedBuilder()
-    embedBuild.setColor(BrandColor)
-    val worldFormal = com.tibiabot.domain.WorldName.formal(world)
-    val configured = worldConfig(guild).find(_.name.equalsIgnoreCase(worldFormal))
-
-    configured match {
-      case None =>
-        embedBuild.setDescription(
-          s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can turn this on.")
-
-      case Some(worldRow) =>
-        val existing = liveChannel(guild, worldRow.statisticsChannel)
-        if (!enabled) {
-          if (worldRow.statisticsChannel == "0" || worldRow.statisticsChannel.isEmpty)
-            embedBuild.setDescription(
-              s"${Config.noEmoji} The daily statistics post is already off for **$worldFormal**.")
-          else {
-            storeStatisticsChannel(guild, worldFormal, "0")
-            val leftBehind = existing
-              .map(channel => s"\n\n*<#${channel.getId}> is still there — delete it if you don't want it.*")
-              .getOrElse("")
-            AdminLog.post(commandLogOf(guild),
-              s"${Names.user(user.getName)} turned the daily statistics post off for **$worldFormal**.",
-              statisticsThumbnail)
-            embedBuild.setDescription(
-              s":gear: The daily statistics post is now **off** for **$worldFormal**.$leftBehind")
-          }
-        } else existing match {
-          case Some(channel) =>
-            embedBuild.setDescription(
-              s"${Config.noEmoji} The daily statistics post is already on for **$worldFormal**, in <#${channel.getId}>.")
-          case None =>
-            createStatisticsChannel(guild, worldRow.category) match {
-              case None =>
-                embedBuild.setDescription(
-                  s"${Config.noEmoji} I couldn't make a channel for **$worldFormal** — run `/repair $worldFormal` " +
-                    "to rebuild the world's category, then try again.")
-              case Some(channel) =>
-                storeStatisticsChannel(guild, worldFormal, channel.getId)
-                postChannelIntro(channel, statisticsIntro(worldFormal))
-                AdminLog.post(commandLogOf(guild),
-                  s"${Names.user(user.getName)} turned the daily statistics post on for **$worldFormal**.",
-                  statisticsThumbnail)
-                embedBuild.setDescription(
-                  s":gear: The daily statistics post is now **on** for **$worldFormal**, in <#${channel.getId}>.\n\n" +
-                    "The first one lands just after the next server save.")
-            }
-        }
-    }
-    embedBuild.build()
-  }
-
-  private val statisticsThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Sign_(Library).gif"
-
-  private def statisticsIntro(world: String): String =
-    s"This channel gets one post a day, just after server save, summing up the last " +
-      s"server save day on **$world** — who gained the most experience, who lost the most, " +
-      "and the highest skill anyone reached.\n\n" +
-      "Turn it off again from `/settings`."
-
-  /** A stored channel id resolved to a channel that is actually still there.
-   *
-   *  Digits-checked before the lookup for the same reason `setCommandLogChannel`
-   *  does it: `getTextChannelById` throws on anything that is not a snowflake,
-   *  and the stored value is "0" for a world that never turned this on. */
-  private def liveChannel(guild: Guild, channelId: String): Option[TextChannel] =
-    Option(channelId).filter(id => id.nonEmpty && id.forall(_.isDigit))
-      .flatMap(id => Option(guild.getTextChannelById(id)))
-
-  /** Make the channel in the world's own category, beside its deaths and levels
-   *  channels. None when the category is gone — `/repair` is what rebuilds that,
-   *  and making the channel loose at the top of the server instead would be a
-   *  worse answer than saying so. */
-  private def createStatisticsChannel(guild: Guild, categoryId: String): Option[TextChannel] =
-    Option(categoryId).filter(id => id != null && id.nonEmpty && id.forall(_.isDigit))
-      .flatMap(id => Option(guild.getCategoryById(id)))
-      .flatMap { category =>
-        Try {
-          val channel = guild.createTextChannel(statisticsChannelName, category).complete()
-          grantWorldPerms(channel, guild.getBotRole, guild.getPublicRole)
-          channel
-        }.toOption
-      }
-
-  /** Write the id to the database and to the cache the post reads back.
-   *
-   *  `statistics_posted` is cleared alongside it, so a world switched off and on
-   *  again gets the next day's post rather than being told it has already had
-   *  one — the stored date would otherwise still be sitting there. */
-  private def storeStatisticsChannel(guild: Guild, worldFormal: String, channelId: String): Unit = {
-    worldRepairConfig(guild, worldFormal, "statistics_channel", channelId)
-    worldRepairConfig(guild, worldFormal, "statistics_posted", "")
-    if (streamState.worldsData.contains(guild.getId)) {
-      val updated = streamState.worldsData(guild.getId).map { world =>
-        if (world.name.equalsIgnoreCase(worldFormal)) world.copy(statisticsChannel = channelId, statisticsPosted = "")
-        else world
-      }
-      streamState.modifyWorldsData(_ + (guild.getId -> updated))
-    }
-  }
+  /** Names no world: it is posted inside that world's own category, and every
+   *  other channel's intro there does the same. */
+  private val statisticsIntro: String =
+    ":speech_balloon: This channel posts a daily summary at **server save**.\n\n" +
+      "It includes who gained and lost the most experience, the highest skill anyone reached, " +
+      "PVP statistics for the day and which bosses are due to spawn today."
 
   private def commandLogOf(guild: Guild): TextChannel = {
     val config = discordRetrieveConfig(guild)
@@ -842,9 +731,10 @@ final class ChannelService(
         val deathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", newCategory).complete()
         val levelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", newCategory).complete()
         val activityChannel = guild.createTextChannel("📝・ᴀᴄᴛɪᴠɪᴛʏ", newCategory).complete()
+        val statisticsChannel = guild.createTextChannel(statisticsChannelName, newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel)
+        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, statisticsChannel)
         channelList.foreach(grantWorldPerms(_, botRole, publicRole))
 
         val notificationsConfig = discordRetrieveConfig(guild)
@@ -866,12 +756,18 @@ final class ChannelService(
         val deathsId = deathsChannel.getId
         val categoryId = newCategory.getId
         val activityId = activityChannel.getId
+        val statisticsId = statisticsChannel.getId
 
         postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/settings filter levels`** command.")
         postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/settings filter deaths`** command.")
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
+        postChannelIntro(guild.getTextChannelById(statisticsId), statisticsIntro)
+
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "0", "0", activityId)
+        // Written after the insert rather than threaded through worldCreateConfig,
+        // whose positional signature is already sixteen arguments long.
+        worldRepairConfig(guild, world, "statistics_channel", statisticsId)
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
           val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(guild.getIdLong, guild.getJDA.getSelfUser.getId)
@@ -962,9 +858,6 @@ final class ChannelService(
       val activityChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.activityChannel))
       val fullblessChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
       val onlineCombinedInfo: Option[String] = cache.flatMap(_.headOption.map(_.onlineCombined))
-      // "0" on every world that has not turned the daily post on, which is most
-      // of them — so this repairs a channel somebody asked for and creates
-      // nothing for anybody who did not.
       val statisticsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.statisticsChannel))
 
       // get admin ids
@@ -983,9 +876,12 @@ final class ChannelService(
       val deathsChannel = guild.getTextChannelById(deathsChannelInfo.getOrElse("0"))
       val activityChannel = guild.getTextChannelById(activityChannelInfo.getOrElse("0"))
       val onlineCombinedVal = onlineCombinedInfo.getOrElse("true")
-      val statisticsWanted = statisticsChannelInfo.exists(id => id != "0" && id.nonEmpty)
-      val statisticsChannel = guild.getTextChannelById(statisticsChannelInfo.getOrElse("0"))
-      val statisticsMissing = statisticsWanted && statisticsChannel == null
+      // "0" on every world set up before the daily post existed, which reads the
+      // same as a deleted channel and is repaired the same way — the path that
+      // gives those worlds their bounty role for the first time does likewise.
+      val statisticsChannelId = statisticsChannelInfo.filter(id => id.nonEmpty && id.forall(_.isDigit)).getOrElse("0")
+      val statisticsChannel = guild.getTextChannelById(statisticsChannelId)
+      val statisticsMissing = statisticsChannel == null
 
       val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
@@ -1251,9 +1147,6 @@ final class ChannelService(
           // post initial embed in activity channel
           postChannelIntro(recreateActivityChannel, s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
         }
-        // Only for a world that had one: `statisticsMissing` is false wherever
-        // the daily post was never turned on, so /repair never hands a guild a
-        // channel it did not ask for.
         if (statisticsMissing) {
           val recreateStatisticsChannel = guild.createTextChannel(statisticsChannelName, category).complete()
           channelList += ((recreateStatisticsChannel, false))
@@ -1270,7 +1163,7 @@ final class ChannelService(
             }
             streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
           }
-          postChannelIntro(recreateStatisticsChannel, statisticsIntro(worldFormal))
+          postChannelIntro(recreateStatisticsChannel, statisticsIntro)
         }
 
         if (boostedChannel == null) {

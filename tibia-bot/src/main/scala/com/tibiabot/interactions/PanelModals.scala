@@ -86,13 +86,6 @@ object PanelModals extends StrictLogging {
               number(event, PanelForms.NeutralsField).map(v => service.onlineMinLevel(event, name, v, "neutrals"))
             ).flatten
 
-          // Not on WorldSettingsService like its neighbours: turning this on
-          // creates a channel, which is ChannelService's business.
-          case PanelIds.Statistics =>
-            choice(event, PanelForms.OptionField)
-              .map(v => BotApp.channelService.setStatisticsChannel(event.getGuild, event.getUser, name, v == "on"))
-              .toList
-
           case _ => Nil
         }
         if (embeds.isEmpty) reply(event, s"${Config.noEmoji} Nothing was changed - every box was left blank.")

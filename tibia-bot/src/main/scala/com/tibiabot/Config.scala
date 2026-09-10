@@ -211,6 +211,7 @@ object Config {
  val levelUpEmoji: String = discord.getString("levelup-emoji")
  /** The falling counterpart to [[levelUpEmoji]] — experience lost rather than
   *  gained. The statistics post uses the pair in place of a + and a - sign. */
+ val newsEmoji: String = discord.getString("news-emoji")
  val levelDownEmoji: String = discord.getString("lvldown-emoji")
 
  /** The nine bar-segment emoji, keyed the way [[com.tibiabot.presentation.Bars]]

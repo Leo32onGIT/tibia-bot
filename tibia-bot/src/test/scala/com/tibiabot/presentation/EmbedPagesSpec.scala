@@ -56,19 +56,17 @@ class EmbedPagesSpec extends AnyFunSuite with Matchers {
     built.foreach(_.getColor.getRGB & 0xFFFFFF shouldBe 123456)
   }
 
-  test("the thumbnail leads and the footer closes") {
-    val built = EmbedPages.build(1, lines(200), "https://example.invalid/t.gif", Some("a note"))
-    built.head.getThumbnail.getUrl shouldBe "https://example.invalid/t.gif"
-    built.tail.foreach(_.getThumbnail shouldBe null)
+  test("the footer closes the last page and appears nowhere else") {
+    val built = EmbedPages.build(1, lines(200), Some("a note"))
+    built.size should be > 1
     built.init.foreach(_.getFooter shouldBe null)
     built.last.getFooter.getText shouldBe "a note"
   }
 
-  test("one page carries both the thumbnail and the footer") {
-    val built = EmbedPages.build(1, lines(2), "https://example.invalid/t.gif", Some("a note"))
+  test("a single page carries the footer itself") {
+    val built = EmbedPages.build(1, lines(2), Some("a note"))
     built should have size 1
-    built.head.getThumbnail should not be null
-    built.head.getFooter should not be null
+    built.head.getFooter.getText shouldBe "a note"
   }
 
   // --- packing embeds into messages ----------------------------------------

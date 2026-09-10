@@ -78,11 +78,9 @@ exactly that reason.
    existing `columnExists` / `ALTER TABLE` migration in
    `JdbcWorldConfigRepository.migrate`, and a `statisticsChannel` field on
    `domain.Worlds`.
-2. `📊・sᴛᴀᴛɪsᴛɪᴄs` created in the world's category. Created by `/setup` for new
-   worlds; for the several hundred guilds that already ran it, created **on
-   demand** from a new `/settings` button rather than force-created on everyone —
-   the same choice the respawn forum made, and it keeps the bot from making a
-   channel in servers that never asked for one.
+2. `📊・sᴛᴀᴛɪsᴛɪᴄs` created in the world's category by `/setup`. ~~and on demand
+   from a `/settings` button for guilds that already ran it~~ — superseded
+   10 Sep 2026, see section 18: existing guilds get theirs from `/repair`.
 3. `/repair` support, mirroring `recreateDeathsChannel`.
 4. Permissions: `VIEW_CHANNEL`, `MESSAGE_SEND`, `MESSAGE_EMBED_LINKS` — the same
    set `commandLogPermissions` uses, since this only ever posts embeds.
@@ -362,11 +360,9 @@ against a field's 1,024 cap. Config-free, with the skill emoji injected the way
 `HighscoreAnnouncement` already takes it; reading Config here made every test of
 the file need a database host set.
 
-**Opt-in.** A `Statistics` button on `/settings` (📰) with an On/Off form.
-Turning it on creates `📊・sᴛᴀᴛɪsᴛɪᴄs` in that world's category; turning it off
-clears the id and leaves the channel, as the command log does. `/repair` rebuilds
-it only for a world that had one. `/setup` does not make it — several hundred
-guilds should not find a new channel after a deploy.
+**Part of a world, not an option.** ~~A `Statistics` button on `/settings`~~ —
+superseded 10 Sep 2026, see section 18. `📊・sᴛᴀᴛɪsᴛɪᴄs` is made by `/setup` and
+rebuilt by `/repair`, exactly like the deaths and levels channels.
 
 **Config.** `discord.statistics { enabled, tick-interval }`, `STATISTICS_ENABLED`
 to turn it off without stopping the history.
@@ -714,3 +710,62 @@ back.
 Still open: `canTalk()` checks `VIEW_CHANNEL` and `MESSAGE_SEND` but not
 `MESSAGE_EMBED_LINKS`, so a channel the bot can talk in but not embed in passes
 the filter and fails at the API.
+
+---
+
+## 18. The channel is not opt-in (10 Sep 2026)
+
+Shipped opt-in, behind a `📰 Statistics` button on `/settings`, on the reasoning
+that several hundred guilds should not find a new channel after a deploy. That
+was the wrong call: every other per-world channel is made by `/setup` and rebuilt
+by `/repair`, and being the one exception made `/repair` look broken — it reports
+"all channels still exist" for a world whose statistics channel was never made,
+because `statisticsMissing` required a stored id to compare against.
+
+So it now follows the same convention as its neighbours:
+
+- **`/setup`** makes `📊・sᴛᴀᴛɪsᴛɪᴄs` alongside the deaths, levels and activity
+  channels, grants it the same world permissions, and posts the intro.
+- **`/repair`** rebuilds it whenever it is missing, with no stored id required.
+  That is also how the several hundred existing guilds get theirs — the same path
+  that hands a pre-bounty world its bounty role the first time it runs.
+- **The `/settings` button is gone**, along with `setStatisticsChannel` and its
+  helpers. `settingsActions` is back to seven buttons, which `Panels.rows` splits
+  5 and 2.
+
+`statistics_channel` therefore means one thing now: the channel. "0" is a world
+set up before this existed and nothing else, which is exactly what `/repair`
+already knows how to fix.
+
+It also takes a bug with it. Turning the post off stored "0" while leaving the
+channel in place, so turning it back on found no live channel behind the stored
+id and made a *second* one — the opposite of what the method's own scaladoc
+claimed.
+
+---
+
+## 19. The channel holds one day, not a log (10 Sep 2026)
+
+The intro embed `/setup` posts was never cleaned up, so the first summary landed
+underneath it and every summary after that stacked on top of the last — the
+channel became a scrolling archive nobody asked for.
+
+It now follows the online list's convention instead: read the recent history,
+purge this bot's own messages, post today's. `BotApp.replaceStatisticsPost`.
+That clears yesterday's summary and, the first time it runs, the intro as well —
+which is what the intro is for, a placeholder until there is something real to
+show.
+
+Details worth keeping:
+
+- **Only this bot's messages.** Anything a person said in there is theirs, and
+  several bots can share a guild.
+- **The purge list is fixed at the history read**, so today's post is not in it
+  and cannot be caught by a delete that lands after the send.
+- **A failed history read still posts.** A stale summary above a fresh one is
+  worth more than losing the day to a tidy-up.
+- **No `MESSAGE_MANAGE` needed.** `grantWorldPerms` does not grant it, so JDA
+  falls back from bulk delete to one delete per message — which is allowed for a
+  bot's own messages, and there are never more than about four.
+- Messages older than fourteen days cannot be bulk-deleted at all, which the
+  same fallback covers. The intro will usually be exactly that.

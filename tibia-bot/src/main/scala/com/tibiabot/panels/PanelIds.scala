@@ -67,11 +67,6 @@ object PanelIds {
   val Neutral = "neutral"
   val ChannelFilter = "chanfilter"
   val OnlineFilter = "onlinefilter"
-  /** The daily statistics post. Unlike its neighbours this one creates or stops
-   *  using a channel rather than changing a value on an existing one — see
-   *  ChannelService.setStatisticsChannel — which is why it is off by default and
-   *  has to be asked for. */
-  val Statistics = "statistics"
   /** Where the bot's command log is posted. The only setting on this panel that
    *  is about the server rather than about a world — hence no world picker on its
    *  form, and last on the panel. */
@@ -83,11 +78,12 @@ object PanelIds {
    *  and so the least often wanted — and the command log after them, which is set
    *  once for the server and then forgotten about.
    *
-   *  Eight, so they no longer fit one row; Panels.rows splits them 5 and 3. The
-   *  daily statistics post sits with the command log at the end: both are set
-   *  once and then left alone, unlike the six above them. */
+   *  Seven, so they no longer fit one row; Panels.rows splits them 5 and 2. The
+   *  daily statistics post is not among them: its channel is part of a world
+   *  like the deaths and levels channels are, made by `/setup` and rebuilt by
+   *  `/repair`, so there is nothing here to turn on. */
   val settingsActions: List[String] =
-    List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral, Statistics, CommandLog)
+    List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
 
   // --- hunted/allies actions ----------------------------------------------
 

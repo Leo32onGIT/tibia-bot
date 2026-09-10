@@ -49,7 +49,6 @@ object Panels {
     PanelIds.Layout        -> ("Online Layout" -> "📈"),
     PanelIds.OnlineFilter  -> ("Online Filters" -> "📋"),
     PanelIds.Neutral       -> ("Neutrals" -> "⚪"),
-    PanelIds.Statistics    -> ("Statistics" -> "📰"),
     PanelIds.CommandLog    -> ("Command Log" -> "🖥️")
   )
 

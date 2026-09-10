@@ -41,13 +41,12 @@ case class Worlds(name: String,
   onlineAlliesMin: Int = 0,
   onlineEnemiesMin: Int = 0,
   onlineNeutralsMin: Int = 0,
-  /** Where the daily statistics post goes, or "0" for a world that has not
-   *  asked for one.
+  /** Where the daily statistics post goes.
    *
-   *  Unlike every other channel here, `/setup` does not create it. The feature
-   *  is opt-in from the `/settings` panel, because a server that has tracked a
-   *  world for a year did not ask for another channel and should not simply
-   *  find one there after a deploy. */
+   *  Made by `/setup` alongside the deaths and levels channels, and rebuilt by
+   *  `/repair` when it is gone — the same convention every other channel here
+   *  follows. "0" therefore means one thing only: a world set up before this
+   *  existed, which `/repair` gives a channel to the first time it is run. */
   statisticsChannel: String = "0",
   /** The last server-save day this world's statistics post covered, as an ISO
    *  date, or "" if it has never posted.

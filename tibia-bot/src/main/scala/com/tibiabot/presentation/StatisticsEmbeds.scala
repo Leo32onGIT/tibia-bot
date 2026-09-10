@@ -37,29 +37,27 @@ object StatisticsEmbeds {
    *  deaths and levels channels use, none of which mean anything here. */
   val WorldColor: Int = 2201331
 
-  /** The wiki file the thumbnail is drawn from, resolved through the same
-   *  Special:Redirect builder every other creature image uses. */
-  val ThumbnailFile: String = "Golden_Newspaper"
-
   private val dayFormat = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH)
 
-  /** @param sideIcon   the ally/enemy icon for a character, by name; empty for
-   *                    somebody this discord does not track
-   *  @param skillIcon  the configured icon for a highscore category
-   *  @param xpUp       rising and falling experience icons, used in place of a
-   *                    sign so the direction reads before the number does
-   *  @param thumbnail  the resolved image URL, or empty for no thumbnail
+  /** @param titleIcon the icon on the date heading — the animated newspaper,
+   *                   which is why this embed carries no thumbnail: the same
+   *                   picture twice, once of it moving and once of it still
+   *  @param sideIcon  the ally/enemy icon for a character, by name; empty for
+   *                   somebody this discord does not track
+   *  @param skillIcon the configured icon for a highscore category
+   *  @param xpUp      rising and falling experience icons, used in place of a
+   *                   sign so the direction reads before the number does
    */
   def build(
       report: DailyReport,
+      titleIcon: String,
       sideIcon: String => String,
       skillIcon: HighscoreCategory => String,
       xpUp: String,
-      xpDown: String,
-      thumbnail: String
+      xpDown: String
   ): List[MessageEmbed] = {
     val sections = List(
-      Some(s"## :bar_chart: [${report.saveDay.format(dayFormat)}](${Urls.worldUrl(report.world)})"),
+      Some(s"## $titleIcon [${report.saveDay.format(dayFormat)}](${Urls.worldUrl(report.world)})"),
       Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
       report.loss.map(delta =>
         section("Top Experience Lost", List(gainLine(delta, sideIcon, xpDown)))),
@@ -68,7 +66,7 @@ object StatisticsEmbeds {
       report.kills.flatMap(killLines).map(section("Creature Stats", _))
     ).flatten
 
-    EmbedPages.build(WorldColor, sections.mkString("\n"), thumbnail)
+    EmbedPages.build(WorldColor, sections.mkString("\n"))
   }
 
   /** A section is its heading and its rows. Absent sections are dropped by the

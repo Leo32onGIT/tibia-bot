@@ -14,6 +14,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   private val day = LocalDate.of(2026, 9, 10)
   private val up = "<:levelup:1>"
   private val down = "<:lvldown:2>"
+  private val news = "<a:news:4>"
 
   private def delta(name: String, gained: Long, level: Int = 400, vocation: String = "Elite Knight") =
     ExperienceDelta(name.toLowerCase, name, vocation, level, level, 4_200_000_000L, gained)
@@ -34,8 +35,8 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     HighscoreEvent("Antica", category, name.toLowerCase, name, "Master Sorcerer", 361, score - 1, score,
       Instant.parse("2026-09-10T18:40:00Z"))
 
-  private def pages(r: DailyReport, side: String => String = _ => "", thumbnail: String = "") =
-    StatisticsEmbeds.build(r, side, _ => "<:mlvl:3>", up, down, thumbnail)
+  private def pages(r: DailyReport, side: String => String = _ => "") =
+    StatisticsEmbeds.build(r, news, side, _ => "<:mlvl:3>", up, down)
 
   /** The one page an ordinary day produces. */
   private def build(r: DailyReport, side: String => String = _ => "") = pages(r, side).head
@@ -69,7 +70,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("the date is an h2 and outranks its own sections") {
     val embed = build(report(gains = List(delta("Arieswar", 900))))
-    embed.getDescription should startWith("## :bar_chart: [Thursday 10 September 2026](")
+    embed.getDescription should startWith(s"## $news [Thursday 10 September 2026](")
     embed.getDescription should include("### Top Experience Gained")
   }
 
@@ -149,7 +150,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     val gains = (1 to 10).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i, level = 400 + i))
     val built = StatisticsEmbeds.build(
       report(gains, Some(delta("Someoneunlucky", -9182993)), Some(advance("magiclevel", 131)), Some(summary())),
-      _ => "<:otherguild:1><:enemy:2>", _ => "<:mlvl:3>", up, down, "https://example.invalid/thumb.gif")
+      news, _ => "<:otherguild:1><:enemy:2>", _ => "<:mlvl:3>", up, down)
     built should have size 1
     built.head.getDescription.length should be < 4096
     built.head.getLength should be < 6000
@@ -159,7 +160,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     // Not reachable with ten gainers, but the guard has to hold whatever the
     // list grows to: the tenth name is never dropped to make the post fit.
     val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
-    val built = pages(report(gains = many), thumbnail = "https://example.invalid/thumb.gif")
+    val built = pages(report(gains = many))
     built.size should be > 1
     built.foreach(_.getDescription.length should be <= 4096)
     // every name survives the split
@@ -167,11 +168,10 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     many.foreach(mover => whole should include(mover.displayName))
   }
 
-  test("the thumbnail goes on the first page and nowhere else") {
+  test("no page carries a thumbnail; the animated title icon is the picture") {
     val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
-    val built = pages(report(gains = many), thumbnail = "https://example.invalid/thumb.gif")
-    built.head.getThumbnail should not be null
-    built.tail.foreach(_.getThumbnail shouldBe null)
+    val built = pages(report(gains = many))
+    built.foreach(_.getThumbnail shouldBe null)
     built.foreach(_.getColor.getRGB & 0xFFFFFF shouldBe StatisticsEmbeds.WorldColor)
   }
 }

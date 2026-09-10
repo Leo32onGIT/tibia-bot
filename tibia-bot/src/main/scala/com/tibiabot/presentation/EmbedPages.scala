@@ -33,20 +33,18 @@ object EmbedPages {
 
   /** One section of the post as one or more embeds.
    *
-   *  The thumbnail goes on the first page and the footer on the last, which is
-   *  where a reader expects to find each of them when a section runs long. The
-   *  colour goes on every page, since that is what says the pages belong
-   *  together.
+   *  The footer goes on the last page, which is where a reader expects to find
+   *  it when a section runs long. The colour goes on every page, since that is
+   *  what says the pages belong together.
    *
    *  An empty body produces no embed at all rather than an empty one.
    */
-  def build(color: Int, body: String, thumbnail: String = "", footer: Option[String] = None): List[MessageEmbed] = {
+  def build(color: Int, body: String, footer: Option[String] = None): List[MessageEmbed] = {
     val pages = split(body)
     pages.zipWithIndex.map { case (page, index) =>
       val embed = new EmbedBuilder()
       embed.setColor(color)
       embed.setDescription(page)
-      if (index == 0 && thumbnail.nonEmpty) embed.setThumbnail(thumbnail)
       if (index == pages.size - 1) footer.foreach(embed.setFooter)
       embed.build()
     }

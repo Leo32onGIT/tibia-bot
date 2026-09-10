@@ -1315,7 +1315,8 @@ object BotApp extends App with StrictLogging {
    *  Unlike the Levels audience above this needs no per-world show flags: the
    *  post is the same for every discord tracking the world, because everything
    *  in it is a fact about the world rather than about anyone's hunted list. A
-   *  world whose channel is "0" has never opted in and is simply absent. */
+   *  world whose channel is "0" was set up before this existed and is absent
+   *  until `/repair` gives it one. */
   private def statisticsTargets(): List[statistics.StatisticsTarget] =
     worldsData.toList.flatMap { case (guildId, worlds) =>
       worlds.collect {
@@ -1383,6 +1384,42 @@ object BotApp extends App with StrictLogging {
       else Some(s"https://discord.com/channels/${target.guildId}/$deathsChannel/$messageId")
   }
 
+  /** Replace whatever this bot last put in a statistics channel with today's post.
+   *
+   *  The channel shows one thing — the last server save day — the way the online
+   *  list shows one roster, so the same convention applies: read the recent
+   *  history, purge this bot's own messages, then post. That clears yesterday's
+   *  summary and, the first time it runs, the `/setup` intro as well.
+   *
+   *  Only this bot's messages go. Anything a person said in there is theirs, and
+   *  several bots can share a guild.
+   *
+   *  The purge list is fixed at the moment of the history read, so today's post
+   *  is not in it and cannot be caught by a delete that lands after the send.
+   *  A history read that fails still posts — a stale summary above a fresh one
+   *  is worth more than losing the day over a tidy-up. */
+  private def replaceStatisticsPost(
+      channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+      messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]
+  ): Unit = {
+    def post(): Unit = sendInOrder(channel, messages)
+    channel.getHistory.retrievePast(100).queue(
+      history => {
+        try {
+          val mine = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
+          if (!mine.isEmpty) channel.purgeMessages(mine)
+        } catch {
+          case error: Throwable =>
+            logger.warn(s"Could not clear the statistics channel in '${channel.getGuild.getId}': ${error.getMessage}")
+        }
+        post()
+      },
+      (error: Throwable) => {
+        logger.warn(s"Could not read the statistics channel in '${channel.getGuild.getId}': ${error.getMessage}")
+        post()
+      })
+  }
+
   /** Send a day's messages to one channel, in the order they were built.
    *
    *  Chained rather than queued separately: two `queue()` calls are two
@@ -1440,14 +1477,13 @@ object BotApp extends App with StrictLogging {
             // characters spills onto a second message rather than losing rows.
             val embeds =
               presentation.StatisticsEmbeds.build(
-                report, side, presentation.SkillEmojis.icon,
-                Config.levelUpEmoji, Config.levelDownEmoji,
-                creatureImageUrl(presentation.StatisticsEmbeds.ThumbnailFile)) :::
+                report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
+                Config.levelUpEmoji, Config.levelDownEmoji) :::
               presentation.PvpEmbeds.build(
                 target.world, frags, enemyLosses, side, statisticsVocation(target.world),
                 Config.barEmoji, Config.levelDownEmoji, jumpToDeath(target)) :::
               presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
-            sendInOrder(channel, presentation.EmbedPages.messages(embeds))
+            replaceStatisticsPost(channel, presentation.EmbedPages.messages(embeds))
           }
         },
     recordPosted = recordStatisticsPosted
