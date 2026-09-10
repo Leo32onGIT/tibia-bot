@@ -116,11 +116,38 @@ final class DualCharacterApi(
       case left => left
     }
 
-  private def compare(tibiaDataResult: Either[String, CharacterResponse], fansiteResult: Either[String, CharacterResponse]): Unit =
+  /** Whether this is the first time this character has diverged in this
+   *  particular way.
+   *
+   *  A stable divergence is found again on every poll, not once — a settled
+   *  death stays settled for the thirty days it remains on the page — so a
+   *  warning per fetch would bury the next distinct one under a few thousand
+   *  copies of the last. Once each is the useful rate: a difference nobody has
+   *  seen before is news, and the same difference an hour later is not.
+   *
+   *  Keyed on the differences themselves rather than on `describe`, whose
+   *  origin skew moves every time and would defeat the whole thing. A character
+   *  whose entry has been pruned reports again, which is the safe direction to
+   *  be wrong in. */
+  private def firstReportOf(cacheKey: String, stable: List[String]): Boolean = {
+    val reportedBefore = new java.util.concurrent.atomic.AtomicBoolean(false)
+    seen.computeIfPresent(cacheKey, (_, entry) => {
+      reportedBefore.set(entry.lastWarned.contains(stable))
+      if (reportedBefore.get) entry else entry.warned(stable)
+    })
+    !reportedBefore.get
+  }
+
+  private def compare(cacheKey: String, tibiaDataResult: Either[String, CharacterResponse], fansiteResult: Either[String, CharacterResponse]): Unit =
     (tibiaDataResult, fansiteResult) match {
       case (Right(l), Right(r)) =>
         val divergence = CharacterDivergence.between(l, r)
-        if (divergence.stable.nonEmpty) logger.warn(s"Fansite shadow divergence — ${divergence.describe}")
+        if (divergence.stable.nonEmpty) {
+          if (firstReportOf(cacheKey, divergence.stable)) logger.warn(s"Fansite shadow divergence — ${divergence.describe}")
+          // Still every poll, but where it costs nothing and answers the one
+          // question the warning above cannot: whether it is still happening.
+          else logger.debug(s"Fansite shadow divergence, already reported — ${divergence.describe}")
+        }
         else if (divergence.volatile.nonEmpty) logger.debug(s"Fansite shadow drift — ${divergence.describe}")
       case (Right(_), Left(error)) =>
         logger.debug(s"Fansite shadow: no answer from the fansite API where TibiaData had one: $error")
@@ -154,7 +181,7 @@ final class DualCharacterApi(
           case Some(fansiteResult) =>
             mode match {
               case Config.FansiteApi.Shadow =>
-                compare(tibiaDataResult, fansiteResult)
+                compare(cacheKey, tibiaDataResult, fansiteResult)
                 tibiaDataResult
               case Config.FansiteApi.Race =>
                 monotonic(cacheKey, entry, fresher(tibiaDataResult, fansiteResult))
@@ -225,10 +252,14 @@ private[fansiteapi] object DualCharacterApi {
   final case class Served(sheet: CharacterResponse, origin: Instant)
 
   /** Per-character state: when this character was first asked for (which sets
-   *  the second source's phase) and what was last served (which keeps the
-   *  sequence monotonic). */
-  final case class Seen(firstSeen: Instant, lastServed: Option[Served]) {
+   *  the second source's phase), what was last served (which keeps the sequence
+   *  monotonic), and the last stable divergence warned about (which keeps the
+   *  same one from being warned about on every poll). The warning state lives
+   *  here rather than in a map of its own so it is pruned along with everything
+   *  else the moment nothing is tracking the character. */
+  final case class Seen(firstSeen: Instant, lastServed: Option[Served], lastWarned: Option[List[String]] = None) {
     def served(sheet: CharacterResponse, origin: Instant): Seen = copy(lastServed = Some(Served(sheet, origin)))
+    def warned(stable: List[String]): Seen = copy(lastWarned = Some(stable))
     def lastOrigin: Option[Instant] = lastServed.map(_.origin)
   }
 }
