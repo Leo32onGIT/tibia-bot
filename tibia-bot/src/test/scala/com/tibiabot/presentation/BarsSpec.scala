@@ -64,29 +64,4 @@ class BarsSpec extends AnyFunSuite with Matchers {
     count(bar, 'r') shouldBe 6
   }
 
-  test("a filled bar leaves the rest as track") {
-    val bar = Bars.filled(3, 12, "green", ink, segments = 12)
-    count(bar, 'g') shouldBe 3
-    count(bar, 'e') shouldBe 9
-  }
-
-  test("anything at all shows at least one segment") {
-    // Otherwise "something happened" draws as an empty bar.
-    count(Bars.filled(1, 500, "green", ink, segments = 12), 'g') shouldBe 1
-  }
-
-  test("nothing shows nothing, and the bar is still full length") {
-    val bar = Bars.filled(0, 500, "green", ink, segments = 12)
-    count(bar, 'g') shouldBe 0
-    count(bar, 'e') shouldBe 12
-  }
-
-  test("a value at or over the top fills the bar without overflowing it") {
-    count(Bars.filled(12, 12, "green", ink, segments = 12), 'g') shouldBe 12
-    count(Bars.filled(900, 12, "green", ink, segments = 12), 'g') shouldBe 12
-  }
-
-  test("a top of zero cannot divide by it") {
-    noException should be thrownBy Bars.filled(5, 0, "green", ink, segments = 12)
-  }
 }

@@ -7,7 +7,7 @@ package com.tibiabot.presentation
  *  What makes it look like one object instead is rounding only the ends, which
  *  is why every colour needs three shapes: a start, a middle and an end.
  *
- *  Pure and Config-free: the nine emoji are passed in as a lookup, the same way
+ *  Pure and Config-free: the six emoji are passed in as a lookup, the same way
  *  [[SkillEmojis]] and [[GuildIcons]] keep their configured strings out of the
  *  code that decides what to draw. `Config.barEmoji` is that lookup in
  *  production; a test can hand over anything readable.
@@ -35,19 +35,6 @@ object Bars {
       else clamp(math.round(left.toDouble / total * segments).toInt, if (left > 0) 1 else 0,
         if (right > 0) segments - 1 else segments)
     run(segments, index => if (index < leftSegments) "green" else "red", emoji)
-  }
-
-  /** A run filled from the left, the rest left as track.
-   *
-   *  `value` against `top` — the caller decides what the scale is. A non-zero
-   *  value always shows at least one filled segment, so "something happened"
-   *  never draws as an empty bar. */
-  def filled(value: Int, top: Int, colour: String, emoji: ((String, String)) => String,
-             segments: Int = Segments): String = {
-    val count =
-      if (value <= 0) 0
-      else clamp(math.round(value.toDouble / math.max(1, top) * segments).toInt, 1, segments)
-    run(segments, index => if (index < count) colour else "empty", emoji)
   }
 
   /** The ends are rounded and the middles are not, which is what makes a row of
