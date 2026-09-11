@@ -9,7 +9,7 @@ import java.time.LocalDate
 
 /** Round-trips ExperienceRepository against a real Postgres (cancels without PGHOST).
  *
- *  Everything is read back through `dailyMovers`, `dailyLoss` and `lossesAmong`,
+ *  Everything is read back through `dailyMovers`, `dailyLosses` and `lossesAmong`,
  *  which are the only three queries production runs against this table. There
  *  used to be a plain `daily` reader used here and nowhere else; reading through
  *  the real ones instead means these tests also cover the self-join that decides
@@ -98,8 +98,8 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
 
     repo.recordDaily(world, List(entry("Bubble", 1500L), entry("Unlucky", 4000L)), day)
 
-    repo.dailyLoss(world, day).map(_.displayName) shouldBe Some("Unlucky")
-    repo.dailyLoss(world, day).map(_.gained) shouldBe Some(-5000L)
+    repo.dailyLosses(world, day, 5).map(_.displayName) shouldBe List("Unlucky")
+    repo.dailyLosses(world, day, 5).map(_.gained) shouldBe List(-5000L)
   }
 
   test("a day nobody ended down has no loss to report") {
@@ -107,7 +107,7 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     baseline(repo, "Bubble", 1000L)
     repo.recordDaily(world, List(entry("Bubble", 1500L)), day)
 
-    repo.dailyLoss(world, day) shouldBe None
+    repo.dailyLosses(world, day, 5) shouldBe Nil
   }
 
   test("losses among a named set ignore everybody else") {

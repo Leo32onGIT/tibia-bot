@@ -105,6 +105,5 @@ object BossPredictionEmbeds {
    *  due" — and those two read identically without this line. */
   private def footer(report: DailyReport): Option[String] =
     if (report.awaitingSighting <= 0) Option.empty
-    else Some(s"${report.awaitingSighting} boss(es) not yet predicted — each becomes " +
-      "predictable the first time it is killed after tracking started.")
+    else Some(s"${report.awaitingSighting} boss(es) not yet predicted")
 }

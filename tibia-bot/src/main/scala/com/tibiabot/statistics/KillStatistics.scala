@@ -28,7 +28,20 @@ final case class DayKillSummary(
     playerDeaths: Int,
     totalKilled: Long,
     totalPlayersKilled: Int
-)
+) {
+
+  /** The day's figures without the day itself.
+   *
+   *  What the endpoint hands back carries no date, so the only way to tell which
+   *  day is in front of us is to compare it against the day we already filed:
+   *  until tibia.com rolls at server save, a live read *is* the previous day.
+   *  See [[KillStatisticsService]], which is the whole reason this exists.
+   *
+   *  Every figure rather than just the total, so two days that happened to kill
+   *  the same number of creatures are still told apart. */
+  def figures: (Option[(String, Int)], Option[(String, Int)], Int, Long, Int) =
+    (mostKilled, deadliest, playerDeaths, totalKilled, totalPlayersKilled)
+}
 
 /** Reading a kill statistics snapshot: which entries are creatures, which are
  *  bosses, and what the day's headlines were.
@@ -77,6 +90,62 @@ object KillStatistics {
         playersKilled = entry.map(_.last_day_players_killed).getOrElse(0)
       )
     }
+  }
+
+  /** How many of the day's creatures the post names. */
+  val TopKills: Int = 10
+
+  /** Every race worth keeping for one world's day: the catalogued bosses, the
+   *  creatures the world killed most of, and the special bosses.
+   *
+   *  All three go in the one table. It is keyed on `(world, save_day, race)` and
+   *  enforces membership of nothing, and the only reader that could be confused
+   *  by a stranger — the spawn prediction — looks rows up *by catalogue name*,
+   *  so a race it has never heard of is never asked for. A second table would
+   *  buy a tidier name and a second write per world per day.
+   *
+   *  Deduplicated on the race, because the three lists can overlap in principle
+   *  and a repeated key would be a write conflict rather than a wrong number.
+   *  The catalogue wins, since its casing is the one the prediction matches on.
+   *
+   *  Unlike the catalogued bosses, the creatures and the specials are kept only
+   *  where something was actually killed. A zero matters for a boss — it is what
+   *  makes "not seen for N days" measurable — but a creature outside the top ten
+   *  is not absent from the world, only from the list, and writing that as a
+   *  zero would say something untrue. */
+  def dayRaces(data: KillStatisticsData, saveDay: LocalDate): List[BossKills] = {
+    val bosses = bossKills(data, saveDay)
+    val known = bosses.map(_.race.toLowerCase).toSet
+    val extra = (topKilled(data.entries) ++ specialKills(data.entries))
+      .filterNot(entry => known.contains(entry.race.toLowerCase))
+      .groupBy(_.race.toLowerCase)
+      .values.flatMap(_.headOption).toList
+      .map(entry => BossKills(
+        world = data.world,
+        saveDay = saveDay,
+        race = entry.race,
+        killed = entry.last_day_killed,
+        playersKilled = entry.last_day_players_killed))
+    bosses ++ extra.sortBy(row => (-row.killed, row.race))
+  }
+
+  /** The creatures the world killed most of, largest first.
+   *
+   *  `players` and `(elemental forces)` are excluded for the reason
+   *  [[NotCreatures]] gives: neither is a creature, and `players` would take the
+   *  top of this list on most worlds. */
+  def topKilled(entries: List[KillStatisticsEntry], limit: Int = TopKills): List[KillStatisticsEntry] =
+    entries.filter(entry => isCreature(entry.race) && entry.last_day_killed > 0)
+      .sortBy(entry => (-entry.last_day_killed, entry.race))
+      .take(limit)
+
+  /** The special bosses that died that day, in the order [[SpecialKills]] lists
+   *  them — which is the order the post shows them in, rather than one that
+   *  reshuffles itself depending on how many of each happened to be killed. */
+  def specialKills(entries: List[KillStatisticsEntry]): List[KillStatisticsEntry] = {
+    val seen = entries.groupBy(_.race.toLowerCase)
+    SpecialKills.all.flatMap(kill => seen.get(kill.race.toLowerCase).flatMap(_.headOption))
+      .filter(_.last_day_killed > 0)
   }
 
   /** The creature players killed most of. None on a day with no kills at all. */

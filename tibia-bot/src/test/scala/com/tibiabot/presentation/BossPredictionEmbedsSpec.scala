@@ -26,7 +26,8 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
       day).get
 
   private def report(predictions: List[BossPrediction] = Nil, awaiting: Int = 0) =
-    DailyReport("Antica", day, Nil, scala.None, scala.None, scala.None, predictions, awaiting)
+    DailyReport("Antica", day, Nil, Nil, scala.None, scala.None,
+      predictions = predictions, awaitingSighting = awaiting)
 
   private def pages(r: DailyReport) = BossPredictionEmbeds.build(r, title, icon)
 

@@ -23,14 +23,24 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   private val yesterday = LocalDate.of(2026, 9, 10)
   private val insideWindow = ZonedDateTime.parse("2026-09-11T10:15:00+02:00").withZoneSameInstant(Clock.Berlin)
+  /** Still inside the 45-minute window, but past the 40 minutes the creature
+   *  figures are given to arrive. */
+  private val pastDeadline = ZonedDateTime.parse("2026-09-11T10:41:00+02:00").withZoneSameInstant(Clock.Berlin)
   private val outsideWindow = ZonedDateTime.parse("2026-09-11T14:00:00+02:00").withZoneSameInstant(Clock.Berlin)
+
+  private val killSummary = DayKillSummary("Antica", yesterday, Some(("dragon", 40)), Some(("wyrm", 3)), 12, 900L, 20)
 
   private def delta(name: String, gained: Long) =
     ExperienceDelta(name.toLowerCase, name, "Elite Knight", 400, 399, 1000000L, gained)
 
   private def target(guildId: String, world: String = "Antica", posted: String = "",
-                     hunted: Set[String] = Set.empty) =
-    StatisticsTarget(guildId, s"Guild $guildId", world, s"channel-$guildId", posted, hunted)
+                     hunted: Set[String] = Set.empty, killsPosted: String = "") =
+    StatisticsTarget(guildId, s"Guild $guildId", world, s"channel-$guildId", posted, hunted, killsPosted)
+
+  /** A target whose board is already out for the day, so only the creature
+   *  figures are still owed — the state the second message is sent from. */
+  private def awaitingKills(guildId: String, world: String = "Antica") =
+    target(guildId, world, posted = yesterday.toString)
 
   private class StubExperience(
       movers: Map[String, List[ExperienceDelta]] = Map.empty,
@@ -45,7 +55,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       if (fail) throw new RuntimeException("database is away")
       movers.getOrElse(world, Nil)
     }
-    def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] = None
+    def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = {
       lossCalls += ((world, names))
       losses
@@ -56,7 +66,9 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
   private class StubKillStatistics(
       days: Map[(String, LocalDate), DayKillSummary] = Map.empty,
       seen: Map[String, List[(LocalDate, Int)]] = Map.empty,
-      earliest: Option[LocalDate] = None
+      earliest: Option[LocalDate] = None,
+      raceRows: List[BossKills] = Nil,
+      fail: Boolean = false
   ) extends KillStatisticsRepository {
     def recordBossKills(rows: List[BossKills]): Unit = ()
     def recordSummary(summary: DayKillSummary): Unit = ()
@@ -64,7 +76,11 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
     def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] = seen
     def earliestDay(world: String): Option[LocalDate] = earliest
-    def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = days.get((world, saveDay))
+    def killsOn(world: String, saveDay: LocalDate): List[BossKills] = raceRows
+    def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = {
+      if (fail) throw new RuntimeException("cache is away")
+      days.get((world, saveDay))
+    }
     def removeExpired(before: LocalDate): Unit = ()
   }
 
@@ -107,7 +123,9 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       frags: FragRepository = new StubFrags()
   ) {
     val posts = mutable.ListBuffer.empty[(String, DailyReport, FragTally, List[ExperienceDelta])]
+    val killPosts = mutable.ListBuffer.empty[(String, DailyReport)]
     val marks = mutable.ListBuffer.empty[(String, LocalDate)]
+    val killMarks = mutable.ListBuffer.empty[(String, LocalDate)]
     val service = new StatisticsService(
       experience = experience,
       highscores = NoopHighscores,
@@ -119,7 +137,12 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
         if (announceFails) throw new RuntimeException("channel is gone")
         posts += ((target.guildId, report, tally, losses))
       },
+      announceKills = (target, report) => {
+        if (announceFails) throw new RuntimeException("channel is gone")
+        killPosts += ((target.guildId, report))
+      },
       recordPosted = (target, day) => marks += ((target.guildId, day)),
+      recordKillsPosted = (target, day) => killMarks += ((target.guildId, day)),
       now = () => now
     )
   }
@@ -174,13 +197,15 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
   }
 
   test("a day with nothing in it is marked without posting") {
-    // Nothing later in the window can change it — the last snapshot inside the
-    // closing day was taken before the window opened — so retrying would be
-    // ninety more queries for the same silence.
+    // Nothing later in the window can change the board — every figure in it was
+    // written inside the closing day — so retrying would be forty more queries
+    // for the same silence. It marks its own half only, though: a world with
+    // nothing in the highscores can still have killed three million creatures.
     val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty))
     harness.service.tick()
     harness.posts shouldBe empty
     harness.marks shouldBe List(("a", yesterday))
+    harness.killMarks shouldBe empty
   }
 
   test("a failed query posts nothing and marks nothing, so the next tick retries") {
@@ -254,18 +279,107 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   // --- the kill statistics half -------------------------------------------
 
-  test("the day's kill statistics ride along when the snapshot was taken") {
-    val summary = DayKillSummary("Antica", yesterday, Some(("dragon", 40)), Some(("wyrm", 3)), 12, 900L, 20)
-    val harness = new Harness(List(target("a")), kills = new StubKillStatistics(Map(("Antica", yesterday) -> summary)))
+  test("the day's kill statistics ride along when the snapshot was already taken") {
+    // One message, exactly as before: the second exists only when it has to.
+    val harness = new Harness(List(target("a")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary)))
     harness.service.tick()
-    harness.posts.head._2.kills shouldBe Some(summary)
+    harness.posts.head._2.kills shouldBe Some(killSummary)
+    harness.killPosts shouldBe empty
+    harness.marks shouldBe List(("a", yesterday))
+    harness.killMarks shouldBe List(("a", yesterday))
   }
 
-  test("a day whose snapshot was never taken still posts everything else") {
+  test("the board does not wait for the day's kill statistics") {
+    // The board's figures were all written inside the closing day. Nothing in
+    // them depends on tibia.com having rolled anything.
     val harness = new Harness(List(target("a")))
     harness.service.tick()
     harness.posts.head._2.kills shouldBe None
     harness.posts.head._2.gains should not be empty
+    harness.marks shouldBe List(("a", yesterday))
+    // Still owed, so the second message can follow.
+    harness.killMarks shouldBe empty
+  }
+
+  test("the second message is not sent in the same tick as the board") {
+    // The board is sent by clearing the channel and reposting; a second message
+    // racing that purge would be swept away by it.
+    val harness = new Harness(List(target("a")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary)))
+    harness.service.tick()
+    harness.killPosts shouldBe empty
+  }
+
+  test("the creature figures follow once the snapshot lands") {
+    val harness = new Harness(List(awaitingKills("a")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary)))
+    harness.service.tick()
+    harness.posts shouldBe empty
+    harness.killPosts.map(_._1) shouldBe List("a")
+    harness.killPosts.head._2.kills shouldBe Some(killSummary)
+    harness.killMarks shouldBe List(("a", yesterday))
+  }
+
+  test("a world still waiting on its snapshot is asked again rather than marked") {
+    val harness = new Harness(List(awaitingKills("a")))
+    harness.service.tick()
+    harness.killPosts shouldBe empty
+    harness.killMarks shouldBe empty
+  }
+
+  test("past the deadline the creature figures are written off for the day") {
+    // tibia.com can be in maintenance until well past server save. The board is
+    // already out; this stops the rest of the window asking for the other half.
+    val harness = new Harness(List(awaitingKills("a")), now = pastDeadline)
+    harness.service.tick()
+    harness.killPosts shouldBe empty
+    harness.killMarks shouldBe List(("a", yesterday))
+  }
+
+  test("a cache that cannot be read defers rather than posting a half message") {
+    val harness = new Harness(List(awaitingKills("a")), kills = new StubKillStatistics(fail = true))
+    harness.service.tick()
+    harness.killPosts shouldBe empty
+    harness.killMarks shouldBe empty
+  }
+
+  test("a second message that throws still marks the day") {
+    val harness = new Harness(List(awaitingKills("a")), announceFails = true,
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary)))
+    harness.service.tick()
+    harness.killPosts shouldBe empty
+    harness.killMarks shouldBe List(("a", yesterday))
+  }
+
+  test("the day's creatures ride the report largest first, specials picked out by name") {
+    val plunder = SpecialKills.all.head
+    val rows = List(
+      BossKills("Antica", yesterday, "rotworm", 900, 0),
+      BossKills("Antica", yesterday, plunder.race, 3, 0),
+      BossKills("Antica", yesterday, "dragon", 40, 0))
+    val harness = new Harness(List(target("a")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary), raceRows = rows))
+    harness.service.tick()
+    val report = harness.posts.head._2
+    // The special is reported under Special Kills, so it is not also a creature.
+    report.topKills.map(_.race) shouldBe List("rotworm", "dragon")
+    report.specialKills shouldBe List(plunder -> 3)
+  }
+
+  test("the creature rows are not read at all until the snapshot is filed") {
+    // Six queries a tick, on a morning tibia.com can spend in maintenance.
+    val rows = List(BossKills("Antica", yesterday, "rotworm", 900, 0))
+    val harness = new Harness(List(target("a")), kills = new StubKillStatistics(raceRows = rows))
+    harness.service.tick()
+    harness.posts.head._2.topKills shouldBe empty
+  }
+
+  test("one world's snapshot is read once however many discords are waiting on it") {
+    val harness = new Harness(List(awaitingKills("a"), awaitingKills("b")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary)))
+    harness.service.tick()
+    harness.killPosts.map(_._1) should contain theSameElementsAs List("a", "b")
   }
 
   test("kill statistics alone are worth a post") {
@@ -277,6 +391,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     harness.service.tick()
     harness.posts.map(_._1) shouldBe List("a")
   }
+
 
   // --- boss predictions ----------------------------------------------------
 
@@ -332,7 +447,9 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       targets = () => List(target("broken"), target("fine")),
       announce = (target, _, _, _) =>
         if (target.guildId == "broken") throw new RuntimeException("channel is gone") else posts += target.guildId,
+      announceKills = (_, _) => (),
       recordPosted = (target, _) => marks += target.guildId,
+      recordKillsPosted = (_, _) => (),
       now = () => insideWindow
     )
     service.tick()

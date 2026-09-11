@@ -91,10 +91,10 @@ class DailyStatisticsSpec extends AnyFunSuite with Matchers {
     DailyStatistics.gains(List(delta("Arieswar", -4000), delta("Bubble", 0))) shouldBe Nil
   }
 
-  test("the loss is the single worst, and only when it is really a loss") {
+  test("losses are the worst first, and only when they are really losses") {
     val movers = List(delta("Bubble", 900), delta("Arieswar", -4000), delta("Mateusz", -12000))
-    DailyStatistics.loss(movers).map(_.displayName) shouldBe Some("Mateusz")
-    DailyStatistics.loss(List(delta("Bubble", 900), delta("Mateusz", 0))) shouldBe None
+    DailyStatistics.losses(movers).map(_.displayName) shouldBe List("Mateusz", "Arieswar")
+    DailyStatistics.losses(List(delta("Bubble", 900), delta("Mateusz", 0))) shouldBe Nil
   }
 
   // --- the report ---------------------------------------------------------
@@ -102,12 +102,12 @@ class DailyStatisticsSpec extends AnyFunSuite with Matchers {
   test("a report with nothing in it is empty") {
     // The ordinary cause is a world on its first day of history: a gain needs
     // two consecutive rollups, so there is nothing to measure against yet.
-    DailyReport("Antica", LocalDate.of(2026, 9, 10), Nil, None, None).isEmpty shouldBe true
+    DailyReport("Antica", LocalDate.of(2026, 9, 10), Nil, Nil, None).isEmpty shouldBe true
   }
 
   test("a report is non-empty if any one of its three parts has something") {
     val day = LocalDate.of(2026, 9, 10)
-    DailyReport("Antica", day, List(delta("Bubble", 900)), None, None).nonEmpty shouldBe true
-    DailyReport("Antica", day, Nil, Some(delta("Bubble", -900)), None).nonEmpty shouldBe true
+    DailyReport("Antica", day, List(delta("Bubble", 900)), Nil, None).nonEmpty shouldBe true
+    DailyReport("Antica", day, Nil, List(delta("Bubble", -900)), None).nonEmpty shouldBe true
   }
 }

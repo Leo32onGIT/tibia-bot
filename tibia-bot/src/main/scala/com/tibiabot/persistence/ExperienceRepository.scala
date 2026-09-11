@@ -33,13 +33,17 @@ trait ExperienceRepository {
    *  world was ever swept has no movers at all, which is the correct answer
    *  rather than a gap to paper over.
    *
-   *  Gains only — [[dailyLoss]] is the other end of the same ordering. */
+   *  Gains only — [[dailyLosses]] is the other end of the same ordering. */
   def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
 
-  /** The single largest experience loss on one world that day, or None if
-   *  nobody ended the day down. Same join and same exclusions as
-   *  [[dailyMovers]], read from the other end. */
-  def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta]
+  /** The largest experience losses on one world that day, worst first. Same join
+   *  and same exclusions as [[dailyMovers]], read from the other end.
+   *
+   *  Shorter than `limit` on a quiet day, and empty where nobody ended the day
+   *  down: the query orders by the delta, so on a world where almost everybody
+   *  gained, the bottom of that ordering is still a gain. Those are dropped
+   *  rather than listed under a heading that says they are losses. */
+  def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
 
   /** The largest experience losses that day among a named set of characters,
    *  worst first.

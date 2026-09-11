@@ -154,6 +154,35 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       day
     }
 
+  def killsOn(world: String, saveDay: LocalDate): List[BossKills] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT race,killed,players_killed
+           |FROM kill_statistics_boss
+           |WHERE world = ? AND save_day = ? AND killed > 0
+           |ORDER BY killed DESC, race ASC;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      statement.setDate(2, SqlDate.valueOf(saveDay))
+      val result = statement.executeQuery()
+
+      val rows = new ListBuffer[BossKills]()
+      while (result.next()) {
+        rows += BossKills(
+          world = world,
+          saveDay = saveDay,
+          race = Option(result.getString("race")).getOrElse(""),
+          killed = result.getInt("killed"),
+          playersKilled = result.getInt("players_killed")
+        )
+      }
+
+      statement.close()
+      rows.toList
+    }
+
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(

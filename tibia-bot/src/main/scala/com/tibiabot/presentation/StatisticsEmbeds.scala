@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
-import com.tibiabot.statistics.{DailyReport, DayKillSummary}
+import com.tibiabot.statistics.DailyReport
 import com.tibiabot.tibiadata.HighscoreCategory
 import net.dv8tion.jda.api.entities.MessageEmbed
 
@@ -37,6 +37,12 @@ object StatisticsEmbeds {
    *  embed under it answers in the other half of the pair. */
   val WorldColor: Int = Embeds.AllyGreen
 
+  /** The bot's yellow, which everywhere else means "this happened on its own
+   *  rather than because somebody asked". The creature figures are the one part
+   *  of the post that is purely the world getting on with it — no ally, no
+   *  enemy, nobody's war — so they wear it. */
+  val CreatureColor: Int = Embeds.AutomaticColor
+
   private val dayFormat = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH)
 
   /** @param titleIcon the icon on the date heading — the animated newspaper,
@@ -59,14 +65,52 @@ object StatisticsEmbeds {
     val sections = List(
       Some(s"## $titleIcon [${report.saveDay.format(dayFormat)}](${Urls.worldUrl(report.world)})"),
       Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
-      report.loss.map(delta =>
-        section("Top Experience Lost", List(gainLine(delta, sideIcon, xpDown)))),
+      Option.when(report.losses.nonEmpty)(
+        section("Top Experience Lost", report.losses.map(gainLine(_, sideIcon, xpDown)))),
       report.advance.map(event =>
-        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon)))),
-      report.kills.flatMap(killLines).map(section("Creature Stats", _))
+        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon))))
     ).flatten
 
     EmbedPages.build(WorldColor, sections.mkString("\n"))
+  }
+
+  /** The day's creature figures, as their own embed.
+   *
+   *  Separate from the board rather than a section at the foot of it, for two
+   *  reasons. It is the one part of the post that waits on tibia.com rolling its
+   *  kill statistics, so on a slow morning it goes out in a later message than
+   *  the board — and a section cannot move between messages while a heading rank
+   *  stays put. And it carries its own colour, which a section inside a green
+   *  embed cannot.
+   *
+   *  No date on it. It has one only in the message where it travels alone, and
+   *  by then the board two minutes above it in the channel has already said
+   *  which day this is.
+   *
+   *  @param titleIcon   the newspaper the board leads with, so the two read as
+   *                     halves of one post
+   *  @param goldIcon    leads Special Kills, at the same rank as PVP and Bosses
+   *                     Due, since it is a section about something else entirely
+   *                     rather than a subdivision of the creature list
+   *  @param specialIcon the configured emoji for a special boss, by its key;
+   *                     empty for one nothing is configured for, which renders as
+   *                     no icon rather than a gap
+   */
+  def creatureStats(report: DailyReport, titleIcon: String, goldIcon: String,
+                    specialIcon: String => String): List[MessageEmbed] = {
+    val creatures = report.topKills.map(row =>
+      s"**${StatLines.number(row.killed.toLong)}** ${row.race} killed")
+    val specials = report.specialKills.map { case (kill, count) =>
+      val icon = specialIcon(kill.emoji)
+      val lead = if (icon.isEmpty) "" else s"$icon "
+      s"$lead**${StatLines.number(count.toLong)}** ${kill.name} killed"
+    }
+    val sections = List(
+      Option.when(creatures.nonEmpty)((s"## $titleIcon Creature Stats" :: creatures).mkString("\n")),
+      Option.when(specials.nonEmpty)((s"## $goldIcon Special Kills" :: specials).mkString("\n"))
+    ).flatten
+
+    if (sections.isEmpty) Nil else EmbedPages.build(CreatureColor, sections.mkString("\n"))
   }
 
   /** A section is its heading and its rows. Absent sections are dropped by the
@@ -104,18 +148,4 @@ object StatisticsEmbeds {
       s"$icon$reached")
   }
 
-  /** The day's creature figures, count first.
-   *
-   *  A world can genuinely have a day where no creature killed a player, so each
-   *  line is dropped on its own rather than the section being all-or-nothing. */
-  private def killLines(kills: DayKillSummary): Option[List[String]] = {
-    val lines = List(
-      kills.mostKilled.map { case (race, count) => s"**${StatLines.number(count.toLong)}** $race killed" },
-      kills.deadliest.map { case (race, count) =>
-        s"**${StatLines.number(count.toLong)}** ${plural(count, "player", "players")} killed by $race" }
-    ).flatten
-    if (lines.isEmpty) None else Some(lines)
-  }
-
-  private def plural(count: Int, one: String, many: String): String = if (count == 1) one else many
 }

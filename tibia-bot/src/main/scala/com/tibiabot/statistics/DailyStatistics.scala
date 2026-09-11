@@ -16,15 +16,23 @@ final case class DailyReport(
     world: String,
     saveDay: LocalDate,
     gains: List[ExperienceDelta],
-    loss: Option[ExperienceDelta],
+    losses: List[ExperienceDelta],
     advance: Option[HighscoreEvent],
     /** What the world was killing, from the day's kill statistics snapshot.
      *
      *  None where the snapshot was never taken — a bot that was down, an
      *  upstream 503 that outlasted the day, or simply the first day after this
-     *  shipped. The rest of the post is unaffected: the two halves come from
-     *  different sources and neither waits on the other. */
+     *  shipped. The board is unaffected: it and the creature figures come from
+     *  different sources and it never waits on this one.
+     *
+     *  Also the gate the post is staged on — see [[StatisticsService]] — so
+     *  everything below that reads the snapshot is present exactly when this is. */
     kills: Option[DayKillSummary] = None,
+    /** The creatures the world killed most of that day, largest first. */
+    topKills: List[BossKills] = Nil,
+    /** The special bosses that died that day, and how many, in the order
+     *  [[SpecialKills]] lists them. Empty on the ordinary day none did. */
+    specialKills: List[(SpecialKill, Int)] = Nil,
     /** Which bosses are due, best chance first.
      *
      *  Empty for a long while after this ships, and that is the honest state
@@ -50,7 +58,7 @@ final case class DailyReport(
    *  top thousand moved and nobody advanced a skill is possible in principle and
    *  reads the same way — silence, which is the honest answer either way. */
   def isEmpty: Boolean =
-    gains.isEmpty && loss.isEmpty && advance.isEmpty && kills.isEmpty && dueBosses.isEmpty
+    gains.isEmpty && losses.isEmpty && advance.isEmpty && kills.isEmpty && dueBosses.isEmpty
 
   /** The bosses worth a line: the ones that might actually be up. A boss three
    *  days into a twelve-day window is not news. */
@@ -107,11 +115,15 @@ object DailyStatistics {
   def gains(movers: List[ExperienceDelta], limit: Int = TopGains): List[ExperienceDelta] =
     movers.filter(_.gained > 0).sortBy(-_.gained).take(limit)
 
-  /** The day's single worst loss, or None if nobody ended it down.
+  /** How many losers the post names. Half the gainers: a day's losses are one
+   *  story — who died badly — where the gains are a leaderboard. */
+  val TopLosses: Int = 5
+
+  /** The day's worst losses, worst first, trimmed to what the post names.
    *
    *  Takes the whole mover list rather than trusting a caller to have asked for
    *  the right end of it, so the rule that a loss must actually be negative is
    *  stated once. */
-  def loss(movers: List[ExperienceDelta]): Option[ExperienceDelta] =
-    movers.filter(_.gained < 0).sortBy(_.gained).headOption
+  def losses(movers: List[ExperienceDelta], limit: Int = TopLosses): List[ExperienceDelta] =
+    movers.filter(_.gained < 0).sortBy(_.gained).take(limit)
 }

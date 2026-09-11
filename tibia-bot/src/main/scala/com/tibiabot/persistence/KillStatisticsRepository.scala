@@ -55,6 +55,16 @@ trait KillStatisticsRepository {
    *  year before it, and nothing here can tell those apart. */
   def earliestDay(world: String): Option[LocalDate]
 
+  /** Every race kept for one world's day that something actually killed, largest
+   *  first.
+   *
+   *  One query answering both halves of the creature embed: the day's top
+   *  creatures are the head of it, and the special bosses are picked out of it
+   *  by name. A catalogued boss is in here too — it cannot outrank a creature,
+   *  since a world kills three of one and a hundred thousand of the other — so
+   *  taking the first ten is the ten the post means. */
+  def killsOn(world: String, saveDay: LocalDate): List[BossKills]
+
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary]
 
   def removeExpired(before: LocalDate): Unit

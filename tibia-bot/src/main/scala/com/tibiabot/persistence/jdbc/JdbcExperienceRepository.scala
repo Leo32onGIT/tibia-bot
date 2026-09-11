@@ -45,8 +45,8 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
   def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
     movers(world, saveDay, "DESC", limit)
 
-  def dailyLoss(world: String, saveDay: LocalDate): Option[ExperienceDelta] =
-    movers(world, saveDay, "ASC", 1).find(_.gained < 0)
+  def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
+    movers(world, saveDay, "ASC", limit).filter(_.gained < 0)
 
   /** Both ends of the day's ordering, which differ only in direction.
    *

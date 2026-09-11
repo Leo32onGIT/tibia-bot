@@ -141,10 +141,10 @@ object Config {
 
     val enabled: Boolean = statistics.getBoolean("enabled")
     val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
+    val waitForKills: java.time.Duration = statistics.getDuration("wait-for-kills")
     val fragRetention: FiniteDuration = statistics.getDuration("frag-retention").toScala
 
-    /** The daily kill statistics snapshot. Independent of `enabled` above: the
-     *  history is worth banking whether or not anything posts it yet. */
+    /** The daily kill statistics snapshot, which the post above waits on. */
     object KillStatistics {
       private val killStatistics = statistics.getConfig("kill-statistics")
       private def dur(key: String): FiniteDuration = killStatistics.getDuration(key).toScala
@@ -153,6 +153,7 @@ object Config {
       val tickInterval: FiniteDuration = dur("tick-interval")
       val requestGap: FiniteDuration = dur("request-gap")
       val settle: java.time.Duration = killStatistics.getDuration("settle")
+      val probeCandidates: Int = killStatistics.getInt("probe-candidates")
       val retention: FiniteDuration = dur("retention")
     }
   }
@@ -227,6 +228,16 @@ object Config {
  val noEmoji: String = discord.getString("no-emoji")
  val letterEmoji: String = discord.getString("letter-emoji")
  val goldEmoji: String = discord.getString("gold-emoji")
+
+ /** The daily post's special-kill icons, by the key
+  *  [[com.tibiabot.statistics.SpecialKills]] holds them under — which is not the
+  *  race the endpoint counts them by. Empty for a boss nothing is configured
+  *  for, which renders as no icon rather than a gap. */
+ val specialKillEmojis: Map[String, String] =
+   discord.getObject("special-kill-emojis").asScala.map {
+     case (key, value) => key -> value.unwrapped().toString
+   }.toMap
+
  val bossEmoji: String = discord.getString("boss-emoji")
  val creatureEmoji: String = discord.getString("creature-emoji")
  val torchOnEmoji: String = discord.getString("torch-on-emoji")

@@ -121,6 +121,92 @@ class KillStatisticsSpec extends AnyFunSuite with Matchers with JsonSupport {
     summary.totalPlayersKilled shouldBe 818
   }
 
+  // --- the creatures the post names ---------------------------------------
+
+  test("the top killed are creatures, largest first, and stop at the limit") {
+    val entries = List(
+      entry("players", killed = 999999),
+      entry("(elemental forces)", killed = 888888),
+      entry("rotworm", killed = 900),
+      entry("dragon", killed = 700),
+      entry("wyrm", killed = 500))
+    KillStatistics.topKilled(entries, limit = 2).map(_.race) shouldBe List("rotworm", "dragon")
+  }
+
+  test("a race nothing killed is not in the list at all") {
+    KillStatistics.topKilled(List(entry("rotworm", killed = 0), entry("dragon", killed = 5)))
+      .map(_.race) shouldBe List("dragon")
+  }
+
+  test("the real snapshot's top ten are ten creatures") {
+    val top = KillStatistics.topKilled(data.entries)
+    top should have size KillStatistics.TopKills
+    top.map(_.race).foreach(race => KillStatistics.isCreature(race) shouldBe true)
+    top.map(_.last_day_killed) shouldBe top.map(_.last_day_killed).sorted.reverse
+  }
+
+  // --- the special bosses --------------------------------------------------
+
+  test("a special boss is found under the race the endpoint counts it by") {
+    // "plunder patriarches", not "Plunder Patriarch" — read off the live
+    // endpoint, because a race that does not match exactly produces no row at
+    // all rather than a wrong one.
+    val plunder = SpecialKills.all.head
+    plunder.name shouldBe "Plunder Patriarch"
+    plunder.race shouldBe "plunder patriarches"
+    SpecialKills.forRace("PLUNDER PATRIARCHES") shouldBe Some(plunder)
+  }
+
+  test("only the special bosses that died are reported") {
+    val entries = List(
+      entry("plunder patriarches", killed = 3),
+      entry("Bakragore", killed = 0),
+      entry("Phosphorus", killed = 1))
+    KillStatistics.specialKills(entries).map(_.race) shouldBe
+      List("plunder patriarches", "Phosphorus")
+  }
+
+  test("they are reported in catalogue order, not by how many died") {
+    val entries = SpecialKills.all.reverse.map(kill => entry(kill.race, killed = 1))
+    KillStatistics.specialKills(entries).map(_.race) shouldBe SpecialKills.races
+  }
+
+  // --- what a day keeps ----------------------------------------------------
+
+  test("a day keeps the catalogued bosses, the top creatures and the specials") {
+    val rows = KillStatistics.dayRaces(data, day)
+    val races = rows.map(_.race.toLowerCase).toSet
+    BossCatalogue.bosses.foreach(boss => races should contain(boss.race.toLowerCase))
+    KillStatistics.topKilled(data.entries).foreach(top => races should contain(top.race.toLowerCase))
+    rows.size shouldBe races.size
+  }
+
+  test("a race is never kept twice, however many lists claim it") {
+    val entries = List(entry("Ferumbras", killed = 90000), entry("rotworm", killed = 5))
+    val rows = KillStatistics.dayRaces(data.copy(entries = entries), day)
+    rows.count(_.race.equalsIgnoreCase("Ferumbras")) shouldBe 1
+  }
+
+  test("a catalogued boss keeps its zero, and a creature outside the list is simply absent") {
+    // A zero is what makes "not seen for N days" measurable for a boss. For a
+    // creature it would say something untrue — it is missing from the list, not
+    // from the world.
+    val entries = List(entry("rotworm", killed = 900))
+    val rows = KillStatistics.dayRaces(data.copy(entries = entries), day)
+    rows.find(_.race == BossCatalogue.bosses.head.race).map(_.killed) shouldBe Some(0)
+    rows.exists(_.race == "dragon") shouldBe false
+  }
+
+  test("the extra races carry the world and day they were read for") {
+    val rows = KillStatistics.dayRaces(data, day).filterNot(row =>
+      BossCatalogue.bosses.exists(_.race.equalsIgnoreCase(row.race)))
+    rows should not be empty
+    rows.foreach { row =>
+      row.world shouldBe data.world
+      row.saveDay shouldBe day
+    }
+  }
+
   // --- believing a snapshot at all ----------------------------------------
 
   test("a world that killed nothing all day is not believed") {
