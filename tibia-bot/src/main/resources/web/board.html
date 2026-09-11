@@ -789,9 +789,17 @@
      than stacking two — and the reply wins while there is one, being the newer
      news. The row below never changes height, so the button never moves; this
      one grows upward instead. */
+  /* The line box is the verdict's whatever is in the row. The hint below is a
+     point smaller, and with a line height in ems that made its row a point and a
+     half shorter — so the panel, and the grid above it that takes what is left,
+     moved by that much on the first click of every visit. Measured at 35.67
+     against 37.13. Pinned to the taller of the two rather than levelling the
+     fonts: the hint is meant to be quieter, and nothing here is worth a pixel of
+     jutter. */
   .foot-msg {
     padding: 9px 20px; border-top: 1px solid var(--panel-border);
-    display: flex; align-items: flex-start; gap: 8px; font-size: calc(12.5px * var(--ui-scale)); line-height: 1.45;
+    display: flex; align-items: flex-start; gap: 8px; font-size: calc(12.5px * var(--ui-scale));
+    line-height: calc(12.5px * var(--ui-scale) * 1.45);
   }
   .foot-msg > i { font-size: calc(15px * var(--ui-scale)); flex-shrink: 0; margin-top: 1px; }
   .foot-msg.ok { color: var(--st-free); }
@@ -1215,6 +1223,10 @@
      one place however much the panel has to say. */
   .readout { padding: 10px 20px; border-top: 1px solid var(--panel-border); display: flex; align-items: center; gap: 12px; font-size: calc(12.5px * var(--ui-scale)); }
   .foot-dur { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; }
+  /* Holding its place without offering itself. The length being dragged is on
+     the grid and in the readout beside the buttons, and a second one here would
+     be a control answering a question nobody is asking. */
+  .foot-dur.spent { visibility: hidden; }
   .readout-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .readout i { font-size: calc(15px * var(--ui-scale)); }
   .verdict-ask { color: var(--warn); } .verdict-no { color: var(--bad); } .verdict-ok { color: var(--st-free); }
@@ -4365,8 +4377,19 @@ function footMessage() {
   // A verdict is about a booking somebody is making. While a block is being
   // moved there is no such booking — the draft is not even drawn — and judging
   // the selection would answer for a slot the reader is not looking at, most
-  // loudly by telling them their own booking is in the way of itself.
-  if (editingAny()) return null;
+  // loudly by telling them their own booking is in the way of itself. What the
+  // row says instead is how to move it, which is the one thing there is to say
+  // while a drag is live — and saying it here rather than beside the buttons
+  // keeps the row from emptying and the panel from jumping by its height.
+  const changing = slots.find(editing);
+  if (changing) {
+    const running = changing.state === 'claimed';
+    return el('div', 'foot-msg hint-msg', `<i class="ti ti-info-circle" aria-hidden="true"></i>
+      <span>${running
+        ? 'Drag the foot of the claim to extend or reduce it — a hunt under way cannot be moved.'
+        : 'Drag the booking to move it; drag its foot to change how long it runs.'
+          + (changing.repeats ? ' It repeats, and only this evening moves.' : '')}</span>`);
+  }
 
   const v = judge(view.pick);
   const srv = serverParts(view.pick);
@@ -4433,7 +4456,13 @@ function readout() {
   // The tank is only worth offering while there is something it could be spent
   // on. With no action available at all — somebody already holding the spawn and
   // nothing selected — the row would be a control feeding nothing.
-  if (limits() && !changing) out.appendChild(dur);
+  if (limits()) {
+    // Kept in the row while a block is being changed rather than taken out of
+    // it: the row is meant to be one height whatever it holds, and pulling the
+    // tank shortened it by the difference between a slider and a button.
+    if (changing) dur.classList.add('spent');
+    out.appendChild(dur);
+  }
   out.appendChild(actions);
 
   if (!view.pick) {
@@ -4461,20 +4490,12 @@ function readout() {
   // their panel, and drawing both would put two Saves on one block — and two
   // elements wearing the readout's id, which the drags write into by name.
   if (editing(mine) && editPanel.owner) {
-    out.insertBefore(el('span', 'mod-hint',
-      'Drag the booking to move it; drag its foot to change how long it runs.'), actions);
+    // How to drag it is said once, in the row above that exists to say whatever
+    // there is to say — including that a repeating booking loses only this
+    // evening, which is said before it is saved rather than after, exactly as
+    // the delete flow says it.
     actions.appendChild(editReadout());
-    // Which of the two things a repeating booking could mean, said as two
-    // buttons rather than guessed at: this Tuesday, or Tuesdays. A booking that
-    // happens once has only the one reading and is offered only the one button —
-    // and it goes down the whole-booking path, which keeps its rule (and so the
-    // Cancel booking above) rather than settling the day and leaving a bare
-    // reservation nothing owns.
-    if (mine.repeats) actions.appendChild(
-      saveEdit(mine, 'This evening', `/dashboard/g/${GUILD_ID}/edit-booking`, spawn));
-    if (mine.scheduleId != null) actions.appendChild(saveWholeBooking(mine));
-    else if (!mine.repeats) actions.appendChild(
-      saveEdit(mine, 'Save', `/dashboard/g/${GUILD_ID}/edit-booking`, spawn));
+    actions.appendChild(saveEdit(mine, 'Save', `/dashboard/g/${GUILD_ID}/edit-booking`, spawn));
     actions.appendChild(button('Cancel', 'btn ghost', endEdit));
     return out;
   }
@@ -4488,39 +4509,6 @@ function readout() {
       () => post(`/dashboard/g/${GUILD_ID}/cancel-booking`, { scheduleId: mine.scheduleId })));
   }
   return out;
-}
-
-/** Move the booking itself rather than one evening of it — the answer to
- *  "Tuesdays are ten now", which nothing else on this grid can give.
- *
- *  The weekday mask travels with it. Dragging a Tuesday onto a Wednesday means
- *  the booking runs on Wednesdays, so the day it left is cleared out of the mask
- *  and the day it landed on set; a booking that already runs every day has
- *  nothing to move. Worked out here because only the page knows which of the
- *  rule's evenings was the one under the pointer.
- */
-function saveWholeBooking(slot) {
-  const every = 127;
-  // serverDayBit, never the reader's own weekday: the mask is a rule the bot
-  // applies in its own clock, and a booking at half past midnight here is the
-  // evening before there.
-  const days = !slot.repeats ? 0
-    : slot.days === every ? every
-    : (slot.days & ~serverDayBit(slot.start)) | serverDayBit(editPanel.at);
-  const save = button(slot.repeats ? 'Every time' : 'Save', 'btn mod-btn', () =>
-    post(`/dashboard/g/${GUILD_ID}/move-booking`, {
-      scheduleId: slot.scheduleId,
-      startsAt: editPanel.at.toISOString(),
-      minutes: editPanel.length,
-      days
-    }));
-  if (!editDirty(slot)) {
-    save.disabled = true;
-    save.title = 'Drag the block first';
-  } else if (slot.repeats) {
-    save.title = 'Move every evening this booking runs on';
-  }
-  return save;
 }
 
 /** Putting one evening of the calendar right, for a moderator.
@@ -4658,9 +4646,7 @@ function moderatorTools(spawn) {
     // What to do leads, and what it produces — the window, then the two verbs —
     // is anchored at the far end, so the row is read in the order the gesture
     // happens in rather than ending on the instruction for it.
-    row.appendChild(el('span', 'mod-hint', onClaim
-      ? 'Drag the foot of the claim to extend or reduce its duration.'
-      : 'Drag the booking to move it; drag its foot to change how long it runs.'));
+    // The instruction is in the message row above, where the owner's is too.
     row.appendChild(el('div', 'mod-gap'));
     row.appendChild(editReadout());
     row.appendChild(saveEdit(slot, 'Save', `/dashboard/g/${GUILD_ID}/edit-slot`, spawn));

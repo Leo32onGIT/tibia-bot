@@ -157,17 +157,6 @@ final class RespawnCommandConsumer(
           local.editOwnSlot(guildId, actor, code, start, to, minutes)
         }
 
-      case RespawnCommand.RescheduleBooking =>
-        val parsed = for {
-          scheduleId <- command.longParam("scheduleId")
-          start <- command.param("startsAt").flatMap(instant)
-          minutes <- command.intParam("minutes").filter(_ > 0)
-          days <- command.intParam("days")
-        } yield (scheduleId, start, minutes, days)
-        parsed.fold(missing("booking, time and length")) { case (id, start, minutes, days) =>
-          local.rescheduleBooking(guildId, actor, id, start, minutes, days)
-        }
-
       case RespawnCommand.ForceLeave =>
         command.param("code").fold(missing("spawn"))(local.forceLeave(guildId, actor, _))
 

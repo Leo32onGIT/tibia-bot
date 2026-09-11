@@ -323,17 +323,6 @@ trait RespawnRepository {
    *  claim history still point at something. */
   def deactivateSchedule(guildId: String, scheduleId: Long): Unit
 
-  /** Move a whole booking: a new first slot, a new length, and the weekdays it
-   *  lands on. The rule keeps its id, so the history already written against it
-   *  still reads.
-   *
-   *  Occurrences it has already written down are at the old times and are not
-   *  touched here — the caller cancels them first, or the sweep would leave the
-   *  booking standing at both times at once. None when the schedule is gone or
-   *  retired. */
-  def retimeSchedule(guildId: String, scheduleId: Long, anchorAt: ZonedDateTime,
-                     durationMinutes: Int, daysOfWeek: Int): Option[RespawnSchedule]
-
   // --- reserved occurrences -----------------------------------------------
 
   /** Book one slot of a schedule, unless that exact slot is already booked.

@@ -577,26 +577,6 @@ final class RespawnDashboardRoute(
         }
       }
     } ~
-    // Moving the whole booking rather than one evening of it, which is why this
-    // one is named by schedule id: the rule is the thing being changed.
-    path("g" / Segment / "move-booking") { guildId =>
-      post {
-        withWrite(guildId, AccessTier.Member) { userId =>
-          entity(as[String]) { body =>
-            val fields = RespawnDashboardRoute.parseBody(body)
-            def number(key: String) = fields.get(key).flatMap(v => scala.util.Try(v.toInt).toOption)
-            (fields.get("scheduleId").flatMap(v => scala.util.Try(v.toLong).toOption),
-             fields.get("startsAt").flatMap(RespawnDashboardRoute.instantAt),
-             number("minutes").filter(_ > 0),
-             number("days")) match {
-              case (Some(id), Some(start), Some(minutes), Some(days)) =>
-                actionResult(guildId, actions.rescheduleBooking(guildId, userId, id, start, minutes, days))
-              case _ => badRequest("Moving a booking needs which booking, a time, a length and its days.")
-            }
-          }
-        }
-      }
-    } ~
     // Who a moderator may hand stamina to. Behind the moderator gate rather than
     // merely unadvertised: it is a list of everybody who has used the system
     // here, which is not something an ordinary member should be able to

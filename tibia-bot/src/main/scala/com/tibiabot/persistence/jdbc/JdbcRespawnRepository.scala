@@ -1485,24 +1485,6 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
-  def retimeSchedule(guildId: String, scheduleId: Long, anchorAt: ZonedDateTime,
-                     durationMinutes: Int, daysOfWeek: Int): Option[RespawnSchedule] =
-    withGuildTransaction(guildId) { conn =>
-      val statement = conn.prepareStatement(
-        """UPDATE respawn_schedules
-          |SET anchor_at = ?, duration_minutes = ?, days_of_week = ?
-          |WHERE id = ? AND active
-          |RETURNING *;""".stripMargin)
-      try {
-        statement.setTimestamp(1, Timestamp.from(anchorAt.toInstant))
-        statement.setInt(2, durationMinutes)
-        statement.setInt(3, daysOfWeek)
-        statement.setLong(4, scheduleId)
-        val result = statement.executeQuery()
-        if (result.next()) Some(readSchedule(result)) else None
-      } finally statement.close()
-    }
-
   def slotAt(guildId: String, respawnId: Long, startsAt: ZonedDateTime): Option[RespawnClaim] =
     withGuild(guildId) { conn =>
       val statement = conn.prepareStatement(

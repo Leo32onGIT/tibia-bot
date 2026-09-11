@@ -508,53 +508,6 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     hasGivenUp(standing, elsewhere) shouldBe false
   }
 
-  // --- moving a whole booking ----------------------------------------------
-
-  /** `RespawnService.rescheduleBooking` decides what to do with the evenings a
-   *  booking has already written down by asking the moved rule whether it still
-   *  names them. Getting that backwards is not a cosmetic bug: cancelling an
-   *  evening the rule still names settles that day against it, and the
-   *  materialiser — which conflicts on (schedule, start) — could then never
-   *  write it again, so the evening would vanish for good. */
-  test("a booking moved by an hour no longer names the evenings it wrote down") {
-    val moved = schedule().copy(anchorAt = anchor.plusHours(1))
-    moved.startsAt(anchor) shouldBe false
-    moved.startsAt(anchor.plusHours(1)) shouldBe true
-  }
-
-  test("a booking that only got longer still names every evening it wrote down") {
-    // The case that would lose an evening outright. Nothing about when it runs
-    // changed, so tonight's row is kept and re-timed rather than given up.
-    val longer = schedule(durationMinutes = 240)
-    longer.startsAt(anchor) shouldBe true
-    longer.startsAt(anchor.plusDays(3)) shouldBe true
-  }
-
-  test("dropping a weekday gives up that day's rows and keeps the rest") {
-    val weekdays = onlyOn(DayOfWeek.THURSDAY, DayOfWeek.FRIDAY)
-    val thursday = weekdays.nextStartAtOrAfter(anchor).getOrElse(fail("no Thursday ahead"))
-    val friday = thursday.plusDays(1)
-    weekdays.startsAt(thursday) shouldBe true
-    weekdays.startsAt(friday) shouldBe true
-    val fridaysOnly = weekdays.copy(daysOfWeek = RespawnSchedule.maskOf(List(DayOfWeek.FRIDAY)))
-    fridaysOnly.startsAt(thursday) shouldBe false
-    fridaysOnly.startsAt(friday) shouldBe true
-  }
-
-  /** The grid works the new mask out itself when a repeating block is dragged
-   *  sideways — it is the only side that knows which of the rule's evenings was
-   *  under the pointer. This is the arithmetic it has to agree with. */
-  test("moving one weekday of a booking clears the day it left and sets the one it landed on") {
-    val tueThu = RespawnSchedule.maskOf(List(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY))
-    val moved = (tueThu & ~RespawnSchedule.bitFor(DayOfWeek.TUESDAY)) |
-      RespawnSchedule.bitFor(DayOfWeek.WEDNESDAY)
-    RespawnSchedule.daysIn(moved) shouldBe List(DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY)
-    // Monday is the low bit, which is what the page's own `1 << DAY_NAMES.indexOf`
-    // relies on — DAY_NAMES starts at Mon.
-    RespawnSchedule.bitFor(DayOfWeek.MONDAY) shouldBe 1
-    RespawnSchedule.EveryDay shouldBe 127
-  }
-
   // --- confirming a booking that has started -------------------------------
 
   test("a started booking is awaiting confirmation until its owner takes the claim") {

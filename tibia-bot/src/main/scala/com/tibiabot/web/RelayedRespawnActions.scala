@@ -147,13 +147,6 @@ final class RelayedRespawnActions(
     Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "minutes" -> minutes.toString,
       "toStartsAt" -> toStartsAt.map(_.toInstant.toString).getOrElse(""))
 
-  def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
-                        firstStart: java.time.ZonedDateTime, minutes: Int,
-                        daysOfWeek: Int): Future[ActionResult] =
-    send(guildId, actorId, RespawnCommand.RescheduleBooking,
-      Map("scheduleId" -> scheduleId.toString, "startsAt" -> firstStart.toInstant.toString,
-        "minutes" -> minutes.toString, "days" -> daysOfWeek.toString))
-
   /** Reads never relay — every bot shares the guild's database, so this
    *  implementation is only ever used for writes and these are unreachable. */
   def bookings(guildId: String, userId: String): List[BookingView] = Nil

@@ -62,13 +62,12 @@ object RespawnCommand {
   val ReassignSlot = "reassign-slot"
   val EditSlot = "edit-slot"
   val EditOwnSlot = "edit-own-slot"
-  val RescheduleBooking = "reschedule-booking"
 
   /** Every action a relayed command may name. An unrecognised one is answered
    *  rather than executed, so a newer build asking for something this one has
    *  never heard of fails visibly instead of silently doing nothing. */
   val Actions: Set[String] =
-    Set(Claim, Release, Extend, Book, CancelBooking, EditOwnSlot, RescheduleBooking,
+    Set(Claim, Release, Extend, Book, CancelBooking, EditOwnSlot,
         ForceLeave, Reassign, GrantStamina, AddSpawn, RemoveSpawn, SetSpawnMax, ExtendHolder,
         DropSlot, ReassignSlot, EditSlot)
 

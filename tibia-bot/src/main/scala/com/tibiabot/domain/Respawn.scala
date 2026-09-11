@@ -257,11 +257,6 @@ object RespawnClaim {
      *  and moving that instant would let the materialiser write the old evening
      *  all over again. */
     val SlotRetimed: String = "slot-retimed"
-    /** The booking behind this occurrence was moved to another time, so the
-     *  evening it had written down is no longer one of its own. Its owner's
-     *  doing, not a moderator's — see [[ScheduleCancelled]] for the rule going
-     *  away entirely. */
-    val BookingRetimed: String = "booking-retimed"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -286,7 +281,6 @@ object RespawnClaim {
       case SlotMoved   => "moved to somebody else by a moderator"
       case SlotResized => "lengthened or shortened by a moderator"
       case SlotRetimed => "moved to another time"
-      case BookingRetimed => "booking moved to another time"
       case other       => other
     }
   }

@@ -84,9 +84,6 @@ class SpriteRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     def editOwnSlot(guildId: String, actorId: String, code: String,
                     startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
                     minutes: Int): Future[ActionResult] = no
-    def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
-                          firstStart: java.time.ZonedDateTime, minutes: Int,
-                          daysOfWeek: Int): Future[ActionResult] = no
   }
 
   /** Enough gateway to construct the access service; no test here reaches it. */

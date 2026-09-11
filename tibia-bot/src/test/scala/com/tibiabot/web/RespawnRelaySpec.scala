@@ -118,13 +118,6 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       result
     }
     var lastOwnEdit: Option[(String, String, Option[String], Int)] = None
-    def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
-                          firstStart: java.time.ZonedDateTime, minutes: Int,
-                          daysOfWeek: Int): Future[ActionResult] = {
-      lastBookingMove = Some((scheduleId, firstStart.toInstant.toString, minutes, daysOfWeek))
-      result
-    }
-    var lastBookingMove: Option[(Long, String, Int, Int)] = None
   }
 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
@@ -272,16 +265,6 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       pending.futureValue.ok shouldBe true
       local.lastOwnEdit shouldBe Some(("415", "2026-08-13T11:00:00Z", Some("2026-08-13T12:00:00Z"), 90))
       local.lastSlotEdit shouldBe None
-    }
-
-    "hand a whole booking's move across with the days it now runs on" in {
-      val cache = new FakeCache
-      val local = new CountingActions()
-      val first = java.time.ZonedDateTime.parse("2026-08-18T20:00:00Z")
-      val pending = relay(cache).rescheduleBooking("g1", "me", 7L, first, 180, 3)
-      consumer(cache, local).sweep().futureValue
-      pending.futureValue.ok shouldBe true
-      local.lastBookingMove shouldBe Some((7L, "2026-08-18T20:00:00Z", 180, 3))
     }
 
     // The thing the whole lease design exists to prevent.

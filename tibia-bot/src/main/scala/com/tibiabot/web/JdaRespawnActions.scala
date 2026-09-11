@@ -418,21 +418,6 @@ final class JdaRespawnActions(
       }
     }
 
-  def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
-                        firstStart: java.time.ZonedDateTime, minutes: Int,
-                        daysOfWeek: Int): Future[ActionResult] =
-    withActableGuild(guildId) { guild =>
-      respawnService.rescheduleBooking(guild, actorId, scheduleId, firstStart, minutes, daysOfWeek) match {
-        case Left(reason) => ActionResult(ok = false, reason)
-        case Right((schedule, respawn)) =>
-          logger.info(s"Dashboard: '$actorId' moved booking $scheduleId to " +
-            s"${firstStart.toInstant} for ${minutes}m in guild '$guildId'")
-          ActionResult(ok = true,
-            s"${respawn.displayName} moved — ${schedule.repeatLabel}, " +
-              s"${com.tibiabot.presentation.RespawnEmbeds.humanDuration(schedule.durationMinutes)}.")
-      }
-    }
-
   def removeSpawn(guildId: String, actorId: String, code: String): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.settings(guildId) match {
@@ -648,7 +633,6 @@ object JdaRespawnActions {
     case Some(RespawnClaim.Outcome.SlotRemoved)  => "taken off the day"
     case Some(RespawnClaim.Outcome.SlotMoved)    => "given to somebody else"
     case Some(RespawnClaim.Outcome.SlotRetimed)  => "moved to another time"
-    case Some(RespawnClaim.Outcome.BookingRetimed) => "booking moved"
     case _                                       => ""
   }
 

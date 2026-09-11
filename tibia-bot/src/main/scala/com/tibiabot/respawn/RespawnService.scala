@@ -2202,100 +2202,6 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
-  /** Move a whole booking: when its first slot is, how long it runs, and which
-   *  days it lands on.
-   *
-   *  The rule, not one evening of it — the answer to "Tuesdays are ten now",
-   *  which every other tool on the calendar deliberately cannot give: they are
-   *  all about the day, and leave a repeating booking repeating. Its owner's to
-   *  make, since it is theirs; a moderator putting one evening right uses
-   *  [[editSlot]].
-   *
-   *  Held to exactly what booking it afresh would be, because that is what it is
-   *  — the guild's ceiling, the same clash rules, a first slot in the future —
-   *  and checked against the spawn with this booking's own evenings taken out of
-   *  the picture, or it would be refused for clashing with itself.
-   *
-   *  The rule keeps its id, so the history already written against it still
-   *  reads. The evenings it had written down are dealt with first, and not all
-   *  the same way: one the moved booking still names is kept and re-timed where
-   *  it stands, because cancelling it would settle that day against the rule and
-   *  the materialiser — which conflicts on (schedule, start) — could then never
-   *  write it again. The rest are given up, being nobody's evenings now. */
-  def rescheduleBooking(guild: Guild, userId: String, scheduleId: Long, firstStart: ZonedDateTime,
-                        durationMinutes: Int, daysOfWeek: Int,
-                        now: ZonedDateTime = ZonedDateTime.now()): Either[String, (RespawnSchedule, Respawn)] = {
-    val guildId = guild.getId
-    settings(guildId) match {
-      case None => Left("The respawn claim system isn't set up on this server yet.")
-      case Some(config) =>
-        // Ownership is checked here rather than trusting the id from the page,
-        // exactly as cancelling a booking does: a schedule id is a small integer
-        // and guessing one must not let somebody move a booking that is not
-        // theirs.
-        repository.findSchedule(guildId, scheduleId).filter(s => s.active && s.userId == userId) match {
-          case None => Left("That booking isn't yours, or has already gone.")
-          case Some(existing) => repository.findById(guildId, existing.respawnId) match {
-            case None => Left("That spawn isn't in the catalogue any more.")
-            case Some(respawn) =>
-              val ceiling = config.maxFor(respawn)
-              val candidate = existing.copy(anchorAt = firstStart, durationMinutes = durationMinutes,
-                daysOfWeek = daysOfWeek)
-              if (durationMinutes < MinimumClaimMinutes || durationMinutes > ceiling)
-                Left(s"A slot has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
-                  s"${RespawnEmbeds.humanDuration(ceiling)}" +
-                  (if (respawn.maxDurationMinutes.isDefined) " on this spawn." else " on this server."))
-              else if (!firstStart.isAfter(now))
-                Left("The first slot has to start in the future.")
-              else if (durationMinutes >= RespawnSchedule.Daily)
-                Left("A slot has to be shorter than a day.")
-              // A rule whose first slot falls on a day it does not run would
-              // produce nothing there and quietly begin somewhere else instead.
-              else if (candidate.repeats && !candidate.coversDay(firstStart))
-                Left("That booking doesn't run on that day — add the day, or move it to one it does.")
-              else repository.withRespawnLock(guildId, respawn.id) {
-                // This booking's own evenings are not something for it to clash
-                // with, so they come out of the picture the check is made on —
-                // both the rows it has written and the rule itself.
-                val written = repository.reservationsFor(guildId, respawn.id, now)
-                  .filter(_.scheduleId.contains(existing.id))
-                val booked = repository.reservationsFor(guildId, respawn.id, now)
-                  .filterNot(_.scheduleId.contains(existing.id))
-                val schedules = repository.schedulesForRespawn(guildId, respawn.id)
-                  .filterNot(_.id == existing.id)
-                  .filter(overlaps(_, candidate))
-                  .filterNot(surrendered(guildId, booked, _, candidate, now))
-                val slots = clashingReservations(booked, candidate, now)
-                if (schedules.nonEmpty || slots.nonEmpty)
-                  Left(clashMessage(candidate, schedules, slots, now))
-                else {
-                  written.foreach { slot =>
-                    slot.startsAt match {
-                      case Some(start) if candidate.startsAt(start) =>
-                        repository.setClaimDuration(guildId, slot.id, durationMinutes,
-                          Some(start.plusMinutes(durationMinutes.toLong)))
-                      case _ =>
-                        repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.BookingRetimed)
-                    }
-                  }
-                  repository.retimeSchedule(guildId, existing.id, firstStart, durationMinutes, daysOfWeek)
-                    .toRight("That booking has already gone.")
-                }
-              } match {
-                case Left(reason) => Left(reason)
-                case Right(saved) =>
-                  // Outside the lock, for the reason addSchedule gives: neither
-                  // writing the near evenings nor the card is worth holding a
-                  // spawn's row across.
-                  materialise(guildId, saved, now)
-                  refreshThread(guild, respawn, config)
-                  Right((saved, respawn))
-              }
-          }
-        }
-    }
-  }
-
   /** Put one day in somebody else's name: the old owner's day is settled and a
    *  fresh booking written beside it, rather than the occurrence being rewritten.
    *  The same shape a slot takes when given up to whoever asked, and for the same
@@ -2370,8 +2276,9 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *
    *  Always about the one evening, never about the booking behind it — a
    *  repeating rule keeps its own time and length, so this Tuesday moves and next
-   *  Tuesday does not. Moving the rule itself is [[rescheduleBooking]], which is
-   *  its owner's to do.
+   *  Tuesday does not. The same narrowness [[dropSlot]] and [[reassignSlot]] have,
+   *  and for the same reason: an answer about one evening cannot stand for every
+   *  week from now on.
    *
    *  What it is held to depends on who is asking — see [[SlotEditor]]. For a
    *  moderator the guild's maximum claim length does not apply but

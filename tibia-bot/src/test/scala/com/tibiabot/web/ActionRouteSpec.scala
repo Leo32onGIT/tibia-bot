@@ -131,13 +131,6 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
         s"edit-own:$code:${startsAt.toInstant}:${toStartsAt.map(_.toInstant).getOrElse("-")}:$minutes"
       result
     }
-    def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
-                          firstStart: java.time.ZonedDateTime, minutes: Int,
-                          daysOfWeek: Int): Future[ActionResult] = {
-      memberCalls = memberCalls :+
-        s"move-booking:$scheduleId:${firstStart.toInstant}:$minutes:$daysOfWeek"
-      result
-    }
     var memberCalls: List[String] = Nil
   }
 
@@ -521,26 +514,21 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z",
             |"toStartsAt":"2026-08-13T12:30:00Z","minutes":90}""".stripMargin)) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
-    Post("/dashboard/g/g1/move-booking",
-      body("""{"scheduleId":7,"startsAt":"2026-08-18T20:00:00Z","minutes":180,"days":3}""")) ~>
-      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
-    actions.memberCalls shouldBe List(
-      "edit-own:415:2026-08-13T11:00:00Z:2026-08-13T12:30:00Z:90",
-      "move-booking:7:2026-08-18T20:00:00Z:180:3")
+    actions.memberCalls shouldBe List("edit-own:415:2026-08-13T11:00:00Z:2026-08-13T12:30:00Z:90")
     // And none of it went down the moderator path.
     actions.moderatorCalls shouldBe empty
   }
 
-  test("a booking move with no days, or no booking, never reaches the service") {
+  test("an owner's edit with no day, or an unreadable one, never reaches the service") {
     val actions = new RecordingActions
     val r = routes(actions)
     List(
-      """{"scheduleId":7,"startsAt":"2026-08-18T20:00:00Z","minutes":180}""",
-      """{"startsAt":"2026-08-18T20:00:00Z","minutes":180,"days":3}""",
-      """{"scheduleId":7,"startsAt":"not a time","minutes":180,"days":3}""",
-      """{"scheduleId":7,"startsAt":"2026-08-18T20:00:00Z","minutes":0,"days":3}"""
+      """{"startsAt":"2026-08-13T11:00:00Z","minutes":90}""",
+      """{"code":"415","minutes":90}""",
+      """{"code":"415","startsAt":"not a time","minutes":90}""",
+      """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":0}"""
     ).foreach { payload =>
-      Post("/dashboard/g/g1/move-booking", body(payload)) ~> signedIn ~> r ~> check {
+      Post("/dashboard/g/g1/edit-booking", body(payload)) ~> signedIn ~> r ~> check {
         withClue(s"$payload: ")(status shouldBe StatusCodes.BadRequest)
       }
     }

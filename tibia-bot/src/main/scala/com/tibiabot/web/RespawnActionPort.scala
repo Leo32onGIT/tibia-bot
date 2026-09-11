@@ -161,17 +161,6 @@ trait RespawnActionPort {
                   startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
                   minutes: Int): Future[ActionResult]
 
-  /** Move a whole booking — its first slot, its length, and the days it runs on.
-   *
-   *  The rule, not one evening of it: the answer to "Tuesdays are ten now". Named
-   *  by schedule id, as cancelling a booking is, because a rule is the thing being
-   *  changed and it has one. Its owner's only, which is why the id is checked
-   *  against them rather than trusted.
-   */
-  def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
-                        firstStart: java.time.ZonedDateTime, minutes: Int,
-                        daysOfWeek: Int): Future[ActionResult]
-
   /** Take a spawn the guild added back out of its catalogue.
    *
    *  Only ever one it added itself — a code from the bundled list is refused,
