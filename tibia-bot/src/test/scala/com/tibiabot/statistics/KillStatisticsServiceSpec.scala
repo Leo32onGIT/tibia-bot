@@ -30,6 +30,9 @@ class KillStatisticsServiceSpec extends AnyFunSuite with Matchers with ScalaFutu
 
   private val wellAfterSave = berlin("2026-09-11T14:00:00+02:00")
   private val justAfterSave = berlin("2026-09-11T10:05:00+02:00")
+  /** Five minutes past the hour the snapshot starts asking — inside the settle
+   *  delay, which only the cold-start path measures. */
+  private val justAfterBatch = berlin("2026-09-11T04:05:00+02:00")
   private val closedDay = LocalDate.of(2026, 9, 10)
   private val dayBefore = closedDay.minusDays(1)
 
@@ -110,11 +113,20 @@ class KillStatisticsServiceSpec extends AnyFunSuite with Matchers with ScalaFutu
     svc.dayToFetch(berlin("2026-09-11T23:50:00+02:00")) shouldBe closedDay
   }
 
-  test("before server save, the day read is the one before that") {
-    // 09:00 on the 11th is inside the save day keyed the 10th, which has not
-    // closed; what the endpoint is showing is the 9th.
+  test("before the nightly batch, the day read is the one already filed") {
+    // Two in the morning on the 11th. tibia.com rebuilds its kill statistics
+    // around 03:10, not at server save, so what the endpoint is showing at this
+    // hour was published the night before and describes the 9th.
     val svc = service(new StubApi(Map.empty), new StubRepo())
-    svc.dayToFetch(berlin("2026-09-11T09:00:00+02:00")) shouldBe LocalDate.of(2026, 9, 9)
+    svc.dayToFetch(berlin("2026-09-11T02:00:00+02:00")) shouldBe LocalDate.of(2026, 9, 9)
+  }
+
+  test("the closing day is readable hours before the post wants it") {
+    // The whole point of moving off the server-save boundary: by four in the
+    // morning the day is published, and the post is six hours away.
+    val svc = service(new StubApi(Map.empty), new StubRepo())
+    svc.dayToFetch(justAfterBatch) shouldBe closedDay
+    svc.dayToFetch(justAfterSave) shouldBe closedDay
   }
 
   // --- recognising the roll ------------------------------------------------
@@ -215,7 +227,7 @@ class KillStatisticsServiceSpec extends AnyFunSuite with Matchers with ScalaFutu
     // to recognise the roll against, so this one case falls back to the clock.
     val api = new StubApi(Map("Antica" -> Right(response("Antica"))))
     val repo = new StubRepo()
-    service(api, repo, now = justAfterSave).tick().futureValue
+    service(api, repo, now = justAfterBatch).tick().futureValue
     api.calls shouldBe empty
     repo.summaries shouldBe empty
   }

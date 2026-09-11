@@ -521,7 +521,6 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |online_neutrals_min INT NOT NULL DEFAULT 0,
               |statistics_channel VARCHAR(255) NOT NULL DEFAULT '0',
               |statistics_posted VARCHAR(255) NOT NULL DEFAULT '',
-              |statistics_kills_posted VARCHAR(255) NOT NULL DEFAULT '',
               |PRIMARY KEY (name)
               |);""".stripMargin
 

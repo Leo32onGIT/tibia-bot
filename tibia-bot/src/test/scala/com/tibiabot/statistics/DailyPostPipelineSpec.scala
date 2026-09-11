@@ -25,7 +25,14 @@ import scala.concurrent.duration._
  *  that, so the row the post wanted was written a quarter of an hour after it
  *  had already gone out and marked the day done — every day, not sometimes.
  *
- *  These drive the real pair against one instant to hold that shut. */
+ *  Both halves of that were wrong in the end. tibia.com does not publish its
+ *  kill statistics at server save at all; it rebuilds them in a nightly batch
+ *  around 03:10 Berlin, so the snapshot is taken at four in the morning and the
+ *  post at ten finds it long since filed. The gap is comfortable now, which is
+ *  exactly the kind of thing that stops being true quietly.
+ *
+ *  So these drive the real pair along one timeline rather than asserting either
+ *  side's schedule in isolation. */
 class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures {
 
   implicit override val patienceConfig: PatienceConfig =
@@ -33,9 +40,17 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
 
   private def berlin(text: String) = ZonedDateTime.parse(text).withZoneSameInstant(Clock.Berlin)
 
-  /** A minute past server save: the post's first tick of the day, and long
-   *  before the old hour-long settle would have allowed a read. */
+  /** The small hours, after tibia.com's nightly batch: when the snapshot is
+   *  taken. */
+  private val afterBatch = berlin("2026-09-11T04:05:00+02:00")
+
+  /** A minute past server save: the post's first tick of the day, six hours
+   *  later. */
   private val justAfterSave = berlin("2026-09-11T10:01:00+02:00")
+
+  /** Before the batch, when the previous day is still what is published. */
+  private val beforeBatch = berlin("2026-09-11T02:00:00+02:00")
+
   private val closedDay = LocalDate.of(2026, 9, 10)
   private val dayBefore = closedDay.minusDays(1)
 
@@ -122,14 +137,21 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
     def removeExpired(guildId: String, before: LocalDate): Unit = ()
   }
 
-  /** One world, one discord, the real services, one clock. */
+  /** One world, one discord, the real services, and one clock they both read.
+   *
+   *  The clock is the point. Each service is right about its own half; what no
+   *  test of either alone can see is the two of them sitting on the same
+   *  timeline, which is exactly where the original bug lived. */
   private class Pipeline(world: String = "Antica") {
     val cache = new Cache
     val tibia = new FakeTibia(world)
     val boards = mutable.ListBuffer.empty[DailyReport]
-    val creatures = mutable.ListBuffer.empty[DailyReport]
     private var posted = ""
-    private var killsPosted = ""
+
+    @volatile var clock: ZonedDateTime = beforeBatch
+
+    /** Move the shared clock, the way the morning does. */
+    def at(time: ZonedDateTime): Unit = clock = time
 
     val snapshot = new KillStatisticsService(
       api = tibia,
@@ -137,7 +159,7 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
       trackedWorlds = () => List(world),
       gap = () => 0.millis,
       delay = _ => Future.unit,
-      now = () => justAfterSave)
+      now = () => clock)
 
     val post = new StatisticsService(
       experience = new StubExperience,
@@ -149,72 +171,74 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
         def averages(world: String, saveDay: LocalDate): Option[WorldOnlineAverage] = None
         def removeExpired(before: LocalDate): Unit = ()
       },
-      targets = () => List(StatisticsTarget(
-        "guild", "Guild", world, "channel", posted, Set.empty, killsPosted)),
+      targets = () => List(StatisticsTarget("guild", "Guild", world, "channel", posted, Set.empty)),
       announce = (_, report, _, _) => boards += report,
-      announceKills = (_, report) => creatures += report,
       recordPosted = (_, day) => posted = day.toString,
-      recordKillsPosted = (_, day) => killsPosted = day.toString,
-      now = () => justAfterSave)
+      now = () => clock)
 
     /** Yesterday's snapshot, which is what the roll is recognised against. */
     def seedPreviousDay(): Unit =
       cache.recordSummary(KillStatistics.summary(response(world, 2400000).killstatistics, dayBefore))
+
+    /** An ordinary morning: the batch runs, the snapshot is taken in the small
+     *  hours, and the post goes out six hours later. */
+    def ordinaryMorning(): Unit = {
+      seedPreviousDay()
+      tibia.roll()
+      at(afterBatch)
+      snapshot.tick().futureValue
+      at(justAfterSave)
+      post.tick()
+    }
   }
 
-  test("the day the post reports is the day the snapshot files") {
-    // The bug this pair exists for: two services agreeing on the clock but not
-    // on the day, which no test of either alone could see.
+  test("the two services agree on which day they are talking about") {
+    // The bug this pair exists for. They compute it from different boundaries —
+    // the snapshot from tibia.com's nightly batch, the post from server save —
+    // and the post finds the row only because the batch falls in between.
     val pipeline = new Pipeline()
     pipeline.snapshot.dayToFetch(justAfterSave) shouldBe DailyStatistics.reportedDay(justAfterSave)
     pipeline.snapshot.dayToFetch(justAfterSave) shouldBe closedDay
+    // And the snapshot names that day from the small hours onward, hours before
+    // the post asks for it.
+    pipeline.snapshot.dayToFetch(afterBatch) shouldBe closedDay
   }
 
-  test("a minute past server save, the snapshot is filed and the post carries it") {
+  test("before the batch the snapshot does not reach for a day that is not published") {
     val pipeline = new Pipeline()
-    pipeline.seedPreviousDay()
-    pipeline.tibia.roll()
+    pipeline.snapshot.dayToFetch(beforeBatch) shouldBe dayBefore
+  }
 
-    pipeline.snapshot.tick().futureValue
-    pipeline.post.tick()
+  test("the snapshot is taken in the small hours and the post carries it at ten") {
+    val pipeline = new Pipeline()
+    pipeline.ordinaryMorning()
 
     pipeline.boards.map(_.saveDay) shouldBe List(closedDay)
     pipeline.boards.head.kills.map(_.mostKilled) shouldBe Some(Some(("dragon", 900)))
-    // One message, because the figures were there when the board went out.
-    pipeline.creatures shouldBe empty
+    pipeline.boards.head.gains should not be empty
   }
 
-  test("a board sent before the roll is followed by the creature figures") {
+  test("a night tibia.com never published still posts the board") {
+    // The one case the creature figures can be missing now that nothing races.
     val pipeline = new Pipeline()
     pipeline.seedPreviousDay()
-
-    // tibia.com has not rolled: the snapshot files nothing and the board goes
-    // out on its own rather than waiting.
+    pipeline.at(afterBatch)
     pipeline.snapshot.tick().futureValue
+    pipeline.at(justAfterSave)
     pipeline.post.tick()
+
     pipeline.boards.map(_.kills) shouldBe List(None)
-    pipeline.creatures shouldBe empty
-
-    // It rolls a minute later, and the other half follows.
-    pipeline.tibia.roll()
-    pipeline.snapshot.tick().futureValue
-    pipeline.post.tick()
-    pipeline.boards should have size 1
-    pipeline.creatures.map(_.saveDay) shouldBe List(closedDay)
-    pipeline.creatures.head.kills.map(_.mostKilled) shouldBe Some(Some(("dragon", 900)))
+    pipeline.boards.head.gains should not be empty
   }
 
-  test("neither half is posted twice however often the tick runs") {
+  test("the day is not posted twice however often the tick runs") {
     val pipeline = new Pipeline()
-    pipeline.seedPreviousDay()
-    pipeline.tibia.roll()
-
+    pipeline.ordinaryMorning()
     (1 to 5).foreach { _ =>
       pipeline.snapshot.tick().futureValue
       pipeline.post.tick()
     }
     pipeline.boards should have size 1
-    pipeline.creatures shouldBe empty
   }
 
   test("a special boss killed that day reaches the post under its own name") {
@@ -223,27 +247,19 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
     // which is why this is worth an end-to-end test rather than two unit ones.
     val plunder = SpecialKills.all.head
     val pipeline = new Pipeline()
-    pipeline.seedPreviousDay()
-    pipeline.tibia.roll()
     pipeline.tibia.alsoKilled(plunder.race, 3)
-
-    pipeline.snapshot.tick().futureValue
-    pipeline.post.tick()
+    pipeline.ordinaryMorning()
 
     pipeline.boards.head.specialKills shouldBe List(plunder -> 3)
     pipeline.boards.head.topKills.map(_.race) should not contain plunder.race
   }
 
   test("the boss predictions can see the day being reported") {
-    // The snapshot writes the boss rows before the summary, and the post waits
-    // on the summary — so a boss killed on the closing day is in the history the
-    // prediction reads rather than a day out of reach.
+    // The snapshot writes the boss rows before the summary, and both are in the
+    // cache hours before the post reads them — so a boss killed on the closing
+    // day is in the history the prediction reads rather than a day out of reach.
     val pipeline = new Pipeline()
-    pipeline.seedPreviousDay()
-    pipeline.tibia.roll()
-
-    pipeline.snapshot.tick().futureValue
-    pipeline.post.tick()
+    pipeline.ordinaryMorning()
 
     pipeline.cache.sightings("Antica", dayBefore).get("ferumbras")
       .map(_.map(_._1)) shouldBe Some(List(closedDay))

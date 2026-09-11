@@ -2,7 +2,7 @@ package com.tibiabot.statistics
 
 import com.tibiabot.domain.time.Clock
 import com.tibiabot.persistence.KillStatisticsRepository
-import com.tibiabot.scheduler.ServerSaveSchedule
+import com.tibiabot.scheduler.KillStatisticsSchedule
 import com.tibiabot.tibiadata.KillStatisticsApi
 import com.tibiabot.tibiadata.response.KillStatisticsData
 import com.typesafe.scalalogging.StrictLogging
@@ -14,13 +14,13 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-/** Takes one kill statistics snapshot per world per server-save day and files
- *  the catalogued bosses plus a summary row.
+/** Takes one kill statistics snapshot per world per published day and files the
+ *  catalogued bosses, the day's creatures and a summary row.
  *
- *  Posts nothing itself, but the daily statistics post waits on it: a world's
- *  summary row landing is what releases that world's embed, so the two are
- *  ordered through the database rather than through the clock. See
- *  [[StatisticsService]].
+ *  Posts nothing itself. The daily statistics post reads what it writes, and
+ *  reads it in the same message as everything else — the batch below runs around
+ *  four in the morning and the post goes out at ten, so there is six hours of
+ *  slack between them and nothing has to wait on anything.
  *
  *  Fleet-wide work, so the primary alone does it: two bots reading the same 68
  *  pages through the same TibiaData instance would be pure duplication, and the
@@ -28,18 +28,23 @@ import scala.util.control.NonFatal
  *  as rows appearing.
  *
  *  ==Knowing the day has rolled==
- *  `last_day` is the save day that has just closed — tibia.com rolls the figures
- *  at server save — so [[DailyStatistics.reportedDay]] names what the endpoint
- *  will be showing once it has rolled. The hazard is the roll itself: the
- *  figures carry no date, so a fetch taken a minute early looks exactly like one
- *  taken a minute late and would be filed under the wrong day, which is the kind
- *  of error that is invisible now and wrong forever.
+ *  tibia.com rebuilds its kill statistics in a nightly batch at around 03:10
+ *  Berlin — not at server save, which is what this originally assumed — so the
+ *  figures are in place hours before anything reads them. See
+ *  [[com.tibiabot.scheduler.KillStatisticsSchedule]]
+ *  for which day a publication describes, since it is not quite a save day.
+ *
+ *  The hazard is the roll itself: the figures carry no date, so a fetch taken a
+ *  minute early looks exactly like one taken a minute late and would be filed
+ *  under the wrong day, which is the kind of error that is invisible now and
+ *  wrong forever.
  *
  *  Rather than hedge that with a timer, this asks the database. The previous
  *  day's summary is the figures the endpoint is *still showing* until it rolls,
  *  so a live read that differs from it has rolled and one that matches has not.
- *  That is evidence rather than a guess, and it means the snapshot lands within
- *  a minute of the roll instead of an hour after it.
+ *  That is evidence rather than a guess, which is why getting the batch time
+ *  wrong for a while cost nothing: the times below decide only when this starts
+ *  asking, never what it believes.
  *
  *  ==Probe, then sweep==
  *  The roll is one event across tibia.com, not sixty-eight of them, so
@@ -56,7 +61,7 @@ import scala.util.control.NonFatal
  *
  *  There is no deadline. A bot that was down all morning still catches the day
  *  when it comes back, because the comparison works just as well at two in the
- *  afternoon as at one minute past ten.
+ *  afternoon as at four in the morning.
  *
  *  @param gap    paced between worlds. 68 requests once a day is nothing beside
  *                the highscore sweep's ninety thousand, but they are all to one
@@ -93,13 +98,18 @@ final class KillStatisticsService(
    *  costs exactly one more probe. */
   @volatile private var rolled: Option[LocalDate] = None
 
-  /** The save day the endpoint reports once it has rolled: the one that has just
-   *  closed, not the one running.
+  /** The day the endpoint publishes once the nightly batch has run.
    *
    *  Always answerable, because it is a statement about the clock. Whether the
    *  endpoint has actually caught up is the separate question [[tick]] answers
-   *  with evidence. */
-  def dayToFetch(at: ZonedDateTime): LocalDate = DailyStatistics.reportedDay(at)
+   *  with evidence.
+   *
+   *  Agrees with [[DailyStatistics.reportedDay]] throughout the server-save
+   *  window, which is what lets the daily post look the row up by the day it is
+   *  reporting. They are computed from different boundaries — this one from the
+   *  batch, that one from server save — and only coincide because the batch
+   *  lands in between. */
+  def dayToFetch(at: ZonedDateTime): LocalDate = KillStatisticsSchedule.reportedDay(at)
 
   /** One pass. Safe on a frequent schedule: once the day is filed this costs a
    *  clock comparison and a map lookup per world, and nothing else. Before the
@@ -133,7 +143,7 @@ final class KillStatisticsService(
         fileAll(rest, day)
 
       case Probe.NotRolled(world) =>
-        // Server save has been and gone by the clock, but tibia.com is still
+        // Past the hour the batch should have run, but tibia.com is still
         // showing the day we filed yesterday. Nothing to do but ask again.
         logger.debug(s"Kill statistics: '$world' is still reporting the day before $day")
         Future.unit
@@ -289,8 +299,14 @@ final class KillStatisticsService(
     done
   }
 
-  private def settled(at: ZonedDateTime): Boolean =
-    Duration.between(ServerSaveSchedule.lastServerSave(at), at).compareTo(settle) >= 0
+  /** Whether enough time has passed since the nightly batch to trust a read we
+   *  have nothing to compare against. Only the cold-start path asks. */
+  private def settled(at: ZonedDateTime): Boolean = {
+    val berlin = at.withZoneSameInstant(Clock.Berlin)
+    val boundary = berlin.toLocalDate.atTime(KillStatisticsSchedule.boundary).atZone(Clock.Berlin)
+    val since = if (berlin.isBefore(boundary)) boundary.minusDays(1) else boundary
+    Duration.between(since, berlin).compareTo(settle) >= 0
+  }
 }
 
 object KillStatisticsService {

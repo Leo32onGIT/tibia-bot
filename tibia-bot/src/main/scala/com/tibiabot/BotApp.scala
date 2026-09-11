@@ -1272,7 +1272,26 @@ object BotApp extends App with StrictLogging {
         () => { killStatisticsService.tick(); () })(ex)
       logger.info("Daily kill statistics snapshot enabled for every tracked world")
     }
+
+    // The measurement of when tibia.com's nightly batch actually runs. Primary
+    // only and one request a minute inside its window, for the same reason the
+    // snapshot is: it asks the same host the same question.
+    if (Config.Statistics.KillStatistics.RollProbe.enabled &&
+        Config.BotRole.current != Config.BotRole.Secondary) {
+      actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 1.minute)(
+        () => { killStatisticsRollProbe.tick(); () })(ex)
+      logger.info("Kill statistics roll probe enabled — watching for the nightly batch")
+    }
   }
+
+  /** Watches one world across the small hours to time tibia.com's kill
+   *  statistics batch. Temporary, and reads nothing the bot depends on. */
+  private lazy val killStatisticsRollProbe = new statistics.RollProbe(
+    api = killStatisticsApi,
+    world = () => streamSupervisor.activeWorlds.toList.sorted.headOption,
+    from = Config.Statistics.KillStatistics.RollProbe.from,
+    to = Config.Statistics.KillStatistics.RollProbe.to
+  )(ex)
 
   if (Config.Statistics.enabled) {
     // Every bot, for the same reason the advance feed is: this only reads the
@@ -1363,8 +1382,7 @@ object BotApp extends App with StrictLogging {
             world = world.name,
             channelId = world.statisticsChannel,
             posted = world.statisticsPosted,
-            huntedNames = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
-            killsPosted = world.statisticsKillsPosted
+            huntedNames = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
           )
       }
     }
@@ -1491,28 +1509,13 @@ object BotApp extends App with StrictLogging {
     }
   }
 
-  /** The same, for the creature figures — the half of the day that waits on
-   *  tibia.com and is marked separately because of it. */
-  private def recordStatisticsKillsPosted(target: statistics.StatisticsTarget, day: java.time.LocalDate): Unit = {
-    worldConfigRepository.updateWorldString(target.guildId, target.world, "statistics_kills_posted", day.toString)
-    modifyWorldsData { data =>
-      data.get(target.guildId) match {
-        case None => data
-        case Some(worlds) => data.updated(target.guildId, worlds.map { world =>
-          if (world.name.equalsIgnoreCase(target.world)) world.copy(statisticsKillsPosted = day.toString) else world
-        })
-      }
-    }
-  }
-
   /** The daily statistics post. Runs on every bot and fetches nothing — the
    *  figures were already written to the shared cache by the primary's hourly
    *  highscore sweep, so all this does is read them and post to its own guilds.
    *
-   *  The board goes out the moment the window opens. The creature figures and
-   *  the bosses ride with it when the day's snapshot is already filed, and
-   *  otherwise follow in a second message once it lands — which is how a
-   *  secondary waits on work only the primary does. */
+   *  One message, four embeds. Nothing waits on anything: the kill statistics
+   *  the last two read were published overnight and filed at four in the
+   *  morning, six hours before this runs. */
   private lazy val statisticsService = new statistics.StatisticsService(
     experience = experienceRepository,
     highscores = highscoreRepository,
@@ -1529,11 +1532,10 @@ object BotApp extends App with StrictLogging {
           // reads as one entry per day. A day too big for Discord's 6,000
           // characters spills onto a second message rather than losing rows.
           //
-          // The last two are here only when the day's kill statistics were
-          // already filed, since both read that snapshot: posting the prediction
-          // now against a history that stops the day before would show a boss
-          // killed yesterday as due today. When they are not, they follow in
-          // `announceKills` instead.
+          // The last two are absent only when the day's kill statistics were
+          // never filed, since both read that snapshot. Normally they were, six
+          // hours earlier — tibia.com publishes them overnight, not at server
+          // save — so this is the tibia.com-was-down case rather than a race.
           val embeds =
             presentation.StatisticsEmbeds.build(
               report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
@@ -1547,19 +1549,7 @@ object BotApp extends App with StrictLogging {
           replaceStatisticsPost(channel, presentation.EmbedPages.messages(embeds))
         }
       },
-    announceKills = (target, report) =>
-      statisticsChannelFor(target).foreach { channel =>
-        outboundSender.enqueue("statistics") { () =>
-          // Sent, not replaced: replaceStatisticsPost clears every message this
-          // bot has in the channel, which on this path would take the board out
-          // with it.
-          val embeds = creatureEmbeds(report)
-          if (embeds.nonEmpty) sendInOrder(channel, presentation.EmbedPages.messages(embeds))
-        }
-      },
-    recordPosted = recordStatisticsPosted,
-    recordKillsPosted = recordStatisticsKillsPosted,
-    waitForKills = Config.Statistics.waitForKills
+    recordPosted = recordStatisticsPosted
   )
 
   /** The half of the post that reads the day's kill statistics: what the world

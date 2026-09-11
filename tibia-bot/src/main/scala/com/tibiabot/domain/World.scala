@@ -55,17 +55,7 @@ case class Worlds(name: String,
    *  45-minute window that the 30-second tick visits about ninety times: an
    *  in-memory guard answers all but the first of those, and answers nothing at
    *  all after a restart mid-window, which would post the same day twice. */
-  statisticsPosted: String = "",
-  /** The last server-save day this world's creature figures were posted, as an
-   *  ISO date, or "" if they never have been.
-   *
-   *  Separate from [[statisticsPosted]] because the two halves of the post are
-   *  released by different things. The board and the war are ready the moment
-   *  server save lands; the creature figures and the boss predictions wait on
-   *  tibia.com rolling its kill statistics, which is usually a minute or two
-   *  later and occasionally half an hour. One date cannot say that one half is
-   *  out and the other is still owed. */
-  statisticsKillsPosted: String = ""
+  statisticsPosted: String = ""
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

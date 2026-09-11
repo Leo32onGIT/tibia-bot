@@ -6,7 +6,7 @@ import com.tibiabot.persistence.{ExperienceRepository, FragRepository, Highscore
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
-import java.time.{Duration, LocalDate, ZonedDateTime}
+import java.time.{LocalDate, ZonedDateTime}
 import scala.util.control.NonFatal
 
 /** One discord's statistics channel for one world.
@@ -26,19 +26,13 @@ final case class StatisticsTarget(
      *  online list and the deaths channel already hold in memory, and because
      *  "Most Exp Lost" is the only query that needs it — pushing it down would
      *  mean the cache reading a guild's own database. */
-    huntedNames: Set[String] = Set.empty,
-    /** That world's stored `statistics_kills_posted` — the last save day this
-     *  channel carried creature figures for. */
-    killsPosted: String = ""
+    huntedNames: Set[String] = Set.empty
 ) {
 
-  /** Whether this channel still owes the board for `day`. String comparison
-   *  against the stored ISO date: a channel that has never posted holds "",
-   *  which matches nothing. */
+  /** Whether this channel still owes a post for `day`. String comparison against
+   *  the stored ISO date: a channel that has never posted holds "", which
+   *  matches nothing. */
   def owes(day: LocalDate): Boolean = posted != day.toString
-
-  /** Whether this channel still owes the creature figures for `day`. */
-  def owesKills(day: LocalDate): Boolean = killsPosted != day.toString
 }
 
 /** Posts the daily statistics embed once per world per server-save day.
@@ -53,46 +47,34 @@ final case class StatisticsTarget(
  *  tracking it, because none of it is guild-scoped. Fifty discords watching
  *  Antica is one pair of queries, not fifty.
  *
- *  ==Two halves, released by different things==
- *  The board and the war are ready the moment server save lands: every figure in
- *  them was written by the highscore sweep inside the closing day. The creature
- *  figures and the boss predictions are not — both read the day's kill
- *  statistics snapshot, which cannot be taken until tibia.com rolls its own
- *  figures, usually a minute or two after server save and occasionally half an
- *  hour later when the site is in maintenance.
+ *  ==One message, and why nothing waits==
+ *  Every figure the post carries is in hand before the window opens. The board
+ *  and the war come from the highscore sweep inside the closing day; the
+ *  creature figures and the boss predictions come from the kill statistics
+ *  snapshot, which tibia.com publishes in a nightly batch at around 03:10 Berlin
+ *  and [[KillStatisticsService]] files from 04:00 — six hours of slack before
+ *  anything here reads it.
  *
- *  So the post goes out in two, and only when it has to. The board and the war
- *  are sent as soon as the window opens. If the snapshot is already filed by
- *  then — a restart later in the morning, a fast roll — the creature figures and
- *  the bosses ride the same message and the day is one post, exactly as before.
- *  If it is not, they follow in a second message the minute it lands. Nobody
- *  waits on tibia.com to read who gained the most experience.
+ *  This briefly posted in two messages, on the belief that tibia.com rolled its
+ *  kill statistics at server save and the snapshot would land mid-window. It
+ *  does not, and the staging was solving a problem that only existed in the
+ *  assumption. What remains of it is the shape of the embeds — the creature
+ *  figures are their own embed rather than a section of the board — which is
+ *  worth keeping on its own merits.
  *
- *  The wait is expressed as the summary row appearing rather than as a schedule,
- *  because only the primary takes the snapshot while every bot posts: a
- *  secondary has no way to observe that work except by seeing the row. One gate
- *  serves both.
- *
- *  It is bounded by `waitForKills`, after which the second half is written off
- *  for the day rather than retried forever. The deadline sits inside the
- *  server-save window on purpose, with several ticks to spare: a target still
- *  waiting when the window shuts would never be released at all, because
- *  tomorrow's tick owes tomorrow's day.
+ *  A day whose snapshot genuinely is missing — tibia.com down through the whole
+ *  night and morning — posts without those two embeds rather than waiting or
+ *  skipping the day. The board is most of the value and it is never at risk.
  *
  *  @param announce     hands a finished report to the caller to render and send;
  *                      the embed is built outside so this stays free of JDA. The
  *                      report's `kills` says whether the creature figures and
- *                      the bosses are riding this message or following in the
- *                      next one
- *  @param announceKills sends the second message — the creature figures and the
- *                      bosses — for a day whose board has already gone out
+ *                      the bosses are in it at all
  *  @param recordPosted stores the day this target has now been served. A callback
  *                      rather than the world-config repository itself, because the
  *                      stored row has a cached twin in memory that `targets` reads
  *                      back on the very next tick — writing only one of the two
  *                      would repost the same day for the rest of the window
- *  @param waitForKills how long past server save to wait for the day's kill
- *                      statistics snapshot before posting without it
  *  @param now          injected so the window logic is testable without waiting
  *                      for ten in the morning
  */
@@ -104,95 +86,43 @@ final class StatisticsService(
     worldOnline: WorldOnlineRepository,
     targets: () => List[StatisticsTarget],
     announce: (StatisticsTarget, DailyReport, FragTally, List[ExperienceDelta]) => Unit,
-    announceKills: (StatisticsTarget, DailyReport) => Unit,
     recordPosted: (StatisticsTarget, LocalDate) => Unit,
-    recordKillsPosted: (StatisticsTarget, LocalDate) => Unit,
-    waitForKills: Duration = StatisticsService.WaitForKills,
     now: () => ZonedDateTime = () => ZonedDateTime.now(Clock.Berlin)
 ) extends StrictLogging {
 
-  /** One pass. Cheap and safe to call on the ordinary minute tick: outside the
-   *  server-save window it does nothing at all, and inside it every target whose
-   *  two halves have both been served is answered by its stored dates without a
-   *  query. */
+  /** One pass. Cheap and safe to call often: outside the server-save window it
+   *  does nothing at all, and inside it every target that has already been
+   *  served is answered by its stored date without a query.
+   *
+   *  How often it is called is how close to ten the post lands, since the
+   *  schedule is anchored to the bot's boot rather than to the clock — so the
+   *  tick interval is a product decision more than a cost one. */
   def tick(): Unit = {
     val currentTime = now()
     if (ServerSaveSchedule.isServerSaveWindow(currentTime.withZoneSameInstant(Clock.Berlin).toLocalTime)) {
       val day = DailyStatistics.reportedDay(currentTime)
-      val all = targets()
-      val boards = all.filter(_.owes(day))
-      // Only targets whose board is already out. A target served in this very
-      // tick is deliberately left for the next one: the board is sent by
-      // clearing the channel and reposting, and a second message racing that
-      // purge would be swept away by it.
-      val creatures = all.filterNot(_.owes(day)).filter(_.owesKills(day))
-      if (boards.nonEmpty || creatures.nonEmpty) postAll(boards, creatures, day, currentTime)
+      val owed = targets().filter(_.owes(day))
+      if (owed.nonEmpty) postAll(owed, day)
     }
   }
 
-  private def postAll(boards: List[StatisticsTarget], creatures: List[StatisticsTarget],
-                      day: LocalDate, at: ZonedDateTime): Unit = {
-    val waited = waitedLongEnough(at)
-    val worlds = (boards ++ creatures).map(_.world).distinct
-    val filed = worlds.map(world => world -> killsFor(world, day)).toMap
-
-    // Built per world rather than per target, because none of it is
-    // guild-scoped — the frag tally is the one thing that cannot be shared this
-    // way, and it is read per target below.
-    //
-    // A world only waiting on its creature figures does not get a report built
-    // until they are actually there. That is six queries, and a morning
-    // tibia.com spends in maintenance is forty ticks long.
-    val wanted = worlds.filter(world => boards.exists(_.world == world) || filed(world).isDefined)
-    val reports = wanted.map(world => world -> report(world, day, filed(world))).toMap
-
-    boards.foreach { target =>
+  private def postAll(owed: List[StatisticsTarget], day: LocalDate): Unit = {
+    // Built per world rather than per target, and only for the worlds something
+    // is actually waiting on. The frag tally cannot be shared this way — it is
+    // read from the guild's own lists — so it is fetched per target below.
+    val reports = owed.map(_.world).distinct
+      .map(world => world -> report(world, day, killsFor(world, day))).toMap
+    owed.foreach { target =>
       reports.get(target.world).flatten.foreach(post(target, _))
     }
-    creatures.foreach { target =>
-      (filed(target.world), reports.get(target.world).flatten) match {
-        case (Some(_), Some(report)) => postKills(target, report)
-        case _ if waited =>
-          // tibia.com never rolled inside the window, or the cache cannot be
-          // read. The board is already out; this stops the rest of the window
-          // asking for the other half.
-          logger.info(s"Statistics: no kill statistics for '${target.world}' on $day by the deadline, " +
-            "giving up on the creature figures for the day")
-          markKillsPosted(target, day)
-        case _ =>
-          logger.debug(s"Statistics: waiting on the kill statistics snapshot for '${target.world}' on $day")
-      }
-    }
   }
-
-  /** The second message: the creature figures and the bosses, for a day whose
-   *  board went out without them.
-   *
-   *  The mark is written whether or not the send succeeded, for the same reason
-   *  the board's is: a channel the bot has lost access to would otherwise be
-   *  retried for the rest of the window and again every morning. */
-  private def postKills(target: StatisticsTarget, report: DailyReport): Unit = {
-    try announceKills(target, report)
-    catch {
-      case NonFatal(error) =>
-        logger.warn(s"Statistics: could not post the creature figures for '${target.world}' " +
-          s"to ${target.guildLabel}: ${error.getMessage}")
-    }
-    markKillsPosted(target, report.saveDay)
-  }
-
-  /** Whether to stop waiting for the day's kill statistics and post without
-   *  them. Measured from server save rather than from the first tick, so a bot
-   *  that started late inside the window does not get its own fresh deadline. */
-  private def waitedLongEnough(at: ZonedDateTime): Boolean =
-    Duration.between(ServerSaveSchedule.lastServerSave(at), at).compareTo(waitForKills) >= 0
 
   /** The day's kill figures, if they have been filed.
    *
-   *  A failure reads the same as "not yet", which is the right way round: the
-   *  creature figures wait and are asked for again rather than the board going
-   *  out saying a world killed nothing, and the deadline stops that waiting from
-   *  outlasting the window. */
+   *  Normally they were, six hours earlier. A failure or a genuine gap reads the
+   *  same way — the creature and boss embeds are left off this post rather than
+   *  holding the board back, which is the same rule every other absent section
+   *  follows. */
   private def killsFor(world: String, day: LocalDate): Option[DayKillSummary] =
     try killStatistics.summary(world, day)
     catch {
@@ -287,17 +217,13 @@ final class StatisticsService(
         None
     }
 
-  /** Post the board to one channel and record that the day is done.
+  /** Post the day to one channel and record that it is done.
    *
-   *  An empty report is marked as posted without anything being sent. The usual
-   *  cause is a world on its first day of history, which has no previous rollup
-   *  to measure a gain against. It marks only the board: the creature figures
-   *  are a separate half and a world with nothing in the highscores can still
-   *  have killed three million creatures.
-   *
-   *  Where the snapshot was already filed, the creature figures and the bosses
-   *  are in this report and go out on this message, so the day is done in one
-   *  and the second half is marked with it.
+   *  An empty report is marked as posted without anything being sent. Nothing
+   *  later in the window can change it — every figure it would carry was settled
+   *  before the window opened — so retrying would be forty more queries for the
+   *  same silence. The usual cause is a world on its first day of history, which
+   *  has no previous rollup to measure a gain against.
    *
    *  The mark is written whether or not the send succeeded. A channel the bot
    *  has lost access to would otherwise be retried for the rest of the window
@@ -315,7 +241,6 @@ final class StatisticsService(
         logger.warn(s"Statistics: could not post '${target.world}' to ${target.guildLabel}: ${error.getMessage}")
     }
     markPosted(target, report.saveDay)
-    if (report.kills.isDefined) markKillsPosted(target, report.saveDay)
   }
 
   private def markPosted(target: StatisticsTarget, day: LocalDate): Unit =
@@ -327,29 +252,4 @@ final class StatisticsService(
         logger.warn(s"Statistics: could not record the post for '${target.world}' in ${target.guildLabel}: ${error.getMessage}")
     }
 
-  private def markKillsPosted(target: StatisticsTarget, day: LocalDate): Unit =
-    try recordKillsPosted(target, day)
-    catch {
-      case NonFatal(error) =>
-        logger.warn(s"Statistics: could not record the creature figures for '${target.world}' " +
-          s"in ${target.guildLabel}: ${error.getMessage}")
-    }
-}
-
-object StatisticsService {
-
-  /** How long past server save to wait for the day's kill statistics before
-   *  posting without them.
-   *
-   *  Forty minutes, which is not a guess about tibia.com so much as a position
-   *  inside the server-save window: the window shuts at 10:45 and the tick runs
-   *  every minute, so a deadline here leaves several attempts in hand. A target
-   *  still deferred when the window shuts would not be posted at all — tomorrow
-   *  it owes tomorrow's day — so the deadline has to clear the edge by more than
-   *  one tick.
-   *
-   *  On an ordinary morning nothing waits anywhere near this long: the roll is
-   *  recognised within a minute of server save. This is for the mornings
-   *  tibia.com spends in maintenance. */
-  val WaitForKills: Duration = Duration.ofMinutes(40)
 }

@@ -141,7 +141,6 @@ object Config {
 
     val enabled: Boolean = statistics.getBoolean("enabled")
     val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
-    val waitForKills: java.time.Duration = statistics.getDuration("wait-for-kills")
     val fragRetention: FiniteDuration = statistics.getDuration("frag-retention").toScala
 
     /** The daily kill statistics snapshot, which the post above waits on. */
@@ -155,6 +154,14 @@ object Config {
       val settle: java.time.Duration = killStatistics.getDuration("settle")
       val probeCandidates: Int = killStatistics.getInt("probe-candidates")
       val retention: FiniteDuration = dur("retention")
+
+      /** The temporary measurement of when tibia.com's nightly batch runs. */
+      object RollProbe {
+        private val probe = killStatistics.getConfig("roll-probe")
+        val enabled: Boolean = probe.getBoolean("enabled")
+        val from: java.time.LocalTime = java.time.LocalTime.parse(probe.getString("from"))
+        val to: java.time.LocalTime = java.time.LocalTime.parse(probe.getString("to"))
+      }
     }
   }
 
