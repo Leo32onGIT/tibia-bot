@@ -248,6 +248,20 @@ object RespawnClaim {
      *  [[SlotMoved]] settles one that changes hands. A booking that already had
      *  a row is edited in place and leaves no trail here. */
     val SlotResized: String = "slot-resized"
+    /** This day was moved to a different time. Recorded against the day it left,
+     *  never against the one it landed on — which is a booking of its own, with
+     *  nothing to explain about it.
+     *
+     *  Always a settle-and-rewrite, even where [[SlotResized]] can edit a row in
+     *  place: an occurrence's identity is its rule and the instant it starts on,
+     *  and moving that instant would let the materialiser write the old evening
+     *  all over again. */
+    val SlotRetimed: String = "slot-retimed"
+    /** The booking behind this occurrence was moved to another time, so the
+     *  evening it had written down is no longer one of its own. Its owner's
+     *  doing, not a moderator's — see [[ScheduleCancelled]] for the rule going
+     *  away entirely. */
+    val BookingRetimed: String = "booking-retimed"
 
     /** Plain-English form for the audit log. Unknown values are shown as-is
      *  rather than hidden, so a row written by a newer version still says
@@ -271,6 +285,8 @@ object RespawnClaim {
       case SlotRemoved => "taken off the calendar by a moderator"
       case SlotMoved   => "moved to somebody else by a moderator"
       case SlotResized => "lengthened or shortened by a moderator"
+      case SlotRetimed => "moved to another time"
+      case BookingRetimed => "booking moved to another time"
       case other       => other
     }
   }

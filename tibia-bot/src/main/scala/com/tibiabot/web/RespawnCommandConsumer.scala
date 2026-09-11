@@ -113,10 +113,19 @@ final class RespawnCommandConsumer(
     val guildId = command.guildId
     val actor = command.actorId
     def missing(what: String) = Future.successful(ActionResult(ok = false, s"That instruction had no $what."))
+    def instant(raw: String) =
+      scala.util.Try(java.time.Instant.parse(raw).atZone(java.time.ZoneOffset.UTC)).toOption
     // The instant a calendar slot starts on, which is how one day is named
     // across the wire — a predicted slot has no row and so no id to send.
-    def slotStart(c: RespawnCommand) = c.param("startsAt")
-      .flatMap(s => scala.util.Try(java.time.Instant.parse(s).atZone(java.time.ZoneOffset.UTC)).toOption)
+    def slotStart(c: RespawnCommand) = c.param("startsAt").flatMap(instant)
+    // Everything both ways of changing one window need. `toStartsAt` is absent
+    // when only the length is changing, which is what a dropped blank param
+    // arrives as — see RelayedRespawnActions.send.
+    def slotEdit(c: RespawnCommand) = for {
+      code <- c.param("code")
+      start <- slotStart(c)
+      minutes <- c.intParam("minutes").filter(_ > 0)
+    } yield (code, start, c.param("toStartsAt").flatMap(instant), minutes)
 
     command.action match {
       case RespawnCommand.Claim =>
@@ -132,8 +141,7 @@ final class RespawnCommandConsumer(
       case RespawnCommand.Book =>
         val parsed = for {
           code <- command.param("code")
-          start <- command.param("startsAt")
-            .flatMap(s => scala.util.Try(java.time.Instant.parse(s).atZone(java.time.ZoneOffset.UTC)).toOption)
+          start <- command.param("startsAt").flatMap(instant)
           minutes <- command.intParam("minutes").filter(_ > 0)
         } yield (code, start, minutes)
         parsed.fold(missing("time to book")) { case (code, start, minutes) =>
@@ -143,6 +151,22 @@ final class RespawnCommandConsumer(
 
       case RespawnCommand.CancelBooking =>
         command.longParam("scheduleId").fold(missing("booking"))(local.cancelBooking(guildId, actor, _))
+
+      case RespawnCommand.EditOwnSlot =>
+        slotEdit(command).fold(missing("spawn, day and length")) { case (code, start, to, minutes) =>
+          local.editOwnSlot(guildId, actor, code, start, to, minutes)
+        }
+
+      case RespawnCommand.RescheduleBooking =>
+        val parsed = for {
+          scheduleId <- command.longParam("scheduleId")
+          start <- command.param("startsAt").flatMap(instant)
+          minutes <- command.intParam("minutes").filter(_ > 0)
+          days <- command.intParam("days")
+        } yield (scheduleId, start, minutes, days)
+        parsed.fold(missing("booking, time and length")) { case (id, start, minutes, days) =>
+          local.rescheduleBooking(guildId, actor, id, start, minutes, days)
+        }
 
       case RespawnCommand.ForceLeave =>
         command.param("code").fold(missing("spawn"))(local.forceLeave(guildId, actor, _))
@@ -201,9 +225,8 @@ final class RespawnCommandConsumer(
         }
 
       case RespawnCommand.EditSlot =>
-        (command.param("code"), slotStart(command), command.intParam("minutes").filter(_ > 0)) match {
-          case (Some(code), Some(start), Some(minutes)) => local.editSlot(guildId, actor, code, start, minutes)
-          case _ => missing("spawn, day and length")
+        slotEdit(command).fold(missing("spawn, day and length")) { case (code, start, to, minutes) =>
+          local.editSlot(guildId, actor, code, start, to, minutes)
         }
 
       // Unreachable via fromJson, which refuses unknown actions — kept so a

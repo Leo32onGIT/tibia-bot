@@ -323,6 +323,17 @@ trait RespawnRepository {
    *  claim history still point at something. */
   def deactivateSchedule(guildId: String, scheduleId: Long): Unit
 
+  /** Move a whole booking: a new first slot, a new length, and the weekdays it
+   *  lands on. The rule keeps its id, so the history already written against it
+   *  still reads.
+   *
+   *  Occurrences it has already written down are at the old times and are not
+   *  touched here — the caller cancels them first, or the sweep would leave the
+   *  booking standing at both times at once. None when the schedule is gone or
+   *  retired. */
+  def retimeSchedule(guildId: String, scheduleId: Long, anchorAt: ZonedDateTime,
+                     durationMinutes: Int, daysOfWeek: Int): Option[RespawnSchedule]
+
   // --- reserved occurrences -----------------------------------------------
 
   /** Book one slot of a schedule, unless that exact slot is already booked.
@@ -366,6 +377,18 @@ trait RespawnRepository {
   def skipOccurrence(guildId: String, scheduleId: Long, respawnId: Long, userId: String,
                      userName: String, nickname: String, characterName: String,
                      startsAt: ZonedDateTime, durationMinutes: Int, outcome: String): Boolean
+
+  /** Move a booked slot to another time, and set its length while there.
+   *
+   *  Only a booking with no rule behind it — an occurrence is identified by its
+   *  rule and the instant it starts on, so moving that instant would let the
+   *  materialiser write the old evening again. None when the row is gone, has
+   *  started, or turns out to be an occurrence after all.
+   *
+   *  Any request standing against it is dropped: the question was about the
+   *  evening its owner had, which is no longer the evening they hold. */
+  def retimeReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
+                        durationMinutes: Int): Option[RespawnClaim]
 
   /** Put a booked slot in somebody else's name, keeping its time and length.
    *

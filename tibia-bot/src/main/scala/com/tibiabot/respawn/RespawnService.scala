@@ -82,21 +82,44 @@ object ScheduleResult {
     extends ScheduleResult
 }
 
-/** What changing one window's length did.
+/** What putting one window right did.
  *
- *  `live` says whether this was a hunt under way (deadline moved under someone,
- *  worth telling them now) or an evening still to come. `cutInto` names whoever
- *  the new window runs into — set only on a live hunt, which is allowed to
- *  overrun, so it is a warning on a success, never a refusal.
+ *  `live` says whether this was a hunt under way (deadline moved under someone)
+ *  or an evening still to come. `cutInto` names whoever the new window runs into
+ *  — set only on a live hunt, which is allowed to overrun, so it is a warning on
+ *  a success, never a refusal.
+ *
+ *  `startsAt` is where the window ended up, which is not always where it was
+ *  aimed from: a window can be moved as well as stretched, and the answer has to
+ *  be able to say so.
  */
 final case class SlotEdit(
   owner: String,
   ownerId: String,
   minutes: Int,
+  startsAt: ZonedDateTime,
   endsAt: ZonedDateTime,
   live: Boolean,
-  cutInto: Option[String]
+  cutInto: Option[String],
+  /** Whether it went to a different time, as opposed to only changing length. */
+  moved: Boolean = false
 )
+
+/** Who is putting a window right, and so which rules it is held to.
+ *
+ *  The same edit means two different things depending on who asks. A moderator
+ *  is repairing somebody else's evening and is deliberately not held to what a
+ *  member may ask for — the guild's ceiling would refuse exactly the repairs
+ *  worth making. An owner editing their own is doing nothing they could not do
+ *  by cancelling and booking again, and is held to precisely that. */
+sealed trait SlotEditor {
+  /** Whether the guild's own rules are being overridden. */
+  def overrides: Boolean
+}
+object SlotEditor {
+  case object Moderator extends SlotEditor { val overrides: Boolean = true }
+  final case class Owner(userId: String) extends SlotEditor { val overrides: Boolean = false }
+}
 
 /** One page of the moderator claim log. `hasOlder` comes from fetching one row
  *  past the page, so an Older button only appears when it would show something. */
@@ -2179,6 +2202,100 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
+  /** Move a whole booking: when its first slot is, how long it runs, and which
+   *  days it lands on.
+   *
+   *  The rule, not one evening of it — the answer to "Tuesdays are ten now",
+   *  which every other tool on the calendar deliberately cannot give: they are
+   *  all about the day, and leave a repeating booking repeating. Its owner's to
+   *  make, since it is theirs; a moderator putting one evening right uses
+   *  [[editSlot]].
+   *
+   *  Held to exactly what booking it afresh would be, because that is what it is
+   *  — the guild's ceiling, the same clash rules, a first slot in the future —
+   *  and checked against the spawn with this booking's own evenings taken out of
+   *  the picture, or it would be refused for clashing with itself.
+   *
+   *  The rule keeps its id, so the history already written against it still
+   *  reads. The evenings it had written down are dealt with first, and not all
+   *  the same way: one the moved booking still names is kept and re-timed where
+   *  it stands, because cancelling it would settle that day against the rule and
+   *  the materialiser — which conflicts on (schedule, start) — could then never
+   *  write it again. The rest are given up, being nobody's evenings now. */
+  def rescheduleBooking(guild: Guild, userId: String, scheduleId: Long, firstStart: ZonedDateTime,
+                        durationMinutes: Int, daysOfWeek: Int,
+                        now: ZonedDateTime = ZonedDateTime.now()): Either[String, (RespawnSchedule, Respawn)] = {
+    val guildId = guild.getId
+    settings(guildId) match {
+      case None => Left("The respawn claim system isn't set up on this server yet.")
+      case Some(config) =>
+        // Ownership is checked here rather than trusting the id from the page,
+        // exactly as cancelling a booking does: a schedule id is a small integer
+        // and guessing one must not let somebody move a booking that is not
+        // theirs.
+        repository.findSchedule(guildId, scheduleId).filter(s => s.active && s.userId == userId) match {
+          case None => Left("That booking isn't yours, or has already gone.")
+          case Some(existing) => repository.findById(guildId, existing.respawnId) match {
+            case None => Left("That spawn isn't in the catalogue any more.")
+            case Some(respawn) =>
+              val ceiling = config.maxFor(respawn)
+              val candidate = existing.copy(anchorAt = firstStart, durationMinutes = durationMinutes,
+                daysOfWeek = daysOfWeek)
+              if (durationMinutes < MinimumClaimMinutes || durationMinutes > ceiling)
+                Left(s"A slot has to be between ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} and " +
+                  s"${RespawnEmbeds.humanDuration(ceiling)}" +
+                  (if (respawn.maxDurationMinutes.isDefined) " on this spawn." else " on this server."))
+              else if (!firstStart.isAfter(now))
+                Left("The first slot has to start in the future.")
+              else if (durationMinutes >= RespawnSchedule.Daily)
+                Left("A slot has to be shorter than a day.")
+              // A rule whose first slot falls on a day it does not run would
+              // produce nothing there and quietly begin somewhere else instead.
+              else if (candidate.repeats && !candidate.coversDay(firstStart))
+                Left("That booking doesn't run on that day — add the day, or move it to one it does.")
+              else repository.withRespawnLock(guildId, respawn.id) {
+                // This booking's own evenings are not something for it to clash
+                // with, so they come out of the picture the check is made on —
+                // both the rows it has written and the rule itself.
+                val written = repository.reservationsFor(guildId, respawn.id, now)
+                  .filter(_.scheduleId.contains(existing.id))
+                val booked = repository.reservationsFor(guildId, respawn.id, now)
+                  .filterNot(_.scheduleId.contains(existing.id))
+                val schedules = repository.schedulesForRespawn(guildId, respawn.id)
+                  .filterNot(_.id == existing.id)
+                  .filter(overlaps(_, candidate))
+                  .filterNot(surrendered(guildId, booked, _, candidate, now))
+                val slots = clashingReservations(booked, candidate, now)
+                if (schedules.nonEmpty || slots.nonEmpty)
+                  Left(clashMessage(candidate, schedules, slots, now))
+                else {
+                  written.foreach { slot =>
+                    slot.startsAt match {
+                      case Some(start) if candidate.startsAt(start) =>
+                        repository.setClaimDuration(guildId, slot.id, durationMinutes,
+                          Some(start.plusMinutes(durationMinutes.toLong)))
+                      case _ =>
+                        repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.BookingRetimed)
+                    }
+                  }
+                  repository.retimeSchedule(guildId, existing.id, firstStart, durationMinutes, daysOfWeek)
+                    .toRight("That booking has already gone.")
+                }
+              } match {
+                case Left(reason) => Left(reason)
+                case Right(saved) =>
+                  // Outside the lock, for the reason addSchedule gives: neither
+                  // writing the near evenings nor the card is worth holding a
+                  // spawn's row across.
+                  materialise(guildId, saved, now)
+                  refreshThread(guild, respawn, config)
+                  Right((saved, respawn))
+              }
+          }
+        }
+    }
+  }
+
   /** Put one day in somebody else's name: the old owner's day is settled and a
    *  fresh booking written beside it, rather than the occurrence being rewritten.
    *  The same shape a slot takes when given up to whoever asked, and for the same
@@ -2234,57 +2351,93 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
     }
   }
 
-  /** Change how long one window on the calendar runs, for a moderator. Aimed at
-   *  whatever is selected on the grid, named by the instant it starts on, whether
-   *  or not it has a row yet. Three cases:
+  /** Put one window on the calendar right: how long it runs, when it starts, or
+   *  both. Aimed at whatever is selected on the grid, named by the instant it
+   *  starts on, whether or not it has a row yet. Three cases:
    *
    *  - '''A live hunt''': its deadline moves, charging nobody, for the same reason
    *    [[extendHolder]] charges nobody. It cannot go below what has already
-   *    elapsed; setting it to exactly that ends the hunt at the next sweep.
-   *  - '''An evening already booked''': the row is rewritten in place. A repeating
-   *    rule keeps its own length, so one evening runs longer and next week does
-   *    not — the same narrowness [[dropSlot]] has.
+   *    elapsed; setting it to exactly that ends the hunt at the next sweep. It
+   *    cannot be moved at all — a hunt's start has already happened, and saying
+   *    otherwise is a different feature from this one.
+   *  - '''An evening already booked''': stretched in place; moved by settling the
+   *    day and writing the booking again at the new time, unless the row has no
+   *    rule behind it, which can simply be re-timed. See `retimeReserved` for
+   *    why those are not the same write.
    *  - '''An evening not yet written down''': the day is settled and a booking in
    *    the same name is written beside it, as [[reassignSlot]] does. There is
-   *    nowhere else to record "this day, but longer" about a rule.
+   *    nowhere else to record "this day, but different" about a rule.
    *
-   *  The guild's maximum claim length does not apply — it governs what members may
-   *  ask for, and would refuse exactly the repairs worth making —  but
-   *  [[MaxModeratorSlotMinutes]] does. A future window is refused if it runs into
-   *  the next thing on the spawn; a live hunt is not, since it overruns what
-   *  follows exactly as a member's own extend does, and the answer names whose
-   *  evening it reaches into. */
+   *  Always about the one evening, never about the booking behind it — a
+   *  repeating rule keeps its own time and length, so this Tuesday moves and next
+   *  Tuesday does not. Moving the rule itself is [[rescheduleBooking]], which is
+   *  its owner's to do.
+   *
+   *  What it is held to depends on who is asking — see [[SlotEditor]]. For a
+   *  moderator the guild's maximum claim length does not apply but
+   *  [[MaxModeratorSlotMinutes]] does; for an owner it is the guild's, since this
+   *  is cancelling and booking again in one move and must cost exactly that.
+   *  Either way a future window is refused if it runs into anything else on the
+   *  spawn; a live hunt is not, since it overruns what follows exactly as a
+   *  member's own extend does, and the answer names whose evening it reaches
+   *  into. */
   def editSlot(guild: Guild, respawn: Respawn, startsAt: ZonedDateTime, minutes: Int,
+               toStartsAt: Option[ZonedDateTime] = None,
+               by: SlotEditor = SlotEditor.Moderator,
                now: ZonedDateTime = ZonedDateTime.now()): Either[String, SlotEdit] = {
     val guildId = guild.getId
-    if (minutes < MinimumClaimMinutes)
-      Left(s"A window has to be at least ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} long.")
-    else if (minutes > MaxModeratorSlotMinutes)
-      Left(s"${RespawnEmbeds.humanDuration(minutes)} is longer than the " +
-        s"${RespawnEmbeds.humanDuration(MaxModeratorSlotMinutes)} a single window can run.")
-    else settings(guildId) match {
+    val landing = toStartsAt.getOrElse(startsAt)
+    val moved = landing.toInstant != startsAt.toInstant
+    settings(guildId) match {
       case None => Left("The respawn claim system isn't set up on this server yet.")
       case Some(config) =>
-        // Read and write on one picture of the spawn, like every other decision
-        // about a slot. What follows the window is part of that picture: without
-        // the lock, a booking made in between would be refused against on one
-        // path and quietly run into on the other.
-        val outcome = repository.withRespawnLock(guildId, respawn.id) {
-          repository.slotAt(guildId, respawn.id, startsAt) match {
-            case Some(slot) if slot.isActive => resizeRunning(guildId, respawn, slot, minutes, now)
-            case Some(slot)                  => resizeReserved(guildId, respawn, slot, startsAt, minutes, now)
-            case None                        => resizePredicted(guildId, respawn, startsAt, minutes, now)
+        val ceiling = if (by.overrides) MaxModeratorSlotMinutes else config.maxFor(respawn)
+        if (minutes < MinimumClaimMinutes)
+          Left(s"A window has to be at least ${RespawnEmbeds.humanDuration(MinimumClaimMinutes)} long.")
+        else if (minutes > ceiling)
+          Left(s"${RespawnEmbeds.humanDuration(minutes)} is longer than the " +
+            s"${RespawnEmbeds.humanDuration(ceiling)} a single window can run" +
+            (if (by.overrides) "." else " on this server."))
+        // The past is not somewhere an evening can be moved to. Only asked on a
+        // move: a window already under way is edited where it stands.
+        else if (moved && !landing.isAfter(now))
+          Left("A window can only be moved to a time still ahead.")
+        else {
+          // Read and write on one picture of the spawn, like every other decision
+          // about a slot. Where it is going is part of that picture: without the
+          // lock, a booking made in between would be refused against on one path
+          // and quietly landed on by the other.
+          val outcome = repository.withRespawnLock(guildId, respawn.id) {
+            repository.slotAt(guildId, respawn.id, startsAt) match {
+              case Some(slot) if slot.isActive =>
+                if (moved)
+                  Left("That hunt is already under way, so only its length can change.")
+                else if (!by.overrides)
+                  Left("That hunt has started. Use Extend to add time to it, or Leave to end it.")
+                else resizeRunning(guildId, respawn, slot, minutes, now)
+              case Some(slot) =>
+                retimeReserved(guildId, respawn, slot, startsAt, landing, minutes, moved, by, now)
+              case None =>
+                retimePredicted(guildId, respawn, startsAt, landing, minutes, moved, by, now)
+            }
           }
+          // Both outside the lock: the card is a Discord round trip, and holding
+          // a spawn's row across one would stall every other claim on it for as
+          // long as Discord felt like taking.
+          outcome.foreach { edit =>
+            refreshThread(guild, respawn, config)
+            if (edit.live) tellHolderOfResize(guild, respawn, edit)
+          }
+          outcome
         }
-        // Both outside the lock: the card is a Discord round trip, and holding
-        // a spawn's row across one would stall every other claim on it for as
-        // long as Discord felt like taking.
-        outcome.foreach { edit =>
-          refreshThread(guild, respawn, config)
-          if (edit.live) tellHolderOfResize(guild, respawn, edit)
-        }
-        outcome
     }
+  }
+
+  /** Whether this editor may put this evening right. A refusal, or nothing. */
+  private def mayEdit(by: SlotEditor, ownerId: String): Option[String] = by match {
+    case SlotEditor.Moderator => None
+    case SlotEditor.Owner(userId) if userId == ownerId => None
+    case _: SlotEditor.Owner => Some("That evening isn't yours.")
   }
 
   /** The running-hunt case of [[editSlot]]. */
@@ -2308,70 +2461,131 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         // holder nothing; shrinking it hands back minutes they will never use.
         if (delta < 0) repository.refundStamina(guildId, slot.userId, -delta, resetBoundary(now))
         repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
-        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
-          live = true, cutInto = nextUpOn(guildId, respawn.id, start, newEnd, now)))
+        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, start, newEnd,
+          live = true, cutInto = occupantOf(guildId, respawn.id, start, newEnd, Set(start.toInstant), now)))
       }
     }
 
-  /** The booked-evening case of [[editSlot]]. */
-  private def resizeReserved(guildId: String, respawn: Respawn, slot: RespawnClaim,
-                             startsAt: ZonedDateTime, minutes: Int,
+  /** The booked-evening case of [[editSlot]].
+   *
+   *  Stretching rewrites the row where it stands. Moving cannot, where that row
+   *  is an occurrence of a rule: an occurrence is identified by its rule and the
+   *  instant it starts on — that pair is the materialiser's unique index — so
+   *  sliding its start would leave nothing holding the old evening shut, and the
+   *  next sweep would write it all over again. The day is settled where it was
+   *  and the booking written afresh where it is going, which is the shape
+   *  [[reassignSlot]] already uses for the same reason. A row with no rule behind
+   *  it has no such key and is simply re-timed.
+   *
+   *  Refused while somebody is waiting to hear about the evening: the question
+   *  they asked was about a slot that would no longer be there. A question
+   *  already answered does not follow a moved occurrence, since what is written
+   *  at the new time is a new booking — which gains nobody anything, the evening
+   *  they were asking after having been vacated rather than kept. */
+  private def retimeReserved(guildId: String, respawn: Respawn, slot: RespawnClaim,
+                             startsAt: ZonedDateTime, landing: ZonedDateTime, minutes: Int,
+                             moved: Boolean, by: SlotEditor,
                              now: ZonedDateTime): Either[String, SlotEdit] = {
-    val newEnd = startsAt.plusMinutes(minutes.toLong)
-    nextUpOn(guildId, respawn.id, startsAt, newEnd, now) match {
-      case Some(who) => Left(clashRefusal(who))
+    val newEnd = landing.plusMinutes(minutes.toLong)
+    mayEdit(by, slot.userId) match {
+      case Some(refusal) => Left(refusal)
+      case None if moved && slot.requestPending =>
+        Left("Somebody is waiting to hear about that evening. Answer them first.")
       case None =>
-        // Nothing to settle with stamina: a booking reserves none until it
-        // starts, so its length is a stored number until then.
-        repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
-        Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes, newEnd,
-          live = false, cutInto = None))
+        occupantOf(guildId, respawn.id, landing, newEnd, Set(startsAt.toInstant), now) match {
+          case Some(who) => Left(clashRefusal(who))
+          case None =>
+            // Nothing to settle with stamina either way: a booking reserves none
+            // until it starts, so both its length and its time are stored numbers
+            // until then.
+            if (!moved) repository.setClaimDuration(guildId, slot.id, minutes, Some(newEnd))
+            else if (slot.scheduleId.isDefined) {
+              repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.SlotRetimed)
+              repository.reserveFor(guildId, respawn.id, slot.userId, slot.userName,
+                slot.nickname, landing, minutes)
+            } else repository.retimeReservation(guildId, slot.id, landing, minutes)
+            Right(SlotEdit(Names.plain(slot.nickname, slot.userName), slot.userId, minutes,
+              landing, newEnd, live = false, cutInto = None, moved = moved))
+        }
     }
   }
 
   /** The not-yet-written-down case of [[editSlot]]. */
-  private def resizePredicted(guildId: String, respawn: Respawn, startsAt: ZonedDateTime,
-                              minutes: Int, now: ZonedDateTime): Either[String, SlotEdit] =
+  private def retimePredicted(guildId: String, respawn: Respawn, startsAt: ZonedDateTime,
+                              landing: ZonedDateTime, minutes: Int, moved: Boolean,
+                              by: SlotEditor, now: ZonedDateTime): Either[String, SlotEdit] =
     predictedOwnerOf(guildId, respawn.id, startsAt, now) match {
       case None => Left("Nothing is booked at that time.")
       case Some(schedule) =>
-        val newEnd = startsAt.plusMinutes(minutes.toLong)
-        nextUpOn(guildId, respawn.id, startsAt, newEnd, now) match {
-          case Some(who) => Left(clashRefusal(who))
+        mayEdit(by, schedule.userId) match {
+          case Some(refusal) => Left(refusal)
           case None =>
-            repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
-              schedule.userName, schedule.nickname, schedule.characterName, startsAt,
-              schedule.durationMinutes, RespawnClaim.Outcome.SlotResized)
-            repository.reserveFor(guildId, respawn.id, schedule.userId, schedule.userName,
-              schedule.nickname, startsAt, minutes)
-            Right(SlotEdit(Names.plain(schedule.nickname, schedule.userName), schedule.userId,
-              minutes, newEnd, live = false, cutInto = None))
+            val newEnd = landing.plusMinutes(minutes.toLong)
+            occupantOf(guildId, respawn.id, landing, newEnd, Set(startsAt.toInstant), now) match {
+              case Some(who) => Left(clashRefusal(who))
+              case None =>
+                repository.skipOccurrence(guildId, schedule.id, respawn.id, schedule.userId,
+                  schedule.userName, schedule.nickname, schedule.characterName, startsAt,
+                  schedule.durationMinutes,
+                  if (moved) RespawnClaim.Outcome.SlotRetimed else RespawnClaim.Outcome.SlotResized)
+                repository.reserveFor(guildId, respawn.id, schedule.userId, schedule.userName,
+                  schedule.nickname, landing, minutes)
+                Right(SlotEdit(Names.plain(schedule.nickname, schedule.userName), schedule.userId,
+                  minutes, landing, newEnd, live = false, cutInto = None, moved = moved))
+            }
         }
     }
 
   private def clashRefusal(who: String): String =
     s"That would run into $who's slot on this respawn. Move or remove theirs first."
 
-  /** Whoever is on this spawn next, if a window ending at `until` reaches them.
-   *  Both written-down bookings and days a rule has not got to yet, for the reason
-   *  `clashingReservations` gives. Strictly after `after`, so the window being
-   *  edited never finds itself. */
-  private def nextUpOn(guildId: String, respawnId: Long, after: ZonedDateTime,
-                       until: ZonedDateTime, now: ZonedDateTime): Option[String] = {
-    val booked = repository.reservationsFor(guildId, respawnId, after)
-      .filter(_.startsAt.exists(_.isBefore(until)))
+  /** Whoever else is on this spawn across a window, if anybody.
+   *
+   *  Overlap, not "starts inside". A window whose start can move may be dropped
+   *  on top of a booking that began before it, and a check on start times alone
+   *  sails straight through that — it can only ever answer "does my tail reach
+   *  the next thing", which is the whole question only while the start is
+   *  pinned.
+   *
+   *  Three things can be in the way, and the hunt in progress is one of them: it
+   *  is on the spawn whatever the diary says. Then written-down bookings, then
+   *  days no rule has got to yet — the last two for the reason
+   *  `clashingReservations` gives, and a day already given up is in nobody's way.
+   *
+   *  `excluding` names the starts belonging to the window being edited — its own
+   *  row and the rule occurrence behind it, which share one instant — so it never
+   *  finds itself and refuses its own move. */
+  private def occupantOf(guildId: String, respawnId: Long, from: ZonedDateTime,
+                         to: ZonedDateTime, excluding: Set[java.time.Instant],
+                         now: ZonedDateTime): Option[String] = {
+    def clashes(start: Option[ZonedDateTime], end: Option[ZonedDateTime]): Boolean =
+      (for (at <- start; until <- end)
+        yield !excluding.contains(at.toInstant) && at.isBefore(to) && until.isAfter(from))
+        .getOrElse(false)
+
+    def live = repository.activeClaim(guildId, respawnId)
+      .filter(claim => clashes(claim.startsAt, claim.endsAt))
+      .map(claim => Names.plain(claim.nickname, claim.userName))
+
+    def booked = repository.reservationsFor(guildId, respawnId, now)
+      .find(slot => clashes(slot.startsAt, slot.bookedEnd))
       .map(slot => Names.plain(slot.nickname, slot.userName))
-    if (booked.nonEmpty) booked.headOption
-    else {
-      // A settled day is in nobody's way, so an evening just taken off the
-      // calendar cannot block an edit to the one before it.
-      val settled = daysGivenUp(guildId, after, Some(until), Some(respawnId))
+
+    // Walked from a day before the window, since an evening that began the day
+    // before can still be running inside it — a booking is always shorter than a
+    // day, which is what bounds how far back that has to reach.
+    def predicted = {
+      val walkFrom = from.minusDays(1)
+      val settled = daysGivenUp(guildId, walkFrom, Some(to), Some(respawnId))
       repository.schedulesForRespawn(guildId, respawnId).iterator.flatMap { schedule =>
-        schedule.occurrencesBetween(after.plusMinutes(1), until)
+        schedule.occurrencesBetween(walkFrom, to)
+          .filter(start => clashes(Some(start), Some(schedule.endOf(start))))
           .filterNot(start => settled.getOrElse(schedule.id, Set.empty).contains(start.toInstant))
           .map(_ => Names.plain(schedule.nickname, schedule.userName))
       }.toList.headOption
     }
+
+    live.orElse(booked).orElse(predicted)
   }
 
   /** Tell somebody their hunt just got longer or shorter under them. Worth a

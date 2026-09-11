@@ -131,9 +131,28 @@ final class RelayedRespawnActions(
       Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "toUserId" -> toUserId))
 
   def editSlot(guildId: String, actorId: String, code: String,
-               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
-    send(guildId, actorId, RespawnCommand.EditSlot,
-      Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "minutes" -> minutes.toString))
+               startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+               minutes: Int): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.EditSlot, slotEdit(code, startsAt, toStartsAt, minutes))
+
+  def editOwnSlot(guildId: String, actorId: String, code: String,
+                  startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                  minutes: Int): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.EditOwnSlot, slotEdit(code, startsAt, toStartsAt, minutes))
+
+  /** `toStartsAt` absent means "leave it where it is", which is exactly what a
+   *  dropped blank param becomes on the far side — see `send`. */
+  private def slotEdit(code: String, startsAt: java.time.ZonedDateTime,
+                       toStartsAt: Option[java.time.ZonedDateTime], minutes: Int): Map[String, String] =
+    Map("code" -> code, "startsAt" -> startsAt.toInstant.toString, "minutes" -> minutes.toString,
+      "toStartsAt" -> toStartsAt.map(_.toInstant.toString).getOrElse(""))
+
+  def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
+                        firstStart: java.time.ZonedDateTime, minutes: Int,
+                        daysOfWeek: Int): Future[ActionResult] =
+    send(guildId, actorId, RespawnCommand.RescheduleBooking,
+      Map("scheduleId" -> scheduleId.toString, "startsAt" -> firstStart.toInstant.toString,
+        "minutes" -> minutes.toString, "days" -> daysOfWeek.toString))
 
   /** Reads never relay — every bot shares the guild's database, so this
    *  implementation is only ever used for writes and these are unreachable. */

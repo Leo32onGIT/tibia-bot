@@ -3192,6 +3192,7 @@ function wireTank(root) {
 function clearPick() {
   view.pick = null;
   view.stack = null;
+  resetEdit();
   // The verdict on screen is about the slot being given up, as is any refusal
   // still sitting above it, so neither outlives it.
   view.answer = null;
@@ -3590,7 +3591,7 @@ function calendarSection() {
 function stackRuns(here, colStart, colEnd) {
   const clipped = here.map(b => ({
     b,
-    from: Math.max(b.start.getTime(), colStart),
+    from: Math.max(shownStart(b).getTime(), colStart),
     to: Math.min(shownEnd(b).getTime(), colEnd)
   })).sort((x, y) => x.from - y.from || y.to - x.to);
   const runs = [];
@@ -3620,7 +3621,7 @@ function stackLead(run) {
   if (held) return held;
   return run.slice().sort((a, b) =>
     (a.past === b.past ? 0 : a.past ? 1 : -1)
-    || b.start.getTime() - a.start.getTime()
+    || shownStart(b).getTime() - shownStart(a).getTime()
     || shownEnd(b).getTime() - shownEnd(a).getTime())[0];
 }
 
@@ -3910,19 +3911,19 @@ function paintGrid(frame, start, days, now) {
     // One block per pile, not one per booking. Two hunts over the same hours
     // used to be drawn one exactly on top of the other, which left the lower of
     // them unreadable, unclickable, and unannounced — see stackRuns.
-    const here = slots.filter(b => b.start.getTime() < colEnd && colStart < shownEnd(b).getTime());
+    const here = slots.filter(b => shownStart(b).getTime() < colEnd && colStart < shownEnd(b).getTime());
     stackRuns(here, colStart, colEnd).forEach(run => {
       const b = stackLead(run);
-      const ends = shownEnd(b);
-      const from = Math.max(b.start.getTime(), colStart), to = Math.min(ends.getTime(), colEnd);
+      const starts = shownStart(b), ends = shownEnd(b);
+      const from = Math.max(starts.getTime(), colStart), to = Math.min(ends.getTime(), colEnd);
       const block = el('div', `wk-block b-${b.state}${b.mine ? ' b-mine' : ''}${b.predicted ? ' b-predicted' : ''}`
         + (run.length > 1 ? ' has-more' : '')
         // Only shows on a hunt that is over, which is the case with no preview
         // of its own to be highlighted by — see previews and .b-chosen.
         + (slotKey(b) === view.stack ? ' b-chosen' : '')
         + (b.past ? ' b-past' + (b.hunted ? '' : ' b-unhunted') : '')
-        + (resizing(b) ? ' b-editing' : '')
-        + (b.start.getTime() < colStart ? ' clip-top' : '')
+        + (editing(b) ? ' b-editing' : '')
+        + (starts.getTime() < colStart ? ' clip-top' : '')
         + (ends.getTime() > colEnd ? ' clip-bottom' : ''));
       // The third line only goes on a block with room for a whole one. A block is
       // as tall as its hunt is long, and half a line of clipped text under the
@@ -3932,7 +3933,7 @@ function paintGrid(frame, start, days, now) {
       block.style.setProperty('--at', (from - colStart) / 3600000);
       block.style.setProperty('--len', (to - from) / 3600000);
       block.innerHTML = `<span class="who">${b.mine ? 'You' : esc(b.owner)}</span>
-        <span class="tm">${fmtLocal(b.start)}–${fmtLocal(ends)}</span>`
+        <span class="tm">${fmtLocal(starts)}–${fmtLocal(ends)}</span>`
         // On a block that is over, what became of it earns the third line ahead
         // of the account: the account answers "who do I ask", which is a
         // question about an evening somebody can still do something with.
@@ -3940,11 +3941,19 @@ function paintGrid(frame, start, days, now) {
           : account && height >= ACCT_MIN_H ? `<span class="acct">${esc(account)}</span>` : '');
       // The tooltip carries it whatever the block's height, so a half-hour
       // booking is not the one block you cannot find out who owns.
-      block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(b.start)}–${fmtLocal(ends)} your time`
+      block.title = `${b.owner}${account ? ` · ${account}` : ''} · ${fmtLocal(starts)}–${fmtLocal(ends)} your time`
         + (b.repeats ? ' · repeats' : '') + (b.predicted ? ' · not booked yet' : '')
         + (b.past ? ` · ${b.hunted ? 'hunted' : 'never hunted'}${b.note ? ` · ${b.note}` : ''}` : '');
       block.addEventListener('click', e => {
         e.stopPropagation();
+        // The click a drag ends with, where the browser sends one. Nothing about
+        // the selection changed — it is the block already being dragged — so
+        // there is nothing to answer.
+        if (Date.now() - draggedAt < 300) return;
+        // Choosing a different evening abandons an edit in progress. Choosing the
+        // same one does not: a stray click on the block being dragged is not a
+        // change of mind, and losing the drag to one would be maddening.
+        if (editPanel.pick != null && editPanel.pick !== b.start.getTime()) resetEdit();
         view.pick = b.start;
         // Which block, not only which instant. Two hunts can share a start, and
         // the readout used to answer for whichever of them the array held first
@@ -3959,9 +3968,14 @@ function paintGrid(frame, start, days, now) {
         // empty slot.
         borrowDuration(slotMinutes(b));
       });
-      // Only while Edit claim is armed, and only on the piece carrying the end:
-      // the half above a midnight split is not where the window finishes.
-      if (resizing(b) && ends.getTime() <= colEnd) block.appendChild(lengthHandle(block, b));
+      // Only while the block is being changed. The foot goes on the piece
+      // carrying the end — the half above a midnight split is not where the
+      // window finishes — but the body is draggable wherever it was clipped to,
+      // since taking hold of the visible half is the whole gesture.
+      if (editing(b)) {
+        dragBlock(block, b, start, day, days);
+        if (ends.getTime() <= colEnd) block.appendChild(lengthHandle(block, b));
+      }
       // Last, so it sits over the block's own text rather than under it.
       if (run.length > 1) block.appendChild(moreChip(run));
       col.appendChild(block);
@@ -4048,6 +4062,10 @@ function previews(start, days) {
   // block carries the highlight instead; see .b-chosen.
   const on = blockAt(view.pick);
   if (on && on.past) return [];
+  // Nor while a block is being moved. The draft would sit where the block used
+  // to be, at the reader's own length rather than the one they are dragging,
+  // and read as a second booking following the first around.
+  if (editingAny()) return [];
   const weekly = view.repeat === 'week' && view.days.size > 0;
   const covers = when => view.days.has(DAY_NAMES.indexOf(serverParts(when).weekday));
   const picked = new Date(view.pick).setSeconds(0, 0);
@@ -4161,6 +4179,95 @@ function dragSelection(block, at, weekStart, day, days) {
   });
 }
 
+/** Take hold of a block that already exists and move it — up and down for the
+ *  time, across for the day.
+ *
+ *  A near twin of [[dragSelection]], and deliberately not the same function for
+ *  the reason [[lengthHandle]] is not [[stretchHandle]]: that one owns
+ *  `view.pick`, which is where a booking nobody has made yet would go, and this
+ *  one owns a proposal about a booking that exists. What the two share is the
+ *  arithmetic, and the arithmetic is the easy half.
+ *
+ *  `editPanel.pick` deliberately does not follow the pointer. It is the evening's
+ *  name on the wire — the server is being told which one is going where — and a
+ *  handle that moved with the block would leave nothing pointing at what is being
+ *  moved.
+ *
+ *  Only ever onto time still ahead, and never off the strip on either axis, both
+ *  for the reasons [[dragSelection]] gives. Written straight to the element
+ *  rather than through a re-render, because rebuilding a hundred and seventy
+ *  cells per frame fights the pointer.
+ */
+function dragBlock(block, slot, weekStart, day, days) {
+  block.classList.add('b-drag');
+  block.addEventListener('pointerdown', down => {
+    // The primary button only, and never the foot: that belongs to the length
+    // handle, which stops the event itself.
+    if (down.button > 0) return;
+    down.preventDefault();
+    try { block.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
+
+    const column = block.parentElement.getBoundingClientRect().width;
+    const fromX = down.clientX, fromY = down.clientY;
+    const at = editPanel.at;
+    const startMinutes = at.getHours() * 60 + at.getMinutes();
+    const label = block.querySelector('.tm');
+    const readout = document.getElementById('edit-readout');
+    let moved = false;
+    let landing = at;
+
+    const move = ev => {
+      const dx = ev.clientX - fromX, dy = ev.clientY - fromY;
+      if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;   // a click, not a drag
+      moved = true;
+      block.classList.add('dragging');
+
+      const moves = Math.min(days - 1, Math.max(0, day + Math.round(dx / column))) - day;
+      const raw = startMinutes + (dy / ROW_H) * 60;
+      const snapped = Math.min(DAY_MS / 60000 - DRAG_SNAP,
+        Math.max(0, Math.round(raw / DRAG_SNAP) * DRAG_SNAP));
+
+      landing = dayStart(weekStart, day + moves);
+      landing.setHours(Math.floor(snapped / 60), snapped % 60, 0, 0);
+      const floor = startFloor();
+      if (landing.getTime() < floor.getTime()) landing = new Date(floor);
+      // Read back off the landing rather than off the pointer: the clamp may
+      // have moved it to another column, and a block held over yesterday is
+      // drawn on today, where it would actually be dropped.
+      const landed = columnOf(weekStart, landing, days) - day;
+
+      block.style.transform = landed ? `translateX(${landed * column}px)` : '';
+      block.style.top = (localMinutes(landing) / 60) * ROW_H + 'px';
+      const ends = new Date(landing.getTime() + editPanel.length * 60000);
+      if (label) label.textContent = `${fmtLocal(landing)}–${fmtLocal(ends)}`;
+      if (readout) readout.textContent = lengthReadout(landing, editPanel.length);
+    };
+
+    const up = () => {
+      block.removeEventListener('pointermove', move);
+      block.removeEventListener('pointerup', up);
+      block.removeEventListener('pointercancel', up);
+      block.classList.remove('dragging');
+      // A press that never moved is not a drag, and must leave the edit exactly
+      // as it was rather than re-render for nothing.
+      if (!moved) return;
+      // The block answers a click by selecting itself and borrowing its length,
+      // which at the end of a drag is a second render saying nothing. A flag
+      // rather than a swallowing listener: at the target phase listeners run in
+      // the order they were added whatever their phase, and the click handler
+      // went on in the paint loop long before this one could.
+      draggedAt = Date.now();
+      editPanel.at = landing;
+      view.answer = null;
+      renderWindow();
+    };
+
+    block.addEventListener('pointermove', move);
+    block.addEventListener('pointerup', up);
+    block.addEventListener('pointercancel', up);
+  });
+}
+
 /** Drag the foot of the selection to change how long the hunt is.
  *
  *  Snapped to half hours on the way, because that is the granularity a booking
@@ -4255,6 +4362,12 @@ function footMessage() {
           + 'Right-click a selection to clear it.'}</span>`);
   }
 
+  // A verdict is about a booking somebody is making. While a block is being
+  // moved there is no such booking — the draft is not even drawn — and judging
+  // the selection would answer for a slot the reader is not looking at, most
+  // loudly by telling them their own booking is in the way of itself.
+  if (editingAny()) return null;
+
   const v = judge(view.pick);
   const srv = serverParts(view.pick);
   // `info` is not a refusal and must not be dressed as one: it answers "who has
@@ -4312,10 +4425,15 @@ function readout() {
       <span class="tank-out"></span>
     </span>`);
   const actions = el('div', 'readout-actions');
+  // Neither the tank nor Book while a block on the grid is being changed. They
+  // are about a booking nobody has made yet, and both would be answering a
+  // different question from the one under the pointer — two lengths on one row,
+  // and a button that would book somewhere else entirely.
+  const changing = editingAny();
   // The tank is only worth offering while there is something it could be spent
   // on. With no action available at all — somebody already holding the spawn and
   // nothing selected — the row would be a control feeding nothing.
-  if (limits()) out.appendChild(dur);
+  if (limits() && !changing) out.appendChild(dur);
   out.appendChild(actions);
 
   if (!view.pick) {
@@ -4325,20 +4443,84 @@ function readout() {
   }
   // The same button that offers Claim when nothing is picked; a selection is
   // what turns it into Book, and clearing one turns it back.
-  if (primary) actions.appendChild(primary);
+  if (primary && !changing) actions.appendChild(primary);
 
   // Cancelling is offered on the slot itself: picking a block of your own is how
   // you reach it, which is the same gesture as picking a time.
   // `!b.past` for the same reason as in overlapping: a booking cancelled before
   // its start leaves a history row at a time still ahead of now, and offering to
   // cancel it again is offering to undo something already undone.
-  const mine = slots.find(b => b.mine && !b.past && b.scheduleId != null
+  const mine = slots.find(b => b.mine && !b.past
     && b.start.getTime() === view.pick.getTime());
-  if (mine) {
+  if (!mine) return out;
+
+  // Changing it, which is the same gesture a moderator has on any block and the
+  // same one the server holds to member rules — this is cancelling and booking
+  // again in a single move, and costs exactly that.
+  // Only the owner's own edit is driven from here. A moderator's is driven from
+  // their panel, and drawing both would put two Saves on one block — and two
+  // elements wearing the readout's id, which the drags write into by name.
+  if (editing(mine) && editPanel.owner) {
+    out.insertBefore(el('span', 'mod-hint',
+      'Drag the booking to move it; drag its foot to change how long it runs.'), actions);
+    actions.appendChild(editReadout());
+    // Which of the two things a repeating booking could mean, said as two
+    // buttons rather than guessed at: this Tuesday, or Tuesdays. A booking that
+    // happens once has only the one reading and is offered only the one button —
+    // and it goes down the whole-booking path, which keeps its rule (and so the
+    // Cancel booking above) rather than settling the day and leaving a bare
+    // reservation nothing owns.
+    if (mine.repeats) actions.appendChild(
+      saveEdit(mine, 'This evening', `/dashboard/g/${GUILD_ID}/edit-booking`, spawn));
+    if (mine.scheduleId != null) actions.appendChild(saveWholeBooking(mine));
+    else if (!mine.repeats) actions.appendChild(
+      saveEdit(mine, 'Save', `/dashboard/g/${GUILD_ID}/edit-booking`, spawn));
+    actions.appendChild(button('Cancel', 'btn ghost', endEdit));
+    return out;
+  }
+
+  if (editing(mine)) return out;
+  actions.appendChild(button('Edit booking', 'btn', () => beginEdit(mine, true)));
+  // A booking with no rule behind it is one that was handed over rather than
+  // made, and there is nothing for Cancel to end.
+  if (mine.scheduleId != null) {
     actions.appendChild(button(mine.repeats ? 'Cancel booking (repeats)' : 'Cancel booking', 'btn danger',
       () => post(`/dashboard/g/${GUILD_ID}/cancel-booking`, { scheduleId: mine.scheduleId })));
   }
   return out;
+}
+
+/** Move the booking itself rather than one evening of it — the answer to
+ *  "Tuesdays are ten now", which nothing else on this grid can give.
+ *
+ *  The weekday mask travels with it. Dragging a Tuesday onto a Wednesday means
+ *  the booking runs on Wednesdays, so the day it left is cleared out of the mask
+ *  and the day it landed on set; a booking that already runs every day has
+ *  nothing to move. Worked out here because only the page knows which of the
+ *  rule's evenings was the one under the pointer.
+ */
+function saveWholeBooking(slot) {
+  const every = 127;
+  // serverDayBit, never the reader's own weekday: the mask is a rule the bot
+  // applies in its own clock, and a booking at half past midnight here is the
+  // evening before there.
+  const days = !slot.repeats ? 0
+    : slot.days === every ? every
+    : (slot.days & ~serverDayBit(slot.start)) | serverDayBit(editPanel.at);
+  const save = button(slot.repeats ? 'Every time' : 'Save', 'btn mod-btn', () =>
+    post(`/dashboard/g/${GUILD_ID}/move-booking`, {
+      scheduleId: slot.scheduleId,
+      startsAt: editPanel.at.toISOString(),
+      minutes: editPanel.length,
+      days
+    }));
+  if (!editDirty(slot)) {
+    save.disabled = true;
+    save.title = 'Drag the block first';
+  } else if (slot.repeats) {
+    save.title = 'Move every evening this booking runs on';
+  }
+  return save;
 }
 
 /** Putting one evening of the calendar right, for a moderator.
@@ -4367,12 +4549,11 @@ function readout() {
  *  and clicking another closes it rather than quietly re-aiming a Delete at
  *  somebody who was never on screen when it was opened.
  *
- *  `length` is the number Edit claim is dragging, in minutes, and null when it
- *  is not being dragged. It has to live out here for the same reason `query`
- *  does — the grid is rebuilt from scratch every poll, so a length held only in
- *  the block's own height would be thrown away every ten seconds, mid-drag.
+ *  What Edit claim is dragging is not here but in `editPanel`, which the
+ *  block's owner drives too — the same gesture on the same block, differing only
+ *  in who the server holds it to.
  */
-let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false, length: null };
+let slotPanel = { open: false, mode: 'idle', pick: null, query: '', typing: false };
 
 /** Everything a moderator can do here, in one panel in the foot.
  *
@@ -4415,7 +4596,7 @@ function moderatorTools(spawn) {
   // panel, and what was left here was a strip with an empty row under it.
   if (!slot) {
     if (slotPanel.pick !== null) {
-      slotPanel = { open: slotPanel.open, mode: 'idle', pick: null, query: '', typing: false, length: null };
+      slotPanel = { open: slotPanel.open, mode: 'idle', pick: null, query: '', typing: false };
     }
     return null;
   }
@@ -4429,7 +4610,7 @@ function moderatorTools(spawn) {
   // alone, since a moderator working through several evenings should not have to
   // reopen it for each, and the strip always names what it is aimed at.
   if (slotPanel.pick !== pickKey) {
-    slotPanel = { open: slotPanel.open, mode: 'idle', pick: pickKey, query: '', typing: false, length: null };
+    slotPanel = { open: slotPanel.open, mode: 'idle', pick: pickKey, query: '', typing: false };
   }
 
   const onClaim = slot.state === 'claimed';
@@ -4442,7 +4623,12 @@ function moderatorTools(spawn) {
      <i class="ti ti-chevron-${slotPanel.open ? 'up' : 'down'}" aria-hidden="true"></i>`);
   strip.type = 'button';
   strip.setAttribute('aria-expanded', String(slotPanel.open));
-  strip.addEventListener('click', () => { slotPanel.open = !slotPanel.open; renderWindow(); });
+  strip.addEventListener('click', () => {
+    slotPanel.open = !slotPanel.open;
+    // The Save a drag is feeding goes with the strip, and handles left on the
+    // grid under a shut one would be a change nobody could commit.
+    if (!slotPanel.open && editing(slot)) endEdit(); else renderWindow();
+  });
   box.appendChild(strip);
   if (!slotPanel.open) return box;
 
@@ -4467,29 +4653,18 @@ function moderatorTools(spawn) {
     return box;
   }
 
-  // --- re-timing: the row becomes the length under the pointer
-  if (slotPanel.mode === 'length') {
-    // What to do leads, and what it produces — the length, then the two verbs —
+  // --- re-timing: the row becomes the window under the pointer
+  if (slotPanel.mode === 'length' && editing(slot) && !editPanel.owner) {
+    // What to do leads, and what it produces — the window, then the two verbs —
     // is anchored at the far end, so the row is read in the order the gesture
     // happens in rather than ending on the instruction for it.
-    row.appendChild(el('span', 'mod-hint',
-      `Drag the foot of the ${onClaim ? 'claim' : 'booking'} to extend or reduce its duration.`));
+    row.appendChild(el('span', 'mod-hint', onClaim
+      ? 'Drag the foot of the claim to extend or reduce its duration.'
+      : 'Drag the booking to move it; drag its foot to change how long it runs.'));
     row.appendChild(el('div', 'mod-gap'));
-    const readout = el('span', 'mod-length', esc(lengthReadout(slot.start, slotPanel.length)));
-    readout.id = 'mod-length';
-    row.appendChild(readout);
-    const save = button('Save', 'btn mod-btn', () =>
-      post(`/dashboard/g/${GUILD_ID}/edit-slot`,
-        { code: spawn.code, startsAt: slot.startsAt, minutes: slotPanel.length }));
-    // Nothing to save until the block has actually moved. Pressing it on an
-    // untouched block would write the length it already has, which looks like
-    // the button doing nothing — and is indistinguishable from it failing.
-    if (slotPanel.length === slotMinutes(slot)) {
-      save.disabled = true;
-      save.title = 'Drag the foot of the block first';
-    }
-    row.appendChild(save);
-    row.appendChild(button('Cancel', 'btn ghost', () => go('idle')));
+    row.appendChild(editReadout());
+    row.appendChild(saveEdit(slot, 'Save', `/dashboard/g/${GUILD_ID}/edit-slot`, spawn));
+    row.appendChild(button('Cancel', 'btn ghost', () => { go('idle'); endEdit(); }));
     return box;
   }
 
@@ -4555,13 +4730,44 @@ function moderatorTools(spawn) {
  */
 function editClaimButton(slot, go) {
   const edit = button('Edit claim', 'btn mod-btn', () => {
-    slotPanel.length = slotMinutes(slot);
     go('length');
+    beginEdit(slot, false);
   });
   edit.title = slot.state === 'claimed'
     ? 'Change how long this hunt runs — costs them no stamina'
-    : 'Change how long this booking runs';
+    : 'Move this booking, or change how long it runs';
   return edit;
+}
+
+/** The window being dragged, as the row says it. Named so both drags can write
+ *  straight into it without a re-render — see dragBlock and lengthHandle. */
+function editReadout() {
+  const readout = el('span', 'mod-length', esc(lengthReadout(editPanel.at, editPanel.length)));
+  readout.id = 'edit-readout';
+  return readout;
+}
+
+/** The button that writes the drag back.
+ *
+ *  `startsAt` is the evening's name and never moves; `toStartsAt` is where it
+ *  landed, and is sent even when it did not so the two ends of the wire agree on
+ *  the shape of the instruction rather than on which fields happen to be there.
+ *
+ *  Dead until the block has actually been touched: pressing it on an untouched
+ *  one would write back what is already there, which looks exactly like the
+ *  button doing nothing and is indistinguishable from it failing. */
+function saveEdit(slot, label, endpoint, spawn) {
+  const save = button(label, 'btn mod-btn', () => post(endpoint, {
+    code: spawn.code,
+    startsAt: slot.startsAt,
+    toStartsAt: editPanel.at.toISOString(),
+    minutes: editPanel.length
+  }));
+  if (!editDirty(slot)) {
+    save.disabled = true;
+    save.title = 'Drag the block first';
+  }
+  return save;
 }
 
 /** How long a block runs now, in whole minutes. Off its two instants rather
@@ -4576,20 +4782,87 @@ const slotMinutes = slot => Math.round((slot.end.getTime() - slot.start.getTime(
 const lengthReadout = (start, minutes) =>
   `${fmtLocal(start)}–${fmtLocal(new Date(start.getTime() + minutes * 60000))} · ${fmtDur(minutes)}`;
 
-/** Whether the panel is re-timing this block right now.
+/** A window on the grid being changed in place: where it starts, how long it
+ *  runs, or both.
  *
- *  Folding the panel away counts as not: the Save the drag is feeding goes with
- *  it, and a handle still on the grid under a shut strip would be a length
- *  nobody could commit. */
-const resizing = slot =>
-  slotPanel.open && slotPanel.mode === 'length' && slotPanel.length != null &&
-  slotPanel.pick === slot.start.getTime();
+ *  One piece of state for both people who can do it. A moderator putting
+ *  somebody's evening right and its owner moving their own are the same gesture
+ *  on the same block, and the server decides between them by who asked — so the
+ *  grid has no reason to hold two of these, and holding two would mean every
+ *  function that draws a block asking which kind of edit it was in.
+ *
+ *  Out here for the reason `slotPanel.query` is: the grid is rebuilt from
+ *  scratch every poll, so anything held only in the block's own geometry would
+ *  be thrown away every ten seconds, mid-drag.
+ *
+ *  `pick` is the instant the block *started* on, which is its name on the wire
+ *  and does not move while it is being dragged — the whole point being that the
+ *  server has to be told which evening is going where.
+ */
+let editPanel = { pick: null, at: null, length: null, owner: false };
 
-/** Where a block ends on screen — the length being dragged while it is being
- *  dragged, and the booking's own end the rest of the time. Everything that
- *  draws a block goes through this, so a window dragged past local midnight is
- *  clipped into the next column exactly as a booked one is. */
-const shownEnd = slot => resizing(slot) ? new Date(slot.start.getTime() + slotPanel.length * 60000) : slot.end;
+/** When a block was last let go of. Some browsers follow a drag with a click and
+ *  some do not, depending on whether the pointerdown's preventDefault took the
+ *  compatibility mouse events with it; either way the click means nothing here.
+ *  See dragBlock. */
+let draggedAt = 0;
+
+/** Whether this block is the one being changed right now.
+ *
+ *  Tied to the selection rather than to a panel being open, so clicking another
+ *  block ends the edit wherever it was being driven from: the Save that would
+ *  commit it is drawn from the same condition, and a handle on the grid with no
+ *  Save under it is a change nobody could make. */
+const editing = slot =>
+  editPanel.pick != null && editPanel.length != null &&
+  editPanel.pick === slot.start.getTime() &&
+  view.pick != null && view.pick.getTime() === editPanel.pick;
+
+/** Whether anything on the grid is being changed, whichever block it is. */
+const editingAny = () => !!(slots && slots.some(editing));
+
+/** Where a block starts and ends on screen — what is under the pointer while it
+ *  is being changed, and the booking's own two ends the rest of the time.
+ *  Everything that draws, clips, stacks or measures a block goes through these,
+ *  so a window dragged past local midnight is split into the next column exactly
+ *  as a booked one is. */
+const shownStart = slot => editing(slot) ? editPanel.at : slot.start;
+const shownEnd = slot =>
+  editing(slot) ? new Date(editPanel.at.getTime() + editPanel.length * 60000) : slot.end;
+
+/** Whether it has actually been changed yet. Save is dead until it has: writing
+ *  back what is already there looks exactly like the button doing nothing. */
+const editMoved = slot => editPanel.at.getTime() !== slot.start.getTime();
+const editDirty = slot => editMoved(slot) || editPanel.length !== slotMinutes(slot);
+
+/** The longest this window may be dragged out to.
+ *
+ *  A moderator's ruler is their own — the guild's ceiling governs what members
+ *  may ask for and would refuse exactly the repairs worth making. An owner
+ *  moving their own booking is doing what booking it again would do, so the
+ *  guild's ceiling is precisely what binds them. Neither is the tank: no stamina
+ *  is charged for a window that has not started. */
+const editCeiling = () => editPanel.owner ? Math.max(SLOT, spawnMax(openSpawn())) : MOD_MAX;
+
+/** Take hold of a block. `owner` says whose rules the server will hold it to,
+ *  which is also what decides where Save posts. */
+function beginEdit(slot, owner) {
+  editPanel = { pick: slot.start.getTime(), at: new Date(slot.start.getTime()),
+                length: slotMinutes(slot), owner };
+  view.answer = null;
+  renderWindow();
+}
+
+/** Forget it, without redrawing. For the places that are about to redraw
+ *  anyway, or that are clearing up after the write has already landed. */
+function resetEdit() {
+  editPanel = { pick: null, at: null, length: null, owner: false };
+}
+
+function endEdit() {
+  resetEdit();
+  renderWindow();
+}
 
 /** The shortest a block may be dragged to.
  *
@@ -4621,7 +4894,8 @@ function lengthHandle(block, slot) {
   const handle = el('div', 'stretch');
   handle.title = 'Drag to change how long this runs';
   const floor = lengthFloor(slot);
-  let preview = slotPanel.length;
+  const ceiling = editCeiling();
+  let preview = editPanel.length;
 
   handle.addEventListener('pointerdown', down => {
     if (down.button > 0) return;
@@ -4631,25 +4905,28 @@ function lengthHandle(block, slot) {
     down.stopPropagation();
     try { handle.setPointerCapture(down.pointerId); } catch (e) { /* drag on regardless */ }
     const fromY = down.clientY;
-    const fromLength = slotPanel.length;
+    const fromLength = editPanel.length;
     const label = block.querySelector('.tm');
-    const readout = document.getElementById('mod-length');
+    const readout = document.getElementById('edit-readout');
+    // Where the block is being drawn, which is where it has been dragged to and
+    // not where the database still has it.
+    const at = editPanel.at;
 
     const move = ev => {
       const minutes = fromLength + ((ev.clientY - fromY) / ROW_H) * 60;
-      const next = Math.max(floor, Math.min(MOD_MAX, Math.round(minutes / SLOT) * SLOT));
+      const next = Math.max(floor, Math.min(ceiling, Math.round(minutes / SLOT) * SLOT));
       if (next === preview) return;
       preview = next;
       block.style.height = Math.max(MIN_BLOCK_H, (next / 60) * ROW_H - 2) + 'px';
-      if (label) label.textContent = `${fmtLocal(slot.start)}–${fmtLocal(new Date(slot.start.getTime() + next * 60000))}`;
-      if (readout) readout.textContent = lengthReadout(slot.start, next);
+      if (label) label.textContent = `${fmtLocal(at)}–${fmtLocal(new Date(at.getTime() + next * 60000))}`;
+      if (readout) readout.textContent = lengthReadout(at, next);
     };
     const up = () => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', up);
       handle.removeEventListener('pointercancel', up);
-      if (preview === slotPanel.length) return;
-      slotPanel.length = preview;
+      if (preview === editPanel.length) return;
+      editPanel.length = preview;
       renderWindow();
     };
     handle.addEventListener('pointermove', move);
@@ -5865,7 +6142,11 @@ async function post(path, payload, guess) {
   // another.
   if (!answer.ok) revert(before);
   view.answer = answer;
-  if (answer.ok) view.pick = null;
+  // A committed change is over. Leaving it armed would be worse than untidy:
+  // `editing` is keyed on the selected instant, so selecting the same block
+  // again would find the old proposal still sitting there and quietly re-enter
+  // an edit the reader thought they had finished.
+  if (answer.ok) { view.pick = null; resetEdit(); }
   // Whatever was held about this spawn's weeks was read before the write. Even
   // a refusal is worth forgetting over: it usually means the week is not what
   // we thought it was.

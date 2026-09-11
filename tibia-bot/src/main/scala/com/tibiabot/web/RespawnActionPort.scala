@@ -129,19 +129,48 @@ trait RespawnActionPort {
   def reassignSlot(guildId: String, actorId: String, code: String,
                    startsAt: java.time.ZonedDateTime, toUserId: String): Future[ActionResult]
 
-  /** Change how long one window on the calendar runs.
+  /** Change one window on the calendar: how long it runs, when it starts, or
+   *  both.
    *
    *  Named by the instant it starts on for the same reason [[dropSlot]] is: the
    *  grid draws days a rule has not written down yet, and those have no id to
-   *  send. The window it names may equally be the hunt in progress, which is
-   *  what lets one button on the panel serve whatever is selected.
+   *  send. `toStartsAt` is where it lands, absent when only the length is
+   *  changing. The window it names may equally be the hunt in progress, which is
+   *  what lets one button on the panel serve whatever is selected — that one
+   *  cannot be moved, only stretched.
    *
    *  A moderator override throughout — no stamina is charged for a longer
    *  window and the guild's maximum claim length does not apply. See
    *  `RespawnService.editSlot` for what it will still refuse.
    */
   def editSlot(guildId: String, actorId: String, code: String,
-               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult]
+               startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+               minutes: Int): Future[ActionResult]
+
+  /** As [[editSlot]], but performed by the evening's own owner on their own
+   *  booking.
+   *
+   *  A member action rather than a moderator one, and so deliberately a separate
+   *  name: what somebody may do is a property of the action, not of the request
+   *  (see `RespawnCommand.requiredTier`), and one name meaning two things
+   *  depending on who sent it is a name that could understate itself. Held to
+   *  everything an ordinary booking is held to, because it is one — this is
+   *  cancelling and booking again in a single move, and must cost exactly that.
+   */
+  def editOwnSlot(guildId: String, actorId: String, code: String,
+                  startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                  minutes: Int): Future[ActionResult]
+
+  /** Move a whole booking — its first slot, its length, and the days it runs on.
+   *
+   *  The rule, not one evening of it: the answer to "Tuesdays are ten now". Named
+   *  by schedule id, as cancelling a booking is, because a rule is the thing being
+   *  changed and it has one. Its owner's only, which is why the id is checked
+   *  against them rather than trusted.
+   */
+  def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
+                        firstStart: java.time.ZonedDateTime, minutes: Int,
+                        daysOfWeek: Int): Future[ActionResult]
 
   /** Take a spawn the guild added back out of its catalogue.
    *

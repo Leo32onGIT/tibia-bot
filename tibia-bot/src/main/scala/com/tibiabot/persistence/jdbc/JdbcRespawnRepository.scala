@@ -1452,6 +1452,57 @@ final class JdbcRespawnRepository(connectionProvider: ConnectionProvider) extend
       } finally statement.close()
     }
 
+  def retimeReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
+                        durationMinutes: Int): Option[RespawnClaim] =
+    withGuildTransaction(guildId) { conn =>
+      // Only a booking with no rule behind it. An occurrence's identity is
+      // (schedule_id, starts_at) — the key the materialiser's unique index is on
+      // — so moving one's start would slide it out from under the row that stops
+      // the next sweep writing that evening again. Those are settled and
+      // rewritten instead; see RespawnService.retimeSlot.
+      //
+      // A request goes with the move, as it does on a reassignment: the question
+      // put to this owner was about the evening they had, and that evening is no
+      // longer the one they hold. `warned` resets for the same reason
+      // setClaimDuration resets it — a reminder is due near the new time.
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_claims
+          |SET starts_at = ?, ends_at = CAST(? AS TIMESTAMPTZ) + make_interval(mins => ?),
+          |    duration_minutes = ?, warned = FALSE,
+          |    asked_at = NULL, request_deadline = NULL,
+          |    requester_user_id = NULL, requester_user_name = NULL, requester_nickname = NULL,
+          |    requested_starts_at = NULL, requested_duration_minutes = NULL
+          |WHERE id = ? AND status = 'reserved' AND schedule_id IS NULL
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(startsAt.toInstant))
+        statement.setTimestamp(2, Timestamp.from(startsAt.toInstant))
+        statement.setInt(3, durationMinutes)
+        statement.setInt(4, durationMinutes)
+        statement.setLong(5, claimId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readClaim(result)) else None
+      } finally statement.close()
+    }
+
+  def retimeSchedule(guildId: String, scheduleId: Long, anchorAt: ZonedDateTime,
+                     durationMinutes: Int, daysOfWeek: Int): Option[RespawnSchedule] =
+    withGuildTransaction(guildId) { conn =>
+      val statement = conn.prepareStatement(
+        """UPDATE respawn_schedules
+          |SET anchor_at = ?, duration_minutes = ?, days_of_week = ?
+          |WHERE id = ? AND active
+          |RETURNING *;""".stripMargin)
+      try {
+        statement.setTimestamp(1, Timestamp.from(anchorAt.toInstant))
+        statement.setInt(2, durationMinutes)
+        statement.setInt(3, daysOfWeek)
+        statement.setLong(4, scheduleId)
+        val result = statement.executeQuery()
+        if (result.next()) Some(readSchedule(result)) else None
+      } finally statement.close()
+    }
+
   def slotAt(guildId: String, respawnId: Long, startsAt: ZonedDateTime): Option[RespawnClaim] =
     withGuild(guildId) { conn =>
       val statement = conn.prepareStatement(

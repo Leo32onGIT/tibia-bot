@@ -103,10 +103,28 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
     }
     var lastSlotMove: Option[(String, String, String)] = None
     def editSlot(guildId: String, actorId: String, code: String,
-                 startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] = {
-      lastSlotEdit = Some((code, startsAt.toInstant.toString, minutes)); result
+                 startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                 minutes: Int): Future[ActionResult] = {
+      lastSlotEdit = Some((code, startsAt.toInstant.toString,
+        toStartsAt.map(_.toInstant.toString), minutes))
+      result
     }
-    var lastSlotEdit: Option[(String, String, Int)] = None
+    var lastSlotEdit: Option[(String, String, Option[String], Int)] = None
+    def editOwnSlot(guildId: String, actorId: String, code: String,
+                    startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                    minutes: Int): Future[ActionResult] = {
+      lastOwnEdit = Some((code, startsAt.toInstant.toString,
+        toStartsAt.map(_.toInstant.toString), minutes))
+      result
+    }
+    var lastOwnEdit: Option[(String, String, Option[String], Int)] = None
+    def rescheduleBooking(guildId: String, actorId: String, scheduleId: Long,
+                          firstStart: java.time.ZonedDateTime, minutes: Int,
+                          daysOfWeek: Int): Future[ActionResult] = {
+      lastBookingMove = Some((scheduleId, firstStart.toInstant.toString, minutes, daysOfWeek))
+      result
+    }
+    var lastBookingMove: Option[(Long, String, Int, Int)] = None
   }
 
   private def relay(cache: RedisCache, timeout: FiniteDuration = 3.seconds) =
@@ -224,10 +242,46 @@ class RespawnRelaySpec extends AnyWordSpec with Matchers with ScalaFutures with 
       val cache = new FakeCache
       val local = new CountingActions()
       val day = java.time.ZonedDateTime.parse("2026-08-13T11:00:00Z")
-      val pending = relay(cache).editSlot("g1", "mod-1", "415", day, 150)
+      val pending = relay(cache).editSlot("g1", "mod-1", "415", day, None, 150)
       consumer(cache, local).sweep().futureValue
       pending.futureValue.ok shouldBe true
-      local.lastSlotEdit shouldBe Some(("415", "2026-08-13T11:00:00Z", 150))
+      local.lastSlotEdit shouldBe Some(("415", "2026-08-13T11:00:00Z", None, 150))
+    }
+
+    // A move and a resize travel as one instruction, so where it lands has to
+    // survive the crossing as well as how long it runs.
+    "hand a moved calendar day across with where it is going" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val day = java.time.ZonedDateTime.parse("2026-08-13T11:00:00Z")
+      val to = java.time.ZonedDateTime.parse("2026-08-15T12:30:00Z")
+      val pending = relay(cache).editSlot("g1", "mod-1", "415", day, Some(to), 150)
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastSlotEdit shouldBe
+        Some(("415", "2026-08-13T11:00:00Z", Some("2026-08-15T12:30:00Z"), 150))
+    }
+
+    "hand an owner's own edit across as the member action it is" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val day = java.time.ZonedDateTime.parse("2026-08-13T11:00:00Z")
+      val to = java.time.ZonedDateTime.parse("2026-08-13T12:00:00Z")
+      val pending = relay(cache).editOwnSlot("g1", "me", "415", day, Some(to), 90)
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastOwnEdit shouldBe Some(("415", "2026-08-13T11:00:00Z", Some("2026-08-13T12:00:00Z"), 90))
+      local.lastSlotEdit shouldBe None
+    }
+
+    "hand a whole booking's move across with the days it now runs on" in {
+      val cache = new FakeCache
+      val local = new CountingActions()
+      val first = java.time.ZonedDateTime.parse("2026-08-18T20:00:00Z")
+      val pending = relay(cache).rescheduleBooking("g1", "me", 7L, first, 180, 3)
+      consumer(cache, local).sweep().futureValue
+      pending.futureValue.ok shouldBe true
+      local.lastBookingMove shouldBe Some((7L, "2026-08-18T20:00:00Z", 180, 3))
     }
 
     // The thing the whole lease design exists to prevent.
