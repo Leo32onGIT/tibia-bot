@@ -395,6 +395,23 @@ final case class RespawnSchedule(
 
   def endOf(start: ZonedDateTime): ZonedDateTime = start.plusMinutes(durationMinutes.toLong)
 
+  /** How far ahead this booking can still contest another one.
+   *
+   *  The window every clash question about it has to be asked over. A one-off
+   *  reaches exactly as far as its single evening, however many days away that
+   *  is; a repeating rule reaches forever, but its pattern comes round weekly,
+   *  so a week and a day from wherever it starts shows every distinct evening
+   *  it can produce.
+   *
+   *  Not the same thing as the materialisation look-ahead, which says how far
+   *  ahead slots are *written down*. Asking a clash question over that instead
+   *  is how a day a moderator had taken off the calendar went on being defended
+   *  by the rule behind it: the day being asked for sat outside the twelve
+   *  hours, so the row recording that it had been given up was never read. */
+  def reachesUntil(now: ZonedDateTime): ZonedDateTime =
+    if (!repeats) endOf(anchorAt)
+    else (if (anchorAt.isAfter(now)) anchorAt else now).plusDays(RespawnSchedule.RepeatCycleDays)
+
   /** How this booking recurs, in words: "once", "every day", "every Tue, Wed". */
   def repeatLabel: String = RespawnSchedule.repeatLabel(daysOfWeek)
 
@@ -454,6 +471,12 @@ object RespawnSchedule {
    *  or an over-wide window cannot spin. */
   private[domain] val OccurrenceLimit: Int = 400
 
+  /** A week and a day: how long a window has to be to hold every distinct
+   *  evening a repeating rule produces. The extra day over seven is what catches
+   *  a window opening on one weekday and running into the next. Same span
+   *  [[clash]] walks, for the same reason. */
+  val RepeatCycleDays: Long = 8L
+
   def bitFor(day: java.time.DayOfWeek): Int = 1 << (day.getValue - 1)
 
   def maskOf(days: Iterable[java.time.DayOfWeek]): Int =
@@ -500,12 +523,21 @@ object RespawnSchedule {
   def surrendered(schedule: RespawnSchedule, candidate: RespawnSchedule,
                   decided: Set[java.time.Instant],
                   from: ZonedDateTime, to: ZonedDateTime): Boolean = {
+    val days = contested(schedule, candidate, from, to)
+    days.nonEmpty && days.forall(start => decided.contains(start.toInstant))
+  }
+
+  /** The evenings `schedule` produces that `candidate` would run over, inside a
+   *  window. What [[surrendered]] weighs, and also what a refusal should name:
+   *  the rule's *next* evening is very often not the one being asked for, and
+   *  naming it reads as a clash with a day the asker never mentioned. */
+  def contested(schedule: RespawnSchedule, candidate: RespawnSchedule,
+                from: ZonedDateTime, to: ZonedDateTime): List[ZonedDateTime] = {
     val theirs = candidate.occurrencesBetween(from, to)
-    val contested = schedule.occurrencesBetween(from, to).filter { start =>
+    schedule.occurrencesBetween(from, to).filter { start =>
       val end = schedule.endOf(start)
       theirs.exists(other => other.isBefore(end) && start.isBefore(candidate.endOf(other)))
     }
-    contested.nonEmpty && contested.forall(start => decided.contains(start.toInstant))
   }
 
   /** What a clashing booking should do about it, given the rules and the booked

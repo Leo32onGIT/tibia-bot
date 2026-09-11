@@ -444,6 +444,61 @@ class RespawnScheduleSpec extends AnyFunSuite with Matchers {
     wanted.overlapsSlot(slot(anchor, durationMinutes = 180), anchor, anchor.plusDays(1)) shouldBe true
   }
 
+  // --- how far ahead a clash has to be asked about -------------------------
+
+  private val lookAhead = anchor.plusMinutes(720)
+
+  test("a one-off reaches exactly as far as the evening it is for") {
+    val tonight = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusHours(1),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    tonight.reachesUntil(anchor) shouldBe anchor.plusHours(3)
+
+    // The case the look-ahead could not answer: an evening days away.
+    val friday = tonight.copy(anchorAt = anchor.plusDays(5))
+    friday.reachesUntil(anchor) shouldBe anchor.plusDays(5).plusMinutes(120)
+    friday.reachesUntil(anchor) should be > lookAhead
+  }
+
+  test("a repeating booking reaches a week and a day, wherever it starts") {
+    schedule().reachesUntil(anchor.plusHours(2)) shouldBe anchor.plusHours(2).plusDays(8)
+    // Anchored ahead of now, it is the anchor the week is measured from — a rule
+    // starting next month contests nothing until then.
+    val later = schedule().copy(anchorAt = anchor.plusDays(30))
+    later.reachesUntil(anchor) shouldBe anchor.plusDays(30).plusDays(8)
+  }
+
+  test("a day a moderator took off the calendar is free however far ahead it is") {
+    // The bug behind this: the clash question used to be asked over the twelve
+    // hours slots are written down in, so an evening days away had no occurrence
+    // inside the window — nothing was found to clash with, and the row saying the
+    // evening had been given up was never read either. The rule went on
+    // defending a day the calendar had already stopped drawing.
+    val standing = schedule()
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(4),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    val dropped = Set(anchor.plusDays(4).toInstant)
+
+    // Over the look-ahead: the evening is out of sight either way, so dropping
+    // it changed nothing.
+    RespawnSchedule.surrendered(standing, wanted, dropped, anchor, lookAhead) shouldBe false
+
+    // Over what the booking actually reaches: the drop is seen, and the rule
+    // stands aside.
+    val reach = wanted.reachesUntil(anchor)
+    RespawnSchedule.surrendered(standing, wanted, Set.empty, anchor, reach) shouldBe false
+    RespawnSchedule.surrendered(standing, wanted, dropped, anchor, reach) shouldBe true
+  }
+
+  test("the evening named is the one being asked for, not the rule's next") {
+    val standing = schedule()
+    val wanted = RespawnSchedule(2L, 1L, "u2", "Two", "", anchor.plusDays(4),
+      RespawnSchedule.Daily, 120, active = true, anchor, RespawnSchedule.OneOff)
+    RespawnSchedule.contested(standing, wanted, anchor, wanted.reachesUntil(anchor)) shouldBe
+      List(anchor.plusDays(4))
+    // Which is four days after the one a refusal used to name.
+    standing.nextStartAtOrAfter(anchor) shouldBe Some(anchor)
+  }
+
   test("a rule that contests nothing inside the window has surrendered nothing") {
     // Different times of day, so the two never meet. Answering "yes, given up"
     // here would read as permission drawn from an absence of evidence.

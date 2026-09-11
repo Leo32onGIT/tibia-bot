@@ -1188,7 +1188,7 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
                           slots: List[RespawnClaim], now: ZonedDateTime): Either[String, ScheduleResult] = {
     val guildId = guild.getId
     def refuse(why: String): Either[String, ScheduleResult] =
-      Left(clashMessage(schedules, slots, now) + why)
+      Left(clashMessage(candidate, schedules, slots, now) + why)
 
     RespawnSchedule.verdict(candidate, schedules, slots) match {
       case ClashVerdict.Yours =>
@@ -1229,15 +1229,23 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
   }
 
   /** Who a clash is with, preferring a booked slot over the rule behind it — the
-   *  slot knows the night it is actually on. */
-  private def clashMessage(schedules: List[RespawnSchedule], slots: List[RespawnClaim],
-                           now: ZonedDateTime): String = {
+   *  slot knows the night it is actually on.
+   *
+   *  A rule is named by the evening it contests with this booking, not by its own
+   *  next one. They are the same evening only when the booking is for tonight;
+   *  any further off and the rule's next evening is a day the asker never
+   *  mentioned, which reads as the refusal answering a different question. */
+  private def clashMessage(candidate: RespawnSchedule, schedules: List[RespawnSchedule],
+                           slots: List[RespawnClaim], now: ZonedDateTime): String = {
     val (who, when, minutes) = slots.headOption match {
       case Some(slot) => (Names.user(slot.nickname, slot.userName), slot.startsAt, slot.durationMinutes)
       case None =>
         val schedule = schedules.head
-        (Names.user(schedule.nickname, schedule.userName),
-          schedule.nextStartAtOrAfter(now), schedule.durationMinutes)
+        val evening = RespawnSchedule
+          .contested(schedule, candidate, now, clashHorizon(candidate, now))
+          .headOption
+          .orElse(schedule.nextStartAtOrAfter(now))
+        (Names.user(schedule.nickname, schedule.userName), evening, schedule.durationMinutes)
     }
     val at = when.map(start => s"<t:${start.toInstant.getEpochSecond}:t>").getOrElse("soon")
     s"That clashes with $who's slot on this respawn " +
@@ -1249,9 +1257,28 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  handed to an asker has no schedule behind it, and a rule beyond the
    *  look-ahead has no slot yet, so either check alone misses one of them. */
   private def clashingReservations(booked: List[RespawnClaim], candidate: RespawnSchedule,
-                                   now: ZonedDateTime): List[RespawnClaim] = {
-    val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
-    booked.filter(candidate.overlapsSlot(_, now, horizon))
+                                   now: ZonedDateTime): List[RespawnClaim] =
+    booked.filter(candidate.overlapsSlot(_, now, clashHorizon(candidate, now)))
+
+  /** How far ahead a booking's clash questions have to be asked.
+   *
+   *  As far as the booking itself reaches, and never less than the look-ahead —
+   *  which is how far slots are written down, and so how far a booked row can be
+   *  in the way of an evening nothing reaches.
+   *
+   *  Both of those, not the look-ahead alone. The look-ahead is twelve hours, so
+   *  asking over it made every question about an evening further off than that
+   *  answer itself: no occurrence of the candidate fell inside the window, so
+   *  nothing was ever found to clash with and nothing was ever found to have
+   *  been given up either. The second is what showed — a day a moderator had
+   *  taken off the calendar was still defended by the rule behind it, since the
+   *  row saying the day was given up sat outside the window and was never read.
+   *  The first is the one that would have bitten next: a booked row beyond the
+   *  look-ahead — what a reassigned evening leaves — was not checked at all. */
+  private def clashHorizon(candidate: RespawnSchedule, now: ZonedDateTime): ZonedDateTime = {
+    val lookAhead = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
+    val reach = candidate.reachesUntil(now)
+    if (reach.isAfter(lookAhead)) reach else lookAhead
   }
 
   /** Whether two bookings on the same spawn ever run at the same time. The rule
@@ -1272,11 +1299,13 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
    *  two still refused the hour it had let go.
    *
    *  All-or-nothing: a rule that settled one Thursday still owns the rest, and a
-   *  day too far ahead to have a row has settled nothing, which keeps
-   *  `TooFarAhead` from quietly becoming a yes. */
+   *  day with nothing written against it has settled nothing, which keeps
+   *  `TooFarAhead` from quietly becoming a yes. Asked over `clashHorizon` rather
+   *  than over the look-ahead, so a day given up further ahead than slots are
+   *  written is still seen to have been given up. */
   private def surrendered(guildId: String, booked: List[RespawnClaim], schedule: RespawnSchedule,
                           candidate: RespawnSchedule, now: ZonedDateTime): Boolean = {
-    val horizon = now.plusMinutes(Config.Respawn.scheduleLookAheadMinutes.toLong)
+    val horizon = clashHorizon(candidate, now)
     val settled = daysGivenUp(guildId, now, Some(horizon), Some(schedule.respawnId))
       .getOrElse(schedule.id, Set.empty)
     val written = booked.collect {
