@@ -2539,15 +2539,42 @@ object BotApp extends App with StrictLogging {
    *  map corrects itself rather than inheriting past mistakes. `shiftOnFailure`
    *  says what to do when the wiki can't be read: the server-save refresh advances
    *  the map we hold, so an outage still rotates, while `/admin`'s Dreamscar leaves
-   *  it alone — that exists to *undo* drift, not add some. */
+   *  it alone — that exists to *undo* drift, not add some.
+   *
+   *  The wiki read is then checked against what the worlds actually killed, which
+   *  is the only source that can catch an offset the page has wrong — see
+   *  [[statistics.DreamCourtService]]. A local shift is deliberately not checked:
+   *  the evidence would be answering a map nobody has re-read, and the next
+   *  successful read is a better place to correct it. */
   private def refreshDreamScarBosses(shiftOnFailure: Boolean): Unit =
     fetchDreamScarBosses() match {
-      case Some(bosses) => dreamScar = bosses
+      case Some(bosses) => dreamScar = correctDreamScarBosses(bosses)
       case None if shiftOnFailure =>
         logger.warn("Advancing the Dream Courts bosses locally instead of re-reading them")
         dreamScar = shiftAllBossesUp(dreamScar)
       case None => ()
     }
+
+  /** The wiki's answer with the worlds the kill history is confident about put
+   *  right. Primary only: it reads the shared cache and writes nothing, so on the
+   *  secondary it would be the same answer computed twice — that bot picks the
+   *  corrections up from the same rows in its own refresh. */
+  private def correctDreamScarBosses(fromWiki: Map[String, String]): Map[String, String] =
+    try dreamCourtService.correct(
+      fromWiki, ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toLocalDate)
+    catch {
+      case error: Throwable =>
+        logger.warn("Could not check the Dream Courts bosses against the kill history", error)
+        fromWiki
+    }
+
+  private lazy val dreamCourtService = new statistics.DreamCourtService(
+    killStatistics = killStatisticsRepository,
+    mode = () => statistics.DreamCourtMode.parse(Config.Statistics.KillStatistics.DreamCourts.mode),
+    window = Config.Statistics.KillStatistics.DreamCourts.windowDays,
+    minDays = Config.Statistics.KillStatistics.DreamCourts.minDays,
+    minLead = Config.Statistics.KillStatistics.DreamCourts.minLead
+  )
 
   def fetchCreatureNames(): List[String] = wikiClient.creatureNames()
 

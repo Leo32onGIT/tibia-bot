@@ -101,6 +101,9 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
       summaries.keys.filter(_._1 == world).map(_._2).toList.sortWith(_.isBefore(_)).headOption
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] =
       bosses.getOrElse((world, saveDay), Nil).filter(_.killed > 0).sortBy(row => (-row.killed, row.race))
+    def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] =
+      bosses.toList.collect { case ((w, day), rows) if w == world && !day.isBefore(from) => rows }
+        .flatten.filter(row => races.contains(row.race.toLowerCase))
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = summaries.get((world, saveDay))
     def removeExpired(before: LocalDate): Unit = ()
   }

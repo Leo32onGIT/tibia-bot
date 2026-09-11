@@ -199,7 +199,11 @@ final class StatisticsService(
         // day with experience figures and no kill figures is worth more than
         // silence.
         kills = kills,
-        topKills = killed.filter(row => SpecialKills.forRace(row.race).isEmpty).take(KillStatistics.TopKills),
+        // Everything kept by name comes out: the catalogued bosses, the Dream
+        // Courts five and the specials are all in the day's rows for their own
+        // reasons and none of them is a creature the world was hunting.
+        topKills = killed.filterNot(row => KillStatistics.keptByName.contains(row.race.toLowerCase))
+          .take(KillStatistics.TopKills),
         specialKills = SpecialKills.all.flatMap(kill =>
           killed.find(_.race.equalsIgnoreCase(kill.race)).map(row => kill -> row.killed)),
         predictions = predictions,

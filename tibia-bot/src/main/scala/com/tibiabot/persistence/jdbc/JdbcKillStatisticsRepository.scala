@@ -183,6 +183,43 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       rows.toList
     }
 
+  def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] =
+    if (races.isEmpty) Nil
+    else JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // LOWER() on both sides rather than trusting the stored casing: these rows
+      // are written from the endpoint's own spelling and read against a list
+      // kept in code, and the two only have to agree case-insensitively.
+      val placeholders = races.toList.map(_ => "?").mkString(",")
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT race,save_day,killed,players_killed
+           |FROM kill_statistics_boss
+           |WHERE world = ? AND save_day >= ? AND LOWER(race) IN ($placeholders)
+           |ORDER BY save_day DESC, race ASC;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      statement.setDate(2, SqlDate.valueOf(from))
+      races.toList.map(_.toLowerCase).zipWithIndex.foreach {
+        case (race, index) => statement.setString(index + 3, race)
+      }
+      val result = statement.executeQuery()
+
+      val rows = new ListBuffer[BossKills]()
+      while (result.next()) {
+        rows += BossKills(
+          world = world,
+          saveDay = result.getDate("save_day").toLocalDate,
+          race = Option(result.getString("race")).getOrElse(""),
+          killed = result.getInt("killed"),
+          playersKilled = result.getInt("players_killed")
+        )
+      }
+
+      statement.close()
+      rows.toList
+    }
+
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(

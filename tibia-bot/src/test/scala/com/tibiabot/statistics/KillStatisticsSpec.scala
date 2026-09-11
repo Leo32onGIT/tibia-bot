@@ -171,14 +171,79 @@ class KillStatisticsSpec extends AnyFunSuite with Matchers with JsonSupport {
     KillStatistics.specialKills(entries).map(_.race) shouldBe SpecialKills.races
   }
 
+  // --- the Dream Courts five -----------------------------------------------
+
+  test("all five are spelled the way the endpoint spells them") {
+    // Checked against the live endpoint rather than assumed, because a race that
+    // does not match exactly banks a zero every day and the history looks like a
+    // boss nobody ever killed. SpecialKills holds the one that does not match.
+    com.tibiabot.domain.time.DreamScarCycle.bossCycle should contain theSameElementsAs List(
+      "Plagueroot", "Malofur Mangrinder", "Maxxenius", "Alptramun", "Izcandar the Banished")
+  }
+
+  test("every one of the five gets a row, killed or not") {
+    // Unlike the creatures: a day a Dream Courts boss was not killed is evidence
+    // about which boss was available, so absence has to be a zero rather than a
+    // missing row.
+    val entries = List(entry("Alptramun", killed = 18), entry("Maxxenius", killed = 5))
+    val rows = KillStatistics.dreamCourtKills(data.copy(entries = entries), day)
+    rows should have size 5
+    rows.map(row => row.race -> row.killed).toMap shouldBe Map(
+      "Plagueroot" -> 0,
+      "Malofur Mangrinder" -> 0,
+      "Maxxenius" -> 5,
+      "Alptramun" -> 18,
+      "Izcandar the Banished" -> 0)
+  }
+
+  test("they are matched however the endpoint cases them") {
+    val rows = KillStatistics.dreamCourtKills(data.copy(entries = List(entry("ALPTRAMUN", killed = 3))), day)
+    rows.find(_.race == "Alptramun").map(_.killed) shouldBe Some(3)
+  }
+
+  test("they carry the world and day they were read for") {
+    val rows = KillStatistics.dreamCourtKills(data, day)
+    rows.map(_.world).distinct shouldBe List("Antica")
+    rows.map(_.saveDay).distinct shouldBe List(day)
+  }
+
+  test("more than one of the five can be killed on the same day") {
+    // The thing that makes this hard, and the reason the history is being banked
+    // rather than read straight away: presence is not the signal, so the rows
+    // have to carry the counts for a later rule to weigh.
+    val entries = List(entry("Alptramun", killed = 18), entry("Maxxenius", killed = 5))
+    val rows = KillStatistics.dreamCourtKills(data.copy(entries = entries), day)
+    rows.count(_.killed > 0) shouldBe 2
+  }
+
   // --- what a day keeps ----------------------------------------------------
 
-  test("a day keeps the catalogued bosses, the top creatures and the specials") {
+  test("a day keeps the catalogued bosses, the Dream Courts five, the top creatures and the specials") {
     val rows = KillStatistics.dayRaces(data, day)
     val races = rows.map(_.race.toLowerCase).toSet
     BossCatalogue.bosses.foreach(boss => races should contain(boss.race.toLowerCase))
+    com.tibiabot.domain.time.DreamScarCycle.bossCycle.foreach(boss => races should contain(boss.toLowerCase))
     KillStatistics.topKilled(data.entries).foreach(top => races should contain(top.race.toLowerCase))
     rows.size shouldBe races.size
+  }
+
+  test("the Dream Courts five are banked even on a day none of them died") {
+    // The fixture has no Dream Courts kills in it, which is the ordinary case on
+    // most worlds and exactly the day that still has to be written down.
+    val rows = KillStatistics.dayRaces(data, day)
+    com.tibiabot.domain.time.DreamScarCycle.bossCycle.foreach { boss =>
+      rows.find(_.race == boss).map(_.killed) shouldBe Some(0)
+    }
+  }
+
+  test("everything kept by name is kept by name") {
+    // What the post's creature list excludes. Stated rather than left to the
+    // fact that a boss killed three times cannot outrank a rotworm.
+    val kept = KillStatistics.keptByName
+    kept should contain("alptramun")
+    kept should contain("plunder patriarches")
+    kept should contain(BossCatalogue.bosses.head.race.toLowerCase)
+    kept should not contain "rotworm"
   }
 
   test("a race is never kept twice, however many lists claim it") {

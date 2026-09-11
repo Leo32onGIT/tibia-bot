@@ -155,6 +155,15 @@ object Config {
       val probeCandidates: Int = killStatistics.getInt("probe-candidates")
       val retention: FiniteDuration = dur("retention")
 
+      /** Correcting the Dream Courts boss of the day from the banked kills. */
+      object DreamCourts {
+        private val dreamCourts = killStatistics.getConfig("dream-courts")
+        val mode: String = dreamCourts.getString("mode")
+        val windowDays: Int = dreamCourts.getInt("window-days")
+        val minDays: Int = dreamCourts.getInt("min-days")
+        val minLead: Int = dreamCourts.getInt("min-lead")
+      }
+
       /** The temporary measurement of when tibia.com's nightly batch runs. */
       object RollProbe {
         private val probe = killStatistics.getConfig("roll-probe")

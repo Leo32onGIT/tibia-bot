@@ -69,6 +69,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] = seen
     def earliestDay(world: String): Option[LocalDate] = earliest
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] = raceRows
+    def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] = Nil
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = {
       if (fail) throw new RuntimeException("cache is away")
       days.get((world, saveDay))
@@ -304,6 +305,29 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     // The special is reported under Special Kills, so it is not also a creature.
     report.topKills.map(_.race) shouldBe List("rotworm", "dragon")
     report.specialKills shouldBe List(plunder -> 3)
+  }
+
+  test("a Dream Courts boss is banked but never shown as a creature") {
+    // They are in the day's rows for a reason nothing reads yet, and on a quiet
+    // world one of them could otherwise outrank a real creature in the list.
+    val rows = List(
+      BossKills("Antica", yesterday, "Alptramun", 18, 0),
+      BossKills("Antica", yesterday, "rotworm", 12, 0))
+    val harness = new Harness(List(target("a")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary), raceRows = rows))
+    harness.service.tick()
+    harness.posts.head._2.topKills.map(_.race) shouldBe List("rotworm")
+  }
+
+  test("a catalogued boss is not shown as a creature either") {
+    val boss = BossCatalogue.bosses.head.race
+    val rows = List(
+      BossKills("Antica", yesterday, boss, 40, 0),
+      BossKills("Antica", yesterday, "rotworm", 12, 0))
+    val harness = new Harness(List(target("a")),
+      kills = new StubKillStatistics(Map(("Antica", yesterday) -> killSummary), raceRows = rows))
+    harness.service.tick()
+    harness.posts.head._2.topKills.map(_.race) shouldBe List("rotworm")
   }
 
   test("the creature rows are not read at all until the snapshot is filed") {

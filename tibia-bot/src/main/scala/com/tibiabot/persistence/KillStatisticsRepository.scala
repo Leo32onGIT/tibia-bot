@@ -65,6 +65,15 @@ trait KillStatisticsRepository {
    *  taking the first ten is the ten the post means. */
   def killsOn(world: String, saveDay: LocalDate): List[BossKills]
 
+  /** One world's daily counts for a named set of races since `from`, zeros
+   *  included.
+   *
+   *  For [[com.tibiabot.statistics.DreamCourtEvidence]], which weighs the five
+   *  Dream Courts bosses against each other day by day. The zeros are the point:
+   *  a day one of them was not killed is evidence about which boss was available,
+   *  so "no row" and "zero" have to stay distinguishable. */
+  def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills]
+
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary]
 
   def removeExpired(before: LocalDate): Unit

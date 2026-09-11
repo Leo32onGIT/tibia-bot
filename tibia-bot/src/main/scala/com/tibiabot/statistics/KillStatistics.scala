@@ -1,5 +1,6 @@
 package com.tibiabot.statistics
 
+import com.tibiabot.domain.time.DreamScarCycle
 import com.tibiabot.tibiadata.response.{KillStatisticsData, KillStatisticsEntry}
 
 import java.time.LocalDate
@@ -34,8 +35,8 @@ final case class DayKillSummary(
    *
    *  What the endpoint hands back carries no date, so the only way to tell which
    *  day is in front of us is to compare it against the day we already filed:
-   *  until tibia.com rolls at server save, a live read *is* the previous day.
-   *  See [[KillStatisticsService]], which is the whole reason this exists.
+   *  until the nightly batch runs, a live read *is* the previous day. See
+   *  [[KillStatisticsService]], which is the whole reason this exists.
    *
    *  Every figure rather than just the total, so two days that happened to kill
    *  the same number of creatures are still told apart. */
@@ -50,11 +51,12 @@ final case class DayKillSummary(
  *  is [[KillStatisticsService]]'s.
  *
  *  ==Which day a snapshot describes==
- *  `last_day` is the server-save day that has just closed, not the one running:
- *  tibia.com rolls the figures at server save. So a snapshot read after 10:00
- *  Berlin describes the day keyed by [[DailyStatistics.reportedDay]] — the same
- *  day the experience post covers, which is what lets the two sit in one embed
- *  later. */
+ *  Not quite a server-save day. tibia.com rebuilds these figures in a nightly
+ *  batch around 03:10 Berlin, so a publication straddles the 10:00 boundary and
+ *  overlaps the day it is filed under by seventeen hours of twenty-four — see
+ *  [[com.tibiabot.scheduler.KillStatisticsSchedule]], which owns that
+ *  arithmetic. The label agrees with [[DailyStatistics.reportedDay]] throughout
+ *  the server-save window, which is what lets the two sit in one post. */
 object KillStatistics {
 
   /** Entries that are counted like a race and are not one.
@@ -95,27 +97,73 @@ object KillStatistics {
   /** How many of the day's creatures the post names. */
   val TopKills: Int = 10
 
+  /** The five Dream Courts bosses, whether or not they died.
+   *
+   *  Kept for a reason nothing reads yet. The bot decides which of the five is
+   *  a world's boss of the day from a wiki page whose per-world offsets drift —
+   *  a server reset bumps a world's rotation and the page stays wrong until
+   *  somebody edits it — and for forty-three worlds the page admits it does not
+   *  know at all. The kill figures are the one source that could answer it from
+   *  evidence instead, because the boss of the day is the one people can
+   *  actually go and kill.
+   *
+   *  Whether they answer it is not settled. Several of the five are killed on
+   *  the same world on the same day, so the signal is which was killed *most*,
+   *  and on one day's data that agreed with the wiki only about half the time.
+   *  The test that separates a noisy estimator from a drifted page is whether a
+   *  world's answer advances by exactly one step per day, and that needs
+   *  consecutive days nobody has. Hence this: bank the days, decide later. A day
+   *  not banked cannot be recovered.
+   *
+   *  Zeros included, like the catalogue and unlike the creatures. A day a boss
+   *  was not killed is exactly as informative as a day it was — it is evidence
+   *  about which boss was available — and a rectangular history is far easier to
+   *  reason about than one where absence means two things.
+   *
+   *  The race names are the endpoint's own, verified against it rather than
+   *  assumed: all five are spelled there exactly as
+   *  [[com.tibiabot.domain.time.DreamScarCycle]] spells
+   *  them, which is not something to take for granted — see [[SpecialKills]] for
+   *  the one that is not. */
+  def dreamCourtKills(data: KillStatisticsData, saveDay: LocalDate): List[BossKills] = {
+    val seen = data.entries.groupBy(_.race.toLowerCase)
+    DreamScarCycle.bossCycle.toList.map { boss =>
+      val entry = seen.get(boss.toLowerCase).flatMap(_.headOption)
+      BossKills(
+        world = data.world,
+        saveDay = saveDay,
+        race = boss,
+        killed = entry.map(_.last_day_killed).getOrElse(0),
+        playersKilled = entry.map(_.last_day_players_killed).getOrElse(0)
+      )
+    }
+  }
+
   /** Every race worth keeping for one world's day: the catalogued bosses, the
-   *  creatures the world killed most of, and the special bosses.
+   *  Dream Courts five, the creatures the world killed most of, and the special
+   *  bosses.
    *
-   *  All three go in the one table. It is keyed on `(world, save_day, race)` and
-   *  enforces membership of nothing, and the only reader that could be confused
-   *  by a stranger — the spawn prediction — looks rows up *by catalogue name*,
-   *  so a race it has never heard of is never asked for. A second table would
-   *  buy a tidier name and a second write per world per day.
+   *  All of them go in the one table. It is keyed on `(world, save_day, race)`
+   *  and enforces membership of nothing, and the only reader that could be
+   *  confused by a stranger — the spawn prediction — looks rows up *by catalogue
+   *  name*, so a race it has never heard of is never asked for. A second table
+   *  would buy a tidier name and a second write per world per day.
    *
-   *  Deduplicated on the race, because the three lists can overlap in principle
-   *  and a repeated key would be a write conflict rather than a wrong number.
-   *  The catalogue wins, since its casing is the one the prediction matches on.
+   *  Deduplicated on the race, because the lists can overlap in principle and a
+   *  repeated key would be a write conflict rather than a wrong number. The
+   *  earlier list wins, and the catalogue is first because its casing is the one
+   *  the prediction matches on.
    *
-   *  Unlike the catalogued bosses, the creatures and the specials are kept only
-   *  where something was actually killed. A zero matters for a boss — it is what
-   *  makes "not seen for N days" measurable — but a creature outside the top ten
-   *  is not absent from the world, only from the list, and writing that as a
+   *  The two named lists keep their zeros; the creatures do not. A zero matters
+   *  for a boss — it is what makes "not seen for N days" measurable, and for the
+   *  Dream Courts five it is half the evidence — but a creature outside the top
+   *  ten is not absent from the world, only from the list, and writing that as a
    *  zero would say something untrue. */
   def dayRaces(data: KillStatisticsData, saveDay: LocalDate): List[BossKills] = {
-    val bosses = bossKills(data, saveDay)
-    val known = bosses.map(_.race.toLowerCase).toSet
+    val named = (bossKills(data, saveDay) ++ dreamCourtKills(data, saveDay))
+      .groupBy(_.race.toLowerCase).values.flatMap(_.headOption).toList
+      .sortBy(_.race)
+    val known = named.map(_.race.toLowerCase).toSet
     val extra = (topKilled(data.entries) ++ specialKills(data.entries))
       .filterNot(entry => known.contains(entry.race.toLowerCase))
       .groupBy(_.race.toLowerCase)
@@ -126,8 +174,20 @@ object KillStatistics {
         race = entry.race,
         killed = entry.last_day_killed,
         playersKilled = entry.last_day_players_killed))
-    bosses ++ extra.sortBy(row => (-row.killed, row.race))
+    named ++ extra.sortBy(row => (-row.killed, row.race))
   }
+
+  /** Races the day keeps by name rather than because they were among the
+   *  biggest: the catalogue, the Dream Courts five and the specials.
+   *
+   *  What the post's creature list has to exclude. Reading the day's rows back
+   *  ordered by kills used to give the top ten creatures only because a boss
+   *  killed three times cannot outrank a rotworm killed a hundred thousand
+   *  times — true, but an assumption rather than a rule, and one that got weaker
+   *  every time another name was added to the table. This states it instead. */
+  def keptByName: Set[String] =
+    (BossCatalogue.bosses.map(_.race) ++ DreamScarCycle.bossCycle ++ SpecialKills.races)
+      .map(_.toLowerCase).toSet
 
   /** The creatures the world killed most of, largest first.
    *
