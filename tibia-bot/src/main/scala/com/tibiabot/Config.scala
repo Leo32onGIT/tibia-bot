@@ -178,6 +178,14 @@ object Config {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
 
+  /** Fandom pages for the races no pluralisation rule reaches. Not to be
+   *  confused with creature-url-mappings above, which is the same idea for the
+   *  other wiki and carries that one's titles. */
+  val creatureRacePages: Map[String, String] =
+    mappings.getObject("kill-stats-page-overrides").asScala.map {
+      case (k, v) => k.toLowerCase -> v.unwrapped().toString
+    }.toMap
+
   // this is the message sent when the bot joins a discord or a user uses /help
   val helpText = s"**How to use the bot:**\n" +
     "Simply use `/setup <World Name>` to setup the bot.\n\n" +
@@ -608,4 +616,9 @@ object Config {
   // creatures - dynamically fetched from the Tibia Fandom wiki (not TibiaData)
   val creaturesListFromApi: List[String] = BotApp.fetchCreatureNames()
   val creaturesList: List[String] = creaturesListFromApi.map(_.toLowerCase.trim)
+  // Indexed once here rather than per post: the daily statistics run asks it
+  // ten times a world, and the index is a few thousand keys built off the list
+  // above, which is already in memory.
+  val creatureWiki: presentation.CreatureWiki =
+    new presentation.CreatureWiki(creaturesListFromApi, creatureRacePages)
 }

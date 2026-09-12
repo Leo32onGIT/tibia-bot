@@ -19,4 +19,14 @@ class UrlsSpec extends AnyFunSuite with Matchers {
     Urls.guildUrl("Red Rose") shouldBe
       "https://www.tibia.com/community/?subtopic=guilds&page=view&GuildName=Red+Rose"
   }
+
+  test("topExperienceUrl points at guildstats, with the world as a path segment") {
+    Urls.topExperienceUrl("Victoris") shouldBe "https://guildstats.eu/top-experience/Victoris"
+  }
+
+  test("topExperienceUrl escapes a space as a path segment would, not as a query would") {
+    // URLEncoder is built for query strings, where a space is '+'; in a path
+    // that is a literal plus sign and a different world.
+    Urls.topExperienceUrl("Nice World") shouldBe "https://guildstats.eu/top-experience/Nice%20World"
+  }
 }

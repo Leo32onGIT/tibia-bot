@@ -9,8 +9,16 @@ package com.tibiabot.statistics
  *  @param emoji the key its configured Discord emoji is held under; resolved by
  *               the caller, so this stays Config-free like everything else the
  *               post's presentation touches
+ *  @param plural what to call it on a day more than one died, where that is a
+ *               different word. Absent for the ones it is not: four of these
+ *               are a single named boss, and kill statistics reports them as
+ *               that however many were killed
  */
-final case class SpecialKill(name: String, race: String, emoji: String)
+final case class SpecialKill(name: String, race: String, emoji: String, plural: Option[String] = None) {
+
+  /** What the post calls it, given how many died. */
+  def nameFor(count: Int): String = if (count > 1) plural.getOrElse(name) else name
+}
 
 /** The quest bosses worth a line of their own on the day they are killed.
  *
@@ -33,11 +41,13 @@ object SpecialKills {
    *  most days anyway, which is about as hard to notice as a bug gets.
    *  `plunder patriarches` is the one that catches people out. */
   val all: List[SpecialKill] = List(
-    SpecialKill("Plunder Patriarch", "plunder patriarches", "plunder"),
+    // The one of these that is a kind of creature rather than one named boss,
+    // and the only one the endpoint itself has a plural for.
+    SpecialKill("Plunder Patriarch", "plunder patriarches", "plunder", Some("Plunder Patriarches")),
     SpecialKill("Phosphorus", "Phosphorus", "phosphorus"),
     SpecialKill("Goshnar's Megalomania", "Goshnar's Megalomania", "soulwar"),
-    SpecialKill("Bakragore", "Bakragore", "bakragore"),
-    SpecialKill("The Primal Menace", "The Primal Menace", "primal")
+    SpecialKill("Bakragore", "Bakragore", "bakragore", Some("Bakragores")),
+    SpecialKill("The Primal Menace", "The Primal Menace", "primal", Some("The Primal Menaces"))
   )
 
   private val byRace: Map[String, SpecialKill] = all.map(kill => kill.race.toLowerCase -> kill).toMap

@@ -92,16 +92,17 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  test("the date links through to the world") {
-    build(report(gains = List(delta("Arieswar", 900)))).getDescription should
-      include("https://www.tibia.com/community/?subtopic=worlds&world=Antica")
+  test("the date links through to the world's experience table, not its tibia.com page") {
+    val body = build(report(gains = List(delta("Arieswar", 900)))).getDescription
+    body should include("https://guildstats.eu/top-experience/Antica")
+    body should not include "subtopic=worlds"
   }
 
   test("a section with nothing in it is absent rather than an empty heading") {
     val embed = build(report(gains = List(delta("Arieswar", 900))))
     embed.getDescription should not include "Top Experience Lost"
     embed.getDescription should not include "Top Skill Advancement"
-    embed.getDescription should not include "Creature Stats"
+    embed.getDescription should not include "Kill Stats"
   }
 
   test("there are no fields at all") {
@@ -133,7 +134,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       gains = List(delta("Arieswar", 900)),
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965))))
-    embed.getDescription should not include "Creature Stats"
+    embed.getDescription should not include "Kill Stats"
     embed.getDescription should not include "flimsy lost souls"
   }
 
@@ -142,8 +143,18 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   private val gold = "<:gold:5>"
   private val creatureIcon = "<:creature:6>"
 
+  // Stands in for CreatureWiki, answering with a page title the way it does, so
+  // the rows below are cased off a real one. It matches everything, which makes
+  // the limits test measure the linked worst case; the row that resolves to
+  // nothing has a test of its own.
+  private val wiki: String => Option[String] = {
+    case "druid's apparitions" => Some("Druid's Apparition")
+    case "acolytes of the cult" => Some("Acolyte of the Cult")
+    case race => Some(race.split(" ").map(_.capitalize).mkString(" "))
+  }
+
   private def creature(r: DailyReport) =
-    StatisticsEmbeds.creatureStats(r, creatureIcon, gold, key => s"<:$key:9>")
+    StatisticsEmbeds.creatureStats(r, creatureIcon, gold, key => s"<:$key:9>", wiki)
 
   private def creatureBody(r: DailyReport) = creature(r).head.getDescription
 
@@ -151,10 +162,71 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     val body = creatureBody(report(
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965), killed("quara looters", 13))))
-    body should startWith(s"## $creatureIcon Creature Stats")
-    body should include("**23,965** flimsy lost souls killed")
-    body should include("**13** quara looters killed")
-    body.indexOf("flimsy") should be < body.indexOf("quara")
+    body should startWith(s"## $creatureIcon Kill Stats")
+    body should include("**23,965** [Flimsy Lost Souls](https://tibia.fandom.com/wiki/Flimsy_Lost_Souls)")
+    body should include("**13** [Quara Looters](https://tibia.fandom.com/wiki/Quara_Looters)")
+    body.indexOf("Flimsy") should be < body.indexOf("Quara")
+  }
+
+  test("the row reads the same linked or not, so an unresolved race loses only the link") {
+    val r = report(kills = Some(summary()), topKills = List(killed("cyclopes", 400)))
+    val linked = StatisticsEmbeds.creatureStats(r, creatureIcon, gold, _ => "", wiki)
+      .head.getDescription
+    val bare = StatisticsEmbeds.creatureStats(r, creatureIcon, gold, _ => "", _ => None)
+      .head.getDescription
+    bare should include("**400** Cyclopes")
+    bare should not include "]("
+    linked should include("**400** [Cyclopes](")
+    // Same words in the same order either way: only the href is added.
+    linked.replaceAll("""\[([^\]]+)\]\([^)]+\)""", "$1") shouldBe bare
+  }
+
+  test("no row repeats the verb the headings already carry") {
+    val body = creatureBody(report(
+      kills = Some(summary()),
+      topKills = List(killed("flimsy lost souls", 23965)),
+      specials = List(SpecialKills.all.head -> 3)))
+    body should include("Kill Stats")
+    body should include("Special Kills")
+    body should not include "killed"
+  }
+
+  test("a creature and a boss are dressed the same: both capitalised, both linked") {
+    val body = creatureBody(report(
+      kills = Some(summary()),
+      topKills = List(killed("flimsy lost souls", 23965)),
+      specials = List(SpecialKills.all.head -> 3)))
+    body should include("**23,965** [Flimsy Lost Souls](")
+    body should include("**3** [Plunder Patriarches](")
+    body should not include "flimsy lost souls"
+  }
+
+  test("the articles inside a name stay lowercase when the rest is capitalised") {
+    creatureBody(report(kills = Some(summary()), topKills = List(killed("acolytes of the cult", 12)))) should
+      include("**12** [Acolytes of the Cult](")
+  }
+
+  test("a possessive keeps its lowercase s, which no capitalisation rule could tell from Mooh'Tah") {
+    creatureBody(report(kills = Some(summary()), topKills = List(killed("druid's apparitions", 7)))) should
+      include("**7** [Druid's Apparitions](")
+  }
+
+  test("one of a special boss is singular, more than one is plural") {
+    val plunder = SpecialKills.all.head
+    plunder.plural shouldBe Some("Plunder Patriarches")
+    creatureBody(report(kills = Some(summary()), specials = List(plunder -> 1))) should
+      include("**1** [Plunder Patriarch](")
+    creatureBody(report(kills = Some(summary()), specials = List(plunder -> 4))) should
+      include("**4** [Plunder Patriarches](")
+  }
+
+  test("a named boss pluralises too, though the endpoint itself never does") {
+    val bakragore = SpecialKills.all.find(_.name == "Bakragore").get
+    bakragore.race shouldBe "Bakragore"  // the endpoint says this however many died
+    creatureBody(report(kills = Some(summary()), specials = List(bakragore -> 3))) should
+      include("**3** [Bakragores](")
+    creatureBody(report(kills = Some(summary()), specials = List(bakragore -> 1))) should
+      include("**1** [Bakragore](")
   }
 
   test("what killed the most players is not reported") {
@@ -168,14 +240,14 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       topKills = List(killed("dragon", 900)),
       specials = List(SpecialKills.all.head -> 3)))
     body should include(s"## $gold Special Kills")
-    body should include("<:plunder:9> **3** Plunder Patriarch killed")
+    body should include("<:plunder:9> **3** [Plunder Patriarches](https://tibia.fandom.com/wiki/Plunder_Patriarch)")
   }
 
   test("a special boss is shown by its name, not the race the endpoint counts it under") {
     val kill = SpecialKills.all.head
     kill.race shouldBe "plunder patriarches"
     val body = creatureBody(report(kills = Some(summary()), specials = List(kill -> 1)))
-    body should include("Plunder Patriarch killed")
+    body should include("**1** [Plunder Patriarch](")
     body should not include "patriarches"
   }
 
@@ -187,8 +259,8 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   test("a special boss with no configured emoji renders without one rather than with a gap") {
     val body = StatisticsEmbeds.creatureStats(
       report(kills = Some(summary()), specials = List(SpecialKills.all.head -> 2)),
-      news, gold, _ => "").head.getDescription
-    body should include("**2** Plunder Patriarch killed")
+      news, gold, _ => "", wiki).head.getDescription
+    body should include("**2** [Plunder Patriarches](")
     body should not include "  **2**"
   }
 

@@ -63,7 +63,7 @@ object StatisticsEmbeds {
       xpDown: String
   ): List[MessageEmbed] = {
     val sections = List(
-      Some(s"## $titleIcon [${report.saveDay.format(dayFormat)}](${Urls.worldUrl(report.world)})"),
+      Some(s"## $titleIcon [${report.saveDay.format(dayFormat)}](${Urls.topExperienceUrl(report.world)})"),
       Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
       Option.when(report.losses.nonEmpty)(
         section("Top Experience Lost", report.losses.map(gainLine(_, sideIcon, xpDown)))),
@@ -87,7 +87,11 @@ object StatisticsEmbeds {
    *  by then the board two minutes above it in the channel has already said
    *  which day this is.
    *
-   *  @param titleIcon   leads Creature Stats. Not the newspaper the board leads
+   *  No `killed` on the rows either. Both headings already say what the figures
+   *  count, and repeating the verb on every row spends the width on the one word
+   *  that never varies.
+   *
+   *  @param titleIcon   leads Kill Stats. Not the newspaper the board leads
    *                     with: this half often goes out as its own message, where
    *                     a second newspaper reads as a second bulletin rather than
    *                     the other half of one
@@ -97,18 +101,34 @@ object StatisticsEmbeds {
    *  @param specialIcon the configured emoji for a special boss, by its key;
    *                     empty for one nothing is configured for, which renders as
    *                     no icon rather than a gap
+   *  @param creatureTitle the wiki's page title for a name — asked for both
+   *                     lists, by the reported race for a creature and by its
+   *                     own title for a boss. It is the title rather than the
+   *                     URL because the row needs both halves of it: the link,
+   *                     and the wiki's spelling to print the race in. None for
+   *                     anything unmatched, which prints unlinked rather than
+   *                     differently; see [[CreatureWiki]] for why that is cheap
    */
   def creatureStats(report: DailyReport, titleIcon: String, goldIcon: String,
-                    specialIcon: String => String): List[MessageEmbed] = {
-    val creatures = report.topKills.map(row =>
-      s"**${StatLines.number(row.killed.toLong)}** ${row.race} killed")
+                    specialIcon: String => String,
+                    creatureTitle: String => Option[String]): List[MessageEmbed] = {
+    val creatures = report.topKills.map { row =>
+      // Looked up by the race as reported; printed in the casing of whatever
+      // page that matched, which is the only thing that knows whether the
+      // apostrophe in this one is Mooh'Tah or Druid's.
+      val title = creatureTitle(row.race)
+      val shown = title.fold(Urls.titleCase(row.race))(CreatureWiki.casedLike(row.race, _))
+      s"**${StatLines.number(row.killed.toLong)}** ${linked(shown, title)}"
+    }
     val specials = report.specialKills.map { case (kill, count) =>
       val icon = specialIcon(kill.emoji)
       val lead = if (icon.isEmpty) "" else s"$icon "
-      s"$lead**${StatLines.number(count.toLong)}** ${kill.name} killed"
+      // A boss carries its own spelling, singular and plural, so nothing here
+      // is derived — the title is looked up only for somewhere to link to.
+      s"$lead**${StatLines.number(count.toLong)}** ${linked(kill.nameFor(count), creatureTitle(kill.name))}"
     }
     val sections = List(
-      Option.when(creatures.nonEmpty)((s"## $titleIcon Creature Stats" :: creatures).mkString("\n")),
+      Option.when(creatures.nonEmpty)((s"## $titleIcon Kill Stats" :: creatures).mkString("\n")),
       Option.when(specials.nonEmpty)((s"## $goldIcon Special Kills" :: specials).mkString("\n"))
     ).flatten
 
@@ -121,6 +141,17 @@ object StatisticsEmbeds {
    *
    *  The label carries no emoji: the `##` title above it has one, and repeating
    *  the trick on every `###` under that turns a hierarchy into a row of badges. */
+  /** A name as the post prints it, linked to its wiki page where there is one.
+   *
+   *  Both lists go through here so a boss and a creature are dressed the same:
+   *  the visible difference between the two sections should be the figure, not
+   *  whether the name is a link.
+   *
+   *  @param shown what the row reads
+   *  @param title the wiki page it matched, if it matched one */
+  private def linked(shown: String, title: Option[String]): String =
+    title.fold(shown)(page => s"[$shown](${CreatureWiki.urlForTitle(page)})")
+
   private def section(title: String, rows: List[String]): String =
     (s"### $title" :: rows).mkString("\n")
 
