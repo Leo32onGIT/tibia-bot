@@ -75,8 +75,9 @@ final class DreamCourtService(
    *  is there. */
   def correct(fromWiki: Map[String, String], today: LocalDate): Map[String, String] = {
     val healing = mode() == DreamCourtMode.Heal
+    val history = kills(today)
     val corrections = fromWiki.keys.toList.sorted.flatMap { world =>
-      divergence(world, fromWiki.get(world), today).map(world -> _)
+      divergence(world, fromWiki.get(world), history.getOrElse(world, Nil), today).map(world -> _)
     }
 
     if (corrections.isEmpty) fromWiki
@@ -90,11 +91,26 @@ final class DreamCourtService(
     }
   }
 
+  /** Every world's Dream Courts kills over the window, keyed by world.
+   *
+   *  One query for the fleet rather than one per world. A failure loses the
+   *  whole correction rather than one world's, which is the same direction the
+   *  per-world catch pointed in anyway: the wiki keeps every world it already
+   *  had, and the next server save tries again. */
+  private def kills(today: LocalDate): Map[String, List[BossKills]] =
+    try killStatistics.dailyCounts(today.minusDays(window.toLong), races)
+    catch {
+      case NonFatal(error) =>
+        logger.warn(s"Dream Courts: could not read the kill history: ${error.getMessage}")
+        Map.empty
+    }
+
   /** One world's verdict, if it both says something and says something
    *  different. Logged either way, because the whole point of the observe mode
    *  is that the disagreements are readable before they are acted on. */
-  private def divergence(world: String, wikiBoss: Option[String], today: LocalDate): Option[DreamCourtVerdict] =
-    evidence(world, today).filter { verdict =>
+  private def divergence(world: String, wikiBoss: Option[String], rows: List[BossKills],
+                         today: LocalDate): Option[DreamCourtVerdict] =
+    DreamCourtEvidence.verdict(rows, today, minDays, minLead).filter { verdict =>
       val differs = !wikiBoss.exists(_.equalsIgnoreCase(verdict.boss))
       if (differs)
         logger.info(s"Dream Courts: '$world' killed ${verdict.boss} on ${verdict.votes} of " +
@@ -104,15 +120,6 @@ final class DreamCourtService(
         logger.debug(s"Dream Courts: '$world' agrees with the wiki on ${verdict.boss} " +
           s"(${verdict.votes} of ${verdict.days})")
       differs
-    }
-
-  private def evidence(world: String, today: LocalDate): Option[DreamCourtVerdict] =
-    try DreamCourtEvidence.verdict(
-      killStatistics.dailyCounts(world, today.minusDays(window.toLong), races), today, minDays, minLead)
-    catch {
-      case NonFatal(error) =>
-        logger.warn(s"Dream Courts: could not read the kill history for '$world': ${error.getMessage}")
-        None
     }
 }
 

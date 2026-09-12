@@ -144,8 +144,8 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       rows.toList
     }
 
-  def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] =
-    if (races.isEmpty) Nil
+  def dailyCounts(from: LocalDate, races: Set[String]): Map[String, List[BossKills]] =
+    if (races.isEmpty) Map.empty
     else JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       // LOWER() on both sides rather than trusting the stored casing: these rows
       // are written from the endpoint's own spelling and read against a list
@@ -153,22 +153,25 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       val placeholders = races.toList.map(_ => "?").mkString(",")
       val statement = conn.prepareStatement(
         s"""
-           |SELECT race,save_day,killed,players_killed
+           |SELECT world,race,save_day,killed,players_killed
            |FROM kill_statistics_boss
-           |WHERE world = ? AND save_day >= ? AND LOWER(race) IN ($placeholders)
-           |ORDER BY save_day DESC, race ASC;
+           |WHERE save_day >= ? AND LOWER(race) IN ($placeholders)
+           |ORDER BY world ASC, save_day DESC, race ASC;
            |""".stripMargin
       )
-      statement.setString(1, world)
-      statement.setDate(2, SqlDate.valueOf(from))
+      statement.setDate(1, SqlDate.valueOf(from))
       races.toList.map(_.toLowerCase).zipWithIndex.foreach {
-        case (race, index) => statement.setString(index + 3, race)
+        case (race, index) => statement.setString(index + 2, race)
       }
       val result = statement.executeQuery()
 
-      val rows = new ListBuffer[BossKills]()
+      // Grouped as they arrive, which the ORDER BY has already put in world
+      // order, so each world's rows are one contiguous run and the buffers are
+      // only ever appended to.
+      val byWorld = scala.collection.mutable.LinkedHashMap.empty[String, ListBuffer[BossKills]]
       while (result.next()) {
-        rows += BossKills(
+        val world = Option(result.getString("world")).getOrElse("")
+        byWorld.getOrElseUpdate(world, new ListBuffer[BossKills]()) += BossKills(
           world = world,
           saveDay = result.getDate("save_day").toLocalDate,
           race = Option(result.getString("race")).getOrElse(""),
@@ -178,7 +181,7 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       }
 
       statement.close()
-      rows.toList
+      byWorld.map { case (world, rows) => world -> rows.toList }.toMap
     }
 
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] =

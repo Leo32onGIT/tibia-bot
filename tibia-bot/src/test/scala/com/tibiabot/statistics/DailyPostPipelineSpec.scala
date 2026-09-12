@@ -98,9 +98,13 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
         .groupBy(_._1).map { case (race, entries) => race -> entries.map(_._2).sortBy(_._1).reverse }
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] =
       bosses.getOrElse((world, saveDay), Nil).filter(_.killed > 0).sortBy(row => (-row.killed, row.race))
-    def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] =
-      bosses.toList.collect { case ((w, day), rows) if w == world && !day.isBefore(from) => rows }
-        .flatten.filter(row => races.contains(row.race.toLowerCase))
+    def dailyCounts(from: LocalDate, races: Set[String]): Map[String, List[BossKills]] =
+      bosses.toList.collect { case ((world, day), rows) if !day.isBefore(from) => world -> rows }
+        .groupBy { case (world, _) => world }
+        .map { case (world, entries) =>
+          world -> entries.flatMap { case (_, rows) => rows }
+            .filter(row => races.contains(row.race.toLowerCase))
+        }
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = summaries.get((world, saveDay))
     def removeExpired(before: LocalDate): Unit = ()
   }

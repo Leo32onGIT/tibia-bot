@@ -66,7 +66,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     def hasDay(world: String, saveDay: LocalDate): Boolean = false
     def sightings(world: String): Map[String, List[(LocalDate, Int)]] = seen
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] = raceRows
-    def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] = Nil
+    def dailyCounts(from: LocalDate, races: Set[String]): Map[String, List[BossKills]] = Map.empty
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = {
       if (fail) throw new RuntimeException("cache is away")
       days.get((world, saveDay))

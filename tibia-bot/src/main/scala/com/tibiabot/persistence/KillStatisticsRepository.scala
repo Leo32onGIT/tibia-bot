@@ -56,14 +56,23 @@ trait KillStatisticsRepository {
    *  taking the first ten is the ten the post means. */
   def killsOn(world: String, saveDay: LocalDate): List[BossKills]
 
-  /** One world's daily counts for a named set of races since `from`, zeros
-   *  included.
+  /** Every world's daily counts for a named set of races since `from`, keyed by
+   *  world, zeros included.
    *
    *  For [[com.tibiabot.statistics.DreamCourtEvidence]], which weighs the five
    *  Dream Courts bosses against each other day by day. The zeros are the point:
    *  a day one of them was not killed is evidence about which boss was available,
-   *  so "no row" and "zero" have to stay distinguishable. */
-  def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills]
+   *  so "no row" and "zero" have to stay distinguishable.
+   *
+   *  Every world at once rather than one at a time, because the caller wants
+   *  the lot: it walks the whole wiki map each server save, which was a hundred
+   *  and eleven round trips for five races. Narrowing by world is also what
+   *  stopped the query using an index — `LOWER(race)` cannot be matched against
+   *  the key's own race column, so each of those scanned its world's whole
+   *  window anyway. Dropping the world leaves one scan of the day range, which
+   *  the `save_day` index does serve, and it reads fewer rows in total than the
+   *  hundred and eleven did between them. */
+  def dailyCounts(from: LocalDate, races: Set[String]): Map[String, List[BossKills]]
 
   def summary(world: String, saveDay: LocalDate): Option[DayKillSummary]
 
