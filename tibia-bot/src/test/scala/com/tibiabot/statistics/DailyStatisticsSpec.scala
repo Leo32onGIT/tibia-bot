@@ -67,29 +67,9 @@ class DailyStatisticsSpec extends AnyFunSuite with Matchers {
     Duration.between(from, to).toHours shouldBe 23
   }
 
-  // --- what counts as a gain ----------------------------------------------
-
-  test("gains are the biggest movers, largest first") {
-    val movers = List(delta("Bubble", 50), delta("Arieswar", 900), delta("Mateusz", 300))
-    DailyStatistics.gains(movers).map(_.displayName) shouldBe List("Arieswar", "Mateusz", "Bubble")
-  }
-
-  test("gains stop at the limit") {
-    val movers = (1 to 30).toList.map(n => delta(s"Char$n", n.toLong))
-    DailyStatistics.gains(movers) should have size DailyStatistics.TopGains
-    DailyStatistics.gains(movers, 3).map(_.gained) shouldBe List(30L, 29L, 28L)
-  }
-
-  test("somebody who lost experience is never listed under gains") {
-    // On a quiet world a loser can surface inside the top ten of a query ordered
-    // by the delta. Listing them under "top experience gained" would be wrong.
-    val movers = List(delta("Bubble", 900), delta("Arieswar", -4000), delta("Mateusz", 0))
-    DailyStatistics.gains(movers).map(_.displayName) shouldBe List("Bubble")
-  }
-
-  test("a day where nobody gained anything is empty rather than padded") {
-    DailyStatistics.gains(List(delta("Arieswar", -4000), delta("Bubble", 0))) shouldBe Nil
-  }
+  // What counts as a gain, and what counts as a loss, is the query's — see
+  // ExperienceRepositoryIntegrationSpec, which reads both ends back off a real
+  // Postgres. Neither has a counterpart here to test.
 
   // --- the report ---------------------------------------------------------
 

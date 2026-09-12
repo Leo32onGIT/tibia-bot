@@ -105,23 +105,7 @@ object DailyStatistics {
     (from.toInstant, to.toInstant)
   }
 
-  /** The day's gains, largest first, trimmed to what the post names.
-   *
-   *  A zero or negative delta is not a gain and is dropped even when it survives
-   *  the query's ordering — on a very quiet world the tenth-placed mover can be
-   *  somebody who simply died, and listing them under "top experience gained"
-   *  would be wrong. That leaves the list short rather than padded, which is
-   *  the honest shape. */
-  def gains(movers: List[ExperienceDelta], limit: Int = TopGains): List[ExperienceDelta] =
-    movers.filter(_.gained > 0).sortBy(-_.gained).take(limit)
-
   /** How many losers the post names. Half the gainers: a day's losses are one
-   *  story — who died badly — where the gains are a leaderboard.
-   *
-   *  There is no `losses` to match [[gains]]: the rule that a loss must actually
-   *  be negative is stated in
-   *  [[com.tibiabot.persistence.ExperienceRepository.dailyLosses]], which is the
-   *  end of the ordering the post reads, so a second statement of it here was
-   *  only ever a second place to get it wrong. */
+   *  story — who died badly — where the gains are a leaderboard. */
   val TopLosses: Int = 5
 }

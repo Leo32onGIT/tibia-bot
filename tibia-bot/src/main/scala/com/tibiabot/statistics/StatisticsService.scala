@@ -168,11 +168,6 @@ final class StatisticsService(
   private def report(world: String, day: LocalDate, kills: Option[DayKillSummary]): Option[DailyReport] =
     try {
       val (from, to) = DailyStatistics.window(day)
-      // One row deeper than the post shows: the query orders by the delta, and
-      // a mover who lost experience can still surface inside the top ten on a
-      // quiet world. DailyStatistics.gains drops them, and asking for the extra
-      // rows means dropping one does not silently shorten the list.
-      val movers = experience.dailyMovers(world, day, DailyStatistics.TopGains * 2)
       // One query for every boss on the world rather than seventy-four, over the
       // whole retained history: a world boss counts in months, so narrowing this
       // to recent days would hide exactly the bosses worth predicting.
@@ -190,7 +185,7 @@ final class StatisticsService(
       Some(DailyReport(
         world = world,
         saveDay = day,
-        gains = DailyStatistics.gains(movers),
+        gains = experience.dailyGains(world, day, DailyStatistics.TopGains),
         losses = experience.dailyLosses(world, day, DailyStatistics.TopLosses),
         advance = highscores.topAdvance(world, from, to),
         // Read by the caller, because whether it is there is what decided this

@@ -76,7 +76,7 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     val dailies = mutable.ListBuffer.empty[(String, Int, LocalDate)]
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit =
       dailies += ((world, entries.size, saveDay))
-    def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
     def removeExpiredDaily(before: LocalDate): Unit = ()

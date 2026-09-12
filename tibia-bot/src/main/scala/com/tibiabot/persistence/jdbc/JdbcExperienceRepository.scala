@@ -42,11 +42,11 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
       statement.close()
     }
 
-  def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
-    movers(world, saveDay, "DESC", lossesOnly = false, limit)
+  def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
+    movers(world, saveDay, ">", "DESC", limit)
 
   def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
-    movers(world, saveDay, "ASC", lossesOnly = true, limit)
+    movers(world, saveDay, "<", "ASC", limit)
 
   /** A day's rows joined to the day before, which is where every figure the
    *  statistics post reports comes from.
@@ -73,22 +73,24 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
       | AND before.save_day = ?
       |WHERE today.world = ? AND today.save_day = ?""".stripMargin
 
-  /** Either end of the day's ordering.
+  /** Either end of the day's ordering, which differ only in which way they face.
    *
-   *  `direction` and `lossesOnly` are literals chosen here, never user input.
+   *  `comparison` and `direction` are literals chosen here, never user input.
    *
-   *  `lossesOnly` pushes the "a loss must actually be negative" rule into the
-   *  query, where `lossesAmong` already had it. Against an ASC ordering it is
-   *  the same answer either way — every negative sorts before every gain, so the
-   *  limit reaches the same rows — and the list still comes back short on a
-   *  world where almost everybody gained, which is the honest shape rather than
-   *  gains printed under a heading that says losses. */
-  private def movers(world: String, saveDay: LocalDate, direction: String,
-                     lossesOnly: Boolean, limit: Int): List[ExperienceDelta] =
+   *  Both ends exclude the middle in the query rather than afterwards.
+   *  A mover who stood still is neither a gain nor a loss, and on a quiet world
+   *  they reach well inside either top ten — printed under a heading that says
+   *  gained or lost, they would be a plain untruth. Excluding them here is the
+   *  same answer a filter on the results gives, since every loss sorts before
+   *  every gain, and it means the caller has nothing left to remember. */
+  private def movers(world: String, saveDay: LocalDate, comparison: String, direction: String,
+                     limit: Int): List[ExperienceDelta] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val onlyLosses = if (lossesOnly) "\n  AND today.experience < before.experience" else ""
       val statement = conn.prepareStatement(
-        s"$deltaSelect$onlyLosses\nORDER BY gained $direction\nLIMIT ?;")
+        s"""$deltaSelect
+           |  AND today.experience $comparison before.experience
+           |ORDER BY gained $direction
+           |LIMIT ?;""".stripMargin)
       statement.setInt(bindDay(statement, world, saveDay), limit)
       val rows = readDeltas(statement)
       statement.close()

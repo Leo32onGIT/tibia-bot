@@ -30,14 +30,17 @@ trait ExperienceRepository {
    *  for the day before it, so a character present in only one of them is left
    *  out entirely: entering the world's top thousand is not a day's experience,
    *  and neither is dropping out of it. That also means the first `saveDay` a
-   *  world was ever swept has no movers at all, which is the correct answer
+   *  world was ever swept has nothing to report, which is the correct answer
    *  rather than a gap to paper over.
    *
-   *  Gains only — [[dailyLosses]] is the other end of the same ordering. */
-  def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
+   *  Only real gains, which the query itself enforces — on a very quiet world
+   *  the tenth-placed mover can be somebody who simply died, and listing them
+   *  under "top experience gained" would be wrong. So this comes back shorter
+   *  than `limit` on a quiet day, the same way [[dailyLosses]] does. */
+  def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
 
   /** The largest experience losses on one world that day, worst first. Same join
-   *  and same exclusions as [[dailyMovers]], read from the other end.
+   *  and same exclusions as [[dailyGains]], read from the other end.
    *
    *  Only real losses, which the query itself enforces — on a world where
    *  almost everybody gained, the bottom of the ordering is still a gain, and

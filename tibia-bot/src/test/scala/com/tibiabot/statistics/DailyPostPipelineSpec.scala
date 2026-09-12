@@ -111,7 +111,7 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
 
   private class StubExperience extends ExperienceRepository {
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
-    def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
+    def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
       List(ExperienceDelta("bubble", "Bubble", "Elite Knight", 400, 399, 1000000L, 900L))
     def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
     def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil

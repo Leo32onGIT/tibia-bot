@@ -9,7 +9,7 @@ import java.time.LocalDate
 
 /** Round-trips ExperienceRepository against a real Postgres (cancels without PGHOST).
  *
- *  Everything is read back through `dailyMovers`, `dailyLosses` and `lossesAmong`,
+ *  Everything is read back through `dailyGains`, `dailyLosses` and `lossesAmong`,
  *  which are the only three queries production runs against this table. There
  *  used to be a plain `daily` reader used here and nowhere else; reading through
  *  the real ones instead means these tests also cover the self-join that decides
@@ -43,7 +43,7 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.recordDaily(world, List(entry("Bubble", 1400L)), day)
     repo.recordDaily(world, List(entry("Bubble", 1500L, level = 401)), day)
 
-    val movers = repo.dailyMovers(world, day, 10)
+    val movers = repo.dailyGains(world, day, 10)
     movers should have size 1
     // 500, not 900: the second write replaced the first rather than adding to it.
     movers.head.gained shouldBe 500L
@@ -60,11 +60,11 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.recordDaily(world, List(entry("Bubble", 2500L)), day.plusDays(1))
     repo.recordDaily(world, List(entry("Bubble", 4000L)), day.plusDays(2))
 
-    repo.dailyMovers(world, day.plusDays(1), 10).map(_.gained) shouldBe List(1500L)
-    repo.dailyMovers(world, day.plusDays(2), 10).map(_.gained) shouldBe List(1500L)
+    repo.dailyGains(world, day.plusDays(1), 10).map(_.gained) shouldBe List(1500L)
+    repo.dailyGains(world, day.plusDays(2), 10).map(_.gained) shouldBe List(1500L)
     // The first day has no day before it, so it has no gain at all — entering
     // the board is not a day's experience.
-    repo.dailyMovers(world, day, 10) shouldBe empty
+    repo.dailyGains(world, day, 10) shouldBe empty
   }
 
   test("names are keyed case-insensitively across the join") {
@@ -74,7 +74,7 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.recordDaily(world, List(entry("bubble", 1200L)), day)
 
     // One character, not two, and the differing casing still joins.
-    val movers = repo.dailyMovers(world, day, 10)
+    val movers = repo.dailyGains(world, day, 10)
     movers should have size 1
     movers.head.gained shouldBe 200L
   }
@@ -87,8 +87,8 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.recordDaily(world, List(
       entry("Bubble", 1500L), entry("Arieswar", 9000L), entry("Kharsek", 1100L)), day)
 
-    repo.dailyMovers(world, day, 10).map(_.displayName) shouldBe List("Arieswar", "Bubble", "Kharsek")
-    repo.dailyMovers(world, day, 2).map(_.displayName) shouldBe List("Arieswar", "Bubble")
+    repo.dailyGains(world, day, 10).map(_.displayName) shouldBe List("Arieswar", "Bubble", "Kharsek")
+    repo.dailyGains(world, day, 2).map(_.displayName) shouldBe List("Arieswar", "Bubble")
   }
 
   test("the day's worst loss is the other end of the same ordering") {
@@ -100,6 +100,30 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
 
     repo.dailyLosses(world, day, 5).map(_.displayName) shouldBe List("Unlucky")
     repo.dailyLosses(world, day, 5).map(_.gained) shouldBe List(-5000L)
+  }
+
+  test("somebody who ended the day down is never listed under gains") {
+    val repo = freshRepo()
+    baseline(repo, "Bubble", 1000L)
+    baseline(repo, "Unlucky", 9000L)
+    baseline(repo, "Idle", 5000L)
+
+    repo.recordDaily(world, List(
+      entry("Bubble", 1500L), entry("Unlucky", 4000L), entry("Idle", 5000L)), day)
+
+    // On a quiet world a loser reaches well inside the top ten of an ordering by
+    // the delta, and so does somebody who did not move at all. Under a heading
+    // that says "top experience gained" either would be a plain untruth, so the
+    // query excludes them rather than the caller.
+    repo.dailyGains(world, day, 10).map(_.displayName) shouldBe List("Bubble")
+  }
+
+  test("a day nobody gained anything on is empty rather than padded") {
+    val repo = freshRepo()
+    baseline(repo, "Unlucky", 9000L)
+    repo.recordDaily(world, List(entry("Unlucky", 4000L)), day)
+
+    repo.dailyGains(world, day, 10) shouldBe Nil
   }
 
   test("a day nobody ended down has no loss to report") {
@@ -129,12 +153,12 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     baseline(repo, "Bubble", 1000L)
     repo.recordDaily(world, List(entry("Bubble", 2000L)), day)
 
-    repo.dailyMovers(world, day, 10) should have size 1
+    repo.dailyGains(world, day, 10) should have size 1
 
     // Dropping the day before takes the baseline with it, so the join finds
     // nothing even though today's row is still there.
     repo.removeExpiredDaily(day)
-    repo.dailyMovers(world, day, 10) shouldBe empty
+    repo.dailyGains(world, day, 10) shouldBe empty
   }
 
   test("a page-set carrying the same character twice takes the last reading") {
@@ -143,6 +167,6 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
 
     repo.recordDaily(world, List(entry("Bubble", 1050L), entry("Bubble", 1100L)), day)
 
-    repo.dailyMovers(world, day, 10).map(_.gained) shouldBe List(100L)
+    repo.dailyGains(world, day, 10).map(_.gained) shouldBe List(100L)
   }
 }

@@ -60,7 +60,7 @@ final case class HighscoreEvent(
  *  Only characters present in both days' rollups can have one of these. A
  *  character who entered the world's top thousand today has no baseline, and
  *  "entered the list" is not a day's experience — see
- *  [[com.tibiabot.persistence.ExperienceRepository.dailyMovers]]. */
+ *  [[com.tibiabot.persistence.ExperienceRepository.dailyGains]]. */
 final case class ExperienceDelta(
     name: String,
     displayName: String,
