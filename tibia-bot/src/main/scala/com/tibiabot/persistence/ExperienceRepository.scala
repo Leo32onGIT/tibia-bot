@@ -39,10 +39,11 @@ trait ExperienceRepository {
   /** The largest experience losses on one world that day, worst first. Same join
    *  and same exclusions as [[dailyMovers]], read from the other end.
    *
-   *  Shorter than `limit` on a quiet day, and empty where nobody ended the day
-   *  down: the query orders by the delta, so on a world where almost everybody
-   *  gained, the bottom of that ordering is still a gain. Those are dropped
-   *  rather than listed under a heading that says they are losses. */
+   *  Only real losses, which the query itself enforces — on a world where
+   *  almost everybody gained, the bottom of the ordering is still a gain, and
+   *  listing those under a heading that says losses would be wrong. So this
+   *  comes back shorter than `limit` on a quiet day and empty where nobody
+   *  ended the day down, which is the honest shape rather than a padded one. */
   def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
 
   /** The largest experience losses that day among a named set of characters,

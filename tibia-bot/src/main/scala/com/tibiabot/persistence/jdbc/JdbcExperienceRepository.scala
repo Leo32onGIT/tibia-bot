@@ -5,7 +5,7 @@ import com.tibiabot.highscores.HighscoreDiff
 import com.tibiabot.persistence.{ConnectionProvider, ExperienceRepository}
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
-import java.sql.{Date => SqlDate, Timestamp}
+import java.sql.{Date => SqlDate, PreparedStatement, ResultSet}
 import java.time.LocalDate
 import scala.collection.mutable.ListBuffer
 
@@ -43,60 +43,56 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
     }
 
   def dailyMovers(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
-    movers(world, saveDay, "DESC", limit)
+    movers(world, saveDay, "DESC", lossesOnly = false, limit)
 
   def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
-    movers(world, saveDay, "ASC", limit).filter(_.gained < 0)
+    movers(world, saveDay, "ASC", lossesOnly = true, limit)
 
-  /** Both ends of the day's ordering, which differ only in direction.
+  /** A day's rows joined to the day before, which is where every figure the
+   *  statistics post reports comes from.
    *
-   *  An inner join against the previous day is what drops the characters who
-   *  have no baseline, so the exclusion is the join rather than a filter that
-   *  could be forgotten. `direction` is a literal chosen here, never user input.
-   */
-  private def movers(world: String, saveDay: LocalDate, direction: String, limit: Int): List[ExperienceDelta] =
+   *  The inner join is what drops the characters who have no baseline — entering
+   *  the world's top thousand is not a day's experience, and neither is dropping
+   *  out of it — so the exclusion is the join rather than a filter somewhere
+   *  else that could be forgotten.
+   *
+   *  Shared by all three readers below, which differ only in what they order by
+   *  and what they add to this WHERE. */
+  private val deltaSelect =
+    """SELECT today.name,
+      |       today.display_name,
+      |       today.vocation,
+      |       today.char_level,
+      |       today.experience,
+      |       before.char_level AS previous_level,
+      |       today.experience - before.experience AS gained
+      |FROM experience_daily today
+      |JOIN experience_daily before
+      |  ON before.world = today.world
+      | AND before.name = today.name
+      | AND before.save_day = ?
+      |WHERE today.world = ? AND today.save_day = ?""".stripMargin
+
+  /** Either end of the day's ordering.
+   *
+   *  `direction` and `lossesOnly` are literals chosen here, never user input.
+   *
+   *  `lossesOnly` pushes the "a loss must actually be negative" rule into the
+   *  query, where `lossesAmong` already had it. Against an ASC ordering it is
+   *  the same answer either way — every negative sorts before every gain, so the
+   *  limit reaches the same rows — and the list still comes back short on a
+   *  world where almost everybody gained, which is the honest shape rather than
+   *  gains printed under a heading that says losses. */
+  private def movers(world: String, saveDay: LocalDate, direction: String,
+                     lossesOnly: Boolean, limit: Int): List[ExperienceDelta] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val onlyLosses = if (lossesOnly) "\n  AND today.experience < before.experience" else ""
       val statement = conn.prepareStatement(
-        s"""
-           |SELECT today.name,
-           |       today.display_name,
-           |       today.vocation,
-           |       today.char_level,
-           |       today.experience,
-           |       before.char_level AS previous_level,
-           |       today.experience - before.experience AS gained
-           |FROM experience_daily today
-           |JOIN experience_daily before
-           |  ON before.world = today.world
-           | AND before.name = today.name
-           | AND before.save_day = ?
-           |WHERE today.world = ? AND today.save_day = ?
-           |ORDER BY gained $direction
-           |LIMIT ?;
-           |""".stripMargin
-      )
-      statement.setDate(1, SqlDate.valueOf(saveDay.minusDays(1)))
-      statement.setString(2, world)
-      statement.setDate(3, SqlDate.valueOf(saveDay))
-      statement.setInt(4, limit)
-      val result = statement.executeQuery()
-
-      val deltas = new ListBuffer[ExperienceDelta]()
-      while (result.next()) {
-        val key = Option(result.getString("name")).getOrElse("")
-        deltas += ExperienceDelta(
-          name = key,
-          displayName = Option(result.getString("display_name")).getOrElse(key),
-          vocation = Option(result.getString("vocation")).getOrElse(""),
-          level = result.getInt("char_level"),
-          previousLevel = result.getInt("previous_level"),
-          experience = result.getLong("experience"),
-          gained = result.getLong("gained")
-        )
-      }
-
+        s"$deltaSelect$onlyLosses\nORDER BY gained $direction\nLIMIT ?;")
+      statement.setInt(bindDay(statement, world, saveDay), limit)
+      val rows = readDeltas(statement)
       statement.close()
-      deltas.toList
+      rows
     }
 
   def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] =
@@ -106,51 +102,51 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
       // input reaching here directly, but it is still bound rather than spliced.
       val placeholders = List.fill(names.size)("?").mkString(",")
       val statement = conn.prepareStatement(
-        s"""
-           |SELECT today.name,
-           |       today.display_name,
-           |       today.vocation,
-           |       today.char_level,
-           |       today.experience,
-           |       before.char_level AS previous_level,
-           |       today.experience - before.experience AS gained
-           |FROM experience_daily today
-           |JOIN experience_daily before
-           |  ON before.world = today.world
-           | AND before.name = today.name
-           | AND before.save_day = ?
-           |WHERE today.world = ? AND today.save_day = ?
+        s"""$deltaSelect
            |  AND today.name IN ($placeholders)
            |  AND today.experience < before.experience
            |ORDER BY gained ASC
-           |LIMIT ?;
-           |""".stripMargin
-      )
-      statement.setDate(1, SqlDate.valueOf(saveDay.minusDays(1)))
-      statement.setString(2, world)
-      statement.setDate(3, SqlDate.valueOf(saveDay))
+           |LIMIT ?;""".stripMargin)
+      val next = bindDay(statement, world, saveDay)
       val ordered = names.toList
-      ordered.zipWithIndex.foreach { case (name, index) => statement.setString(4 + index, name.toLowerCase) }
-      statement.setInt(4 + ordered.size, limit)
-      val result = statement.executeQuery()
-
-      val deltas = new ListBuffer[ExperienceDelta]()
-      while (result.next()) {
-        val key = Option(result.getString("name")).getOrElse("")
-        deltas += ExperienceDelta(
-          name = key,
-          displayName = Option(result.getString("display_name")).getOrElse(key),
-          vocation = Option(result.getString("vocation")).getOrElse(""),
-          level = result.getInt("char_level"),
-          previousLevel = result.getInt("previous_level"),
-          experience = result.getLong("experience"),
-          gained = result.getLong("gained")
-        )
-      }
-
+      ordered.zipWithIndex.foreach { case (name, index) => statement.setString(next + index, name.toLowerCase) }
+      statement.setInt(next + ordered.size, limit)
+      val rows = readDeltas(statement)
       statement.close()
-      deltas.toList
+      rows
     }
+
+  /** The three parameters [[deltaSelect]] opens with — the baseline day, the
+   *  world, and the day itself — bound in that order. Returns the next free
+   *  index, so a caller's own parameters do not have to count them again. */
+  private def bindDay(statement: PreparedStatement, world: String, saveDay: LocalDate): Int = {
+    statement.setDate(1, SqlDate.valueOf(saveDay.minusDays(1)))
+    statement.setString(2, world)
+    statement.setDate(3, SqlDate.valueOf(saveDay))
+    4
+  }
+
+  private def readDeltas(statement: PreparedStatement): List[ExperienceDelta] = {
+    val result = statement.executeQuery()
+    val deltas = new ListBuffer[ExperienceDelta]()
+    while (result.next()) deltas += delta(result)
+    deltas.toList
+  }
+
+  /** One row. The stored name is the lowercased key, so it stands in for a
+   *  display name that was never recorded. */
+  private def delta(result: ResultSet): ExperienceDelta = {
+    val key = Option(result.getString("name")).getOrElse("")
+    ExperienceDelta(
+      name = key,
+      displayName = Option(result.getString("display_name")).getOrElse(key),
+      vocation = Option(result.getString("vocation")).getOrElse(""),
+      level = result.getInt("char_level"),
+      previousLevel = result.getInt("previous_level"),
+      experience = result.getLong("experience"),
+      gained = result.getLong("gained")
+    )
+  }
 
   def removeExpiredDaily(before: LocalDate): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
