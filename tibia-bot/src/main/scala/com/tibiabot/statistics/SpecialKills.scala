@@ -36,7 +36,8 @@ object SpecialKills {
     SpecialKill("Plunder Patriarch", "plunder patriarches", "plunder"),
     SpecialKill("Phosphorus", "Phosphorus", "phosphorus"),
     SpecialKill("Goshnar's Megalomania", "Goshnar's Megalomania", "soulwar"),
-    SpecialKill("Bakragore", "Bakragore", "bakragore")
+    SpecialKill("Bakragore", "Bakragore", "bakragore"),
+    SpecialKill("The Primal Menace", "The Primal Menace", "primal")
   )
 
   private val byRace: Map[String, SpecialKill] = all.map(kill => kill.race.toLowerCase -> kill).toMap
