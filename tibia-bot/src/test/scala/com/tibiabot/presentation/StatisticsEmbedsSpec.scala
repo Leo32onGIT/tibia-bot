@@ -140,9 +140,10 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   // --- the creature embed --------------------------------------------------
 
   private val gold = "<:gold:5>"
+  private val creatureIcon = "<:creature:6>"
 
   private def creature(r: DailyReport) =
-    StatisticsEmbeds.creatureStats(r, news, gold, key => s"<:$key:9>")
+    StatisticsEmbeds.creatureStats(r, creatureIcon, gold, key => s"<:$key:9>")
 
   private def creatureBody(r: DailyReport) = creature(r).head.getDescription
 
@@ -150,7 +151,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     val body = creatureBody(report(
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965), killed("quara looters", 13))))
-    body should startWith(s"## $news Creature Stats")
+    body should startWith(s"## $creatureIcon Creature Stats")
     body should include("**23,965** flimsy lost souls killed")
     body should include("**13** quara looters killed")
     body.indexOf("flimsy") should be < body.indexOf("quara")

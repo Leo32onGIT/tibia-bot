@@ -87,8 +87,10 @@ object StatisticsEmbeds {
    *  by then the board two minutes above it in the channel has already said
    *  which day this is.
    *
-   *  @param titleIcon   the newspaper the board leads with, so the two read as
-   *                     halves of one post
+   *  @param titleIcon   leads Creature Stats. Not the newspaper the board leads
+   *                     with: this half often goes out as its own message, where
+   *                     a second newspaper reads as a second bulletin rather than
+   *                     the other half of one
    *  @param goldIcon    leads Special Kills, at the same rank as PVP and Bosses
    *                     Due, since it is a section about something else entirely
    *                     rather than a subdivision of the creature list

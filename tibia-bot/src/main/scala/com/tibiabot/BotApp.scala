@@ -1565,7 +1565,7 @@ object BotApp extends App with StrictLogging {
     if (report.kills.isEmpty) Nil
     else
       presentation.StatisticsEmbeds.creatureStats(
-        report, Config.newsEmoji, Config.goldEmoji, Config.specialKillEmojis.getOrElse(_, "")) :::
+        report, Config.creatureEmoji, Config.goldEmoji, Config.specialKillEmojis.getOrElse(_, "")) :::
       presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
 
   /** The statistics channel for one target, if this bot can write to it. */
