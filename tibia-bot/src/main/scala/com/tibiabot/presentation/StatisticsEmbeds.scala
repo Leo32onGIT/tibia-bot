@@ -91,7 +91,7 @@ object StatisticsEmbeds {
    *  count, and repeating the verb on every row spends the width on the one word
    *  that never varies.
    *
-   *  @param titleIcon   leads Kill Stats. Not the newspaper the board leads
+   *  @param titleIcon   leads Creature Kills. Not the newspaper the board leads
    *                     with: this half often goes out as its own message, where
    *                     a second newspaper reads as a second bulletin rather than
    *                     the other half of one
@@ -128,7 +128,7 @@ object StatisticsEmbeds {
       s"$lead**${StatLines.number(count.toLong)}** ${linked(kill.nameFor(count), creatureTitle(kill.name))}"
     }
     val sections = List(
-      Option.when(creatures.nonEmpty)((s"## $titleIcon Kill Stats" :: creatures).mkString("\n")),
+      Option.when(creatures.nonEmpty)((s"## $titleIcon Creature Kills" :: creatures).mkString("\n")),
       Option.when(specials.nonEmpty)((s"## $goldIcon Special Kills" :: specials).mkString("\n"))
     ).flatten
 

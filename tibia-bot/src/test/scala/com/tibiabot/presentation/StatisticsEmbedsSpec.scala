@@ -102,7 +102,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = build(report(gains = List(delta("Arieswar", 900))))
     embed.getDescription should not include "Top Experience Lost"
     embed.getDescription should not include "Top Skill Advancement"
-    embed.getDescription should not include "Kill Stats"
+    embed.getDescription should not include "Creature Kills"
   }
 
   test("there are no fields at all") {
@@ -134,7 +134,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       gains = List(delta("Arieswar", 900)),
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965))))
-    embed.getDescription should not include "Kill Stats"
+    embed.getDescription should not include "Creature Kills"
     embed.getDescription should not include "flimsy lost souls"
   }
 
@@ -162,7 +162,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     val body = creatureBody(report(
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965), killed("quara looters", 13))))
-    body should startWith(s"## $creatureIcon Kill Stats")
+    body should startWith(s"## $creatureIcon Creature Kills")
     body should include("**23,965** [Flimsy Lost Souls](https://tibia.fandom.com/wiki/Flimsy_Lost_Souls)")
     body should include("**13** [Quara Looters](https://tibia.fandom.com/wiki/Quara_Looters)")
     body.indexOf("Flimsy") should be < body.indexOf("Quara")
@@ -186,7 +186,7 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965)),
       specials = List(SpecialKills.all.head -> 3)))
-    body should include("Kill Stats")
+    body should include("Creature Kills")
     body should include("Special Kills")
     body should not include "killed"
   }
