@@ -25,9 +25,7 @@ class DreamCourtServiceSpec extends AnyFunSuite with Matchers {
     def recordBossKills(rows: List[BossKills]): Unit = ()
     def recordSummary(summary: DayKillSummary): Unit = ()
     def hasDay(world: String, saveDay: LocalDate): Boolean = false
-    def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
-    def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] = Map.empty
-    def earliestDay(world: String): Option[LocalDate] = None
+    def sightings(world: String): Map[String, List[(LocalDate, Int)]] = Map.empty
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] = Nil
     def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] = {
       if (fail) throw new RuntimeException("cache is away")

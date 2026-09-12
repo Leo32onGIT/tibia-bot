@@ -90,9 +90,10 @@ object BossPredictionEmbeds {
     }
 
   /** The upper bound in days, for deciding whether the window has already
-   *  closed. Parsed back from the rendered figure rather than carried twice. */
+   *  closed. A boss past the point where its windows overlap has none, and can
+   *  never read as overdue against one. */
   private def daysBetweenSaves(chance: BossChance): Int =
-    chance.windowMax.flatMap(max => scala.util.Try(max.toInt).toOption).getOrElse(Int.MaxValue)
+    chance.windowMax.getOrElse(Int.MaxValue)
 
   /** Discord's relative timestamp. It renders as "in 3 days" or "22 days ago"
    *  against the reader's own clock, and keeps doing so after the post is old. */

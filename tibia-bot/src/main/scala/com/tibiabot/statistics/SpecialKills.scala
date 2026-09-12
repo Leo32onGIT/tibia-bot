@@ -50,9 +50,5 @@ object SpecialKills {
     SpecialKill("The Primal Menace", "The Primal Menace", "primal", Some("The Primal Menaces"))
   )
 
-  private val byRace: Map[String, SpecialKill] = all.map(kill => kill.race.toLowerCase -> kill).toMap
-
-  def forRace(race: String): Option[SpecialKill] = byRace.get(race.toLowerCase)
-
   def races: List[String] = all.map(_.race)
 }

@@ -92,13 +92,10 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
     def recordSummary(summary: DayKillSummary): Unit =
       summaries.put((summary.world, summary.saveDay), summary)
     def hasDay(world: String, saveDay: LocalDate): Boolean = summaries.contains((world, saveDay))
-    def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
-    def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] =
-      bosses.toList.collect { case ((w, day), rows) if w == world && !day.isBefore(from) => (day, rows) }
+    def sightings(world: String): Map[String, List[(LocalDate, Int)]] =
+      bosses.toList.collect { case ((w, day), rows) if w == world => (day, rows) }
         .flatMap { case (day, rows) => rows.filter(_.killed > 0).map(row => (row.race.toLowerCase, (day, row.killed))) }
         .groupBy(_._1).map { case (race, entries) => race -> entries.map(_._2).sortBy(_._1).reverse }
-    def earliestDay(world: String): Option[LocalDate] =
-      summaries.keys.filter(_._1 == world).map(_._2).toList.sortWith(_.isBefore(_)).headOption
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] =
       bosses.getOrElse((world, saveDay), Nil).filter(_.killed > 0).sortBy(row => (-row.killed, row.race))
     def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] =
@@ -264,7 +261,7 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
     val pipeline = new Pipeline()
     pipeline.ordinaryMorning()
 
-    pipeline.cache.sightings("Antica", dayBefore).get("ferumbras")
+    pipeline.cache.sightings("Antica").get("ferumbras")
       .map(_.map(_._1)) shouldBe Some(List(closedDay))
   }
 }

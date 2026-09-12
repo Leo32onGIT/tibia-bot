@@ -54,11 +54,11 @@ class BossCatalogueSpec extends AnyFunSuite with Matchers {
     BossCatalogue.bosses.count(_.predict) should be > 50
   }
 
-  test("lookup by race is case-insensitive both ways") {
-    BossCatalogue.isBoss("YETIS") shouldBe true
-    BossCatalogue.isBoss("Ferumbras") shouldBe true
-    BossCatalogue.isBoss("dragon") shouldBe false
-    BossCatalogue.isBoss("players") shouldBe false
+  test("lookup by race is keyed lowercased, so the endpoint's casing cannot miss") {
+    BossCatalogue.byRace.get("YETIS".toLowerCase).map(_.name) shouldBe Some("Yeti")
+    BossCatalogue.byRace.get("Ferumbras".toLowerCase).map(_.name) shouldBe Some("Ferumbras")
+    BossCatalogue.byRace.get("dragon") shouldBe None
+    BossCatalogue.byRace.get("players") shouldBe None
   }
 
   test("the world bosses carry the long windows that make them worth predicting") {

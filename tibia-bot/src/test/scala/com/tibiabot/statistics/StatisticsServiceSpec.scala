@@ -58,16 +58,13 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
   private class StubKillStatistics(
       days: Map[(String, LocalDate), DayKillSummary] = Map.empty,
       seen: Map[String, List[(LocalDate, Int)]] = Map.empty,
-      earliest: Option[LocalDate] = None,
       raceRows: List[BossKills] = Nil,
       fail: Boolean = false
   ) extends KillStatisticsRepository {
     def recordBossKills(rows: List[BossKills]): Unit = ()
     def recordSummary(summary: DayKillSummary): Unit = ()
     def hasDay(world: String, saveDay: LocalDate): Boolean = false
-    def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] = Nil
-    def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] = seen
-    def earliestDay(world: String): Option[LocalDate] = earliest
+    def sightings(world: String): Map[String, List[(LocalDate, Int)]] = seen
     def killsOn(world: String, saveDay: LocalDate): List[BossKills] = raceRows
     def dailyCounts(world: String, from: LocalDate, races: Set[String]): List[BossKills] = Nil
     def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] = {
@@ -361,8 +358,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   test("a boss seen recently enough is predicted into the report") {
     val kills = new StubKillStatistics(
-      seen = Map("furyosa" -> List((yesterday.minusDays(20), 1))),
-      earliest = Some(yesterday.minusDays(120)))
+      seen = Map("furyosa" -> List((yesterday.minusDays(20), 1))))
     val harness = new Harness(List(target("a")), kills = kills)
     harness.service.tick()
     val report = harness.posts.head._2
@@ -379,8 +375,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
 
   test("a due boss alone is worth a post") {
     val kills = new StubKillStatistics(
-      seen = Map("furyosa" -> List((yesterday.minusDays(20), 1))),
-      earliest = Some(yesterday.minusDays(120)))
+      seen = Map("furyosa" -> List((yesterday.minusDays(20), 1))))
     val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), kills = kills)
     harness.service.tick()
     harness.posts.map(_._1) shouldBe List("a")
@@ -390,8 +385,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     // Predictions with nothing due are not news; the report reads as empty and
     // the other halves decide.
     val kills = new StubKillStatistics(
-      seen = Map("furyosa" -> List((yesterday.minusDays(1), 1))),
-      earliest = Some(yesterday.minusDays(120)))
+      seen = Map("furyosa" -> List((yesterday.minusDays(1), 1))))
     val harness = new Harness(List(target("a")), experience = new StubExperience(Map.empty), kills = kills)
     harness.service.tick()
     harness.posts shouldBe empty

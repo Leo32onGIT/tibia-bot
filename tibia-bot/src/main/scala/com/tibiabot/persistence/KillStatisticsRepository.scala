@@ -29,31 +29,22 @@ trait KillStatisticsRepository {
    *  halfway through the boss rows reads as absent and is fetched again. */
   def hasDay(world: String, saveDay: LocalDate): Boolean
 
-  /** One boss's history on one world from `from` onward, oldest first — the
-   *  shape a spawn prediction wants. Nothing reads this yet; it is the reason
-   *  the table exists. */
-  def bossHistory(world: String, race: String, from: LocalDate): List[BossKills]
-
-  /** Every day each boss was seen on one world since `from`, newest first,
-   *  keyed by the lowercased race name.
+  /** Every day each boss was seen on one world, newest first, keyed by the
+   *  lowercased race name.
    *
    *  One query for the whole world rather than seventy-four, since the
-   *  prediction wants all of them at once. Only days a boss was actually seen
-   *  are returned — the zero rows exist so that a day we looked is
-   *  distinguishable from a day we did not, which is what [[earliestDay]]
-   *  answers, and they would otherwise be most of the result.
+   *  prediction wants all of them at once. The whole retained history, because a
+   *  world boss counts in months and narrowing this to recent days would hide
+   *  exactly the bosses worth predicting — the retention cutoff is the only
+   *  bound there is.
+   *
+   *  Only days a boss was actually seen are returned. The zero rows exist so
+   *  that a day we looked is distinguishable from a day we did not, and they
+   *  would otherwise be most of the result.
    *
    *  The Int is that day's kill count. It matters for a boss with several spawn
    *  points: three killed on one day is three sightings, not one. */
-  def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]]
-
-  /** The first day this world has any snapshot for, or None if it has none.
-   *
-   *  How far back the history goes, which is what decides whether "not seen
-   *  since" means anything yet. A boss never seen inside it cannot be predicted
-   *  at all — the last sighting could be a day before our first snapshot or a
-   *  year before it, and nothing here can tell those apart. */
-  def earliestDay(world: String): Option[LocalDate]
+  def sightings(world: String): Map[String, List[(LocalDate, Int)]]
 
   /** Every race kept for one world's day that something actually killed, largest
    *  first.

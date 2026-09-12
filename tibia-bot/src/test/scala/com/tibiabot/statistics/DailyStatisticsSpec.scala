@@ -91,12 +91,6 @@ class DailyStatisticsSpec extends AnyFunSuite with Matchers {
     DailyStatistics.gains(List(delta("Arieswar", -4000), delta("Bubble", 0))) shouldBe Nil
   }
 
-  test("losses are the worst first, and only when they are really losses") {
-    val movers = List(delta("Bubble", 900), delta("Arieswar", -4000), delta("Mateusz", -12000))
-    DailyStatistics.losses(movers).map(_.displayName) shouldBe List("Mateusz", "Arieswar")
-    DailyStatistics.losses(List(delta("Bubble", 900), delta("Mateusz", 0))) shouldBe Nil
-  }
-
   // --- the report ---------------------------------------------------------
 
   test("a report with nothing in it is empty") {

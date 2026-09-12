@@ -154,7 +154,7 @@ class KillStatisticsSpec extends AnyFunSuite with Matchers with JsonSupport {
     val plunder = SpecialKills.all.head
     plunder.name shouldBe "Plunder Patriarch"
     plunder.race shouldBe "plunder patriarches"
-    SpecialKills.forRace("PLUNDER PATRIARCHES") shouldBe Some(plunder)
+    SpecialKills.races should contain(plunder.race)
   }
 
   test("only the special bosses that died are reported") {

@@ -83,48 +83,21 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
       found
     }
 
-  def bossHistory(world: String, race: String, from: LocalDate): List[BossKills] =
+  def sightings(world: String): Map[String, List[(LocalDate, Int)]] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.prepareStatement(
-        s"""
-           |SELECT race,save_day,killed,players_killed
-           |FROM kill_statistics_boss
-           |WHERE world = ? AND LOWER(race) = LOWER(?) AND save_day >= ?
-           |ORDER BY save_day ASC;
-           |""".stripMargin
-      )
-      statement.setString(1, world)
-      statement.setString(2, race)
-      statement.setDate(3, SqlDate.valueOf(from))
-      val result = statement.executeQuery()
-
-      val rows = new ListBuffer[BossKills]()
-      while (result.next()) {
-        rows += BossKills(
-          world = world,
-          saveDay = result.getDate("save_day").toLocalDate,
-          race = Option(result.getString("race")).getOrElse(race),
-          killed = result.getInt("killed"),
-          playersKilled = result.getInt("players_killed")
-        )
-      }
-
-      statement.close()
-      rows.toList
-    }
-
-  def sightings(world: String, from: LocalDate): Map[String, List[(LocalDate, Int)]] =
-    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // No lower bound on the day: the retention prune is what limits this, and
+      // a world boss counts in months. This used to be handed the world's own
+      // earliest day, which took a second query to compute a bound that by
+      // definition excluded nothing.
       val statement = conn.prepareStatement(
         s"""
            |SELECT race,save_day,killed
            |FROM kill_statistics_boss
-           |WHERE world = ? AND save_day >= ? AND (killed > 0 OR players_killed > 0)
+           |WHERE world = ? AND (killed > 0 OR players_killed > 0)
            |ORDER BY race ASC, save_day DESC;
            |""".stripMargin
       )
       statement.setString(1, world)
-      statement.setDate(2, SqlDate.valueOf(from))
       val result = statement.executeQuery()
 
       // Built newest-first per race, which is the order the prediction reads
@@ -140,18 +113,6 @@ final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider)
 
       statement.close()
       byRace.map { case (race, days) => race -> days.toList }.toMap
-    }
-
-  def earliestDay(world: String): Option[LocalDate] =
-    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.prepareStatement(
-        "SELECT MIN(save_day) AS earliest FROM kill_statistics_summary WHERE world = ?;")
-      statement.setString(1, world)
-      val result = statement.executeQuery()
-      // MIN over no rows is one row holding NULL, not no rows.
-      val day = if (result.next()) Option(result.getDate("earliest")).map(_.toLocalDate) else None
-      statement.close()
-      day
     }
 
   def killsOn(world: String, saveDay: LocalDate): List[BossKills] =

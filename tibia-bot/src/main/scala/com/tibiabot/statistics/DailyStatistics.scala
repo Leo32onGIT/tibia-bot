@@ -116,14 +116,12 @@ object DailyStatistics {
     movers.filter(_.gained > 0).sortBy(-_.gained).take(limit)
 
   /** How many losers the post names. Half the gainers: a day's losses are one
-   *  story — who died badly — where the gains are a leaderboard. */
-  val TopLosses: Int = 5
-
-  /** The day's worst losses, worst first, trimmed to what the post names.
+   *  story — who died badly — where the gains are a leaderboard.
    *
-   *  Takes the whole mover list rather than trusting a caller to have asked for
-   *  the right end of it, so the rule that a loss must actually be negative is
-   *  stated once. */
-  def losses(movers: List[ExperienceDelta], limit: Int = TopLosses): List[ExperienceDelta] =
-    movers.filter(_.gained < 0).sortBy(_.gained).take(limit)
+   *  There is no `losses` to match [[gains]]: the rule that a loss must actually
+   *  be negative is stated in
+   *  [[com.tibiabot.persistence.ExperienceRepository.dailyLosses]], which is the
+   *  end of the ordering the post reads, so a second statement of it here was
+   *  only ever a second place to get it wrong. */
+  val TopLosses: Int = 5
 }

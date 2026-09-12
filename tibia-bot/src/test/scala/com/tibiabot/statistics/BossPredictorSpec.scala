@@ -51,7 +51,7 @@ class BossPredictorSpec extends AnyFunSuite with Matchers {
   test("the first window is always shown, even before the boss is due") {
     // So a reader can see how far off it is rather than just "not due".
     chance(5).windowMin shouldBe 12
-    chance(5).windowMax shouldBe Some("28")
+    chance(5).windowMax shouldBe Some(28)
   }
 
   // --- past the first window ----------------------------------------------
@@ -74,7 +74,7 @@ class BossPredictorSpec extends AnyFunSuite with Matchers {
     val second = BossPredictor.chanceFor(today, seenDaysAgo(340), 161, 175)
     second.chance shouldBe Chance.High
     second.windowMin shouldBe 322
-    second.windowMax shouldBe Some("350")
+    second.windowMax shouldBe Some(350)
     second.daysSince shouldBe 340
   }
 

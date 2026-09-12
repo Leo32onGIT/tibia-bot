@@ -200,7 +200,7 @@ final class KillStatisticsService(
             val live = KillStatistics.summary(data, day)
             if (live.figures == previous.figures) Future.successful(Probe.NotRolled(world))
             else {
-              file(world, data, day)
+              file(world, data, day, live)
               Future.successful(Probe.Rolled(world))
             }
         }
@@ -239,7 +239,7 @@ final class KillStatisticsService(
             "while other worlds have rolled, not filing it")
           false
         } else {
-          file(world, data, day)
+          file(world, data, day, summary)
           true
         }
     }
@@ -271,10 +271,15 @@ final class KillStatisticsService(
    *  daily post's gate, so a failure between the two leaves the day looking
    *  unfiled and it is simply read again. The other order would mark a day done
    *  with its rows missing, and would release a post whose creature list and
-   *  boss predictions were both reading a half-written day. */
-  private def file(world: String, data: KillStatisticsData, day: LocalDate): Unit = {
+   *  boss predictions were both reading a half-written day.
+   *
+   *  The summary is handed in rather than derived again: both callers already
+   *  computed it to compare against the previous day, and it is three passes
+   *  over the fifteen hundred races the endpoint returns. */
+  private def file(world: String, data: KillStatisticsData, day: LocalDate,
+                   summary: DayKillSummary): Unit = {
     repository.recordBossKills(KillStatistics.dayRaces(data, day))
-    repository.recordSummary(KillStatistics.summary(data, day))
+    repository.recordSummary(summary)
     filed.put((world, day), ())
   }
 

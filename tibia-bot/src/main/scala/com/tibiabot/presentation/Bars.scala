@@ -36,10 +36,9 @@ object Bars {
   final case class Scale(ceiling: Int, referenceLevel: Double)
 
   object Scale {
-    /** What a world with no samples yet gets, which is every world on its first
-     *  day. Slightly wrong for one morning beats no bar at all. */
-    val Default: Scale = Scale(DefaultCeiling, DefaultLevel)
-
+    /** A world with no samples yet — which is every world on its first day —
+     *  falls back to the defaults below. Slightly wrong for one morning beats no
+     *  bar at all. */
     def forWorld(averageOnline: Option[Double], averageLevel: Option[Double]): Scale =
       Scale(
         averageOnline.map(ceilingFor).getOrElse(DefaultCeiling),

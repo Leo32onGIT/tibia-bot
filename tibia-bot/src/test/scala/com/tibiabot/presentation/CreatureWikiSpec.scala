@@ -47,7 +47,6 @@ class CreatureWikiSpec extends AnyFunSuite with Matchers {
     page("cyclopes") shouldBe None
     page("sabreteeth") shouldBe None
     page("players") shouldBe None
-    wiki.urlFor("cyclopes") shouldBe None
   }
 
   test("a form two pages both claim is dropped rather than guessed between") {
@@ -63,14 +62,15 @@ class CreatureWikiSpec extends AnyFunSuite with Matchers {
   }
 
   test("parentheses are escaped, so a disambiguated title survives as a link") {
-    val url = wiki.urlFor("amarie (creature)")
+    val url = page("amarie (creature)").map(CreatureWiki.urlForTitle)
     url shouldBe Some("https://tibia.fandom.com/wiki/Amarie_%28Creature%29")
     // Discord ends a link at the first ')', so an unescaped one breaks the row.
     url.get should not include ")"
   }
 
   test("a page name becomes the wiki's own URL") {
-    wiki.urlFor("grim reapers") shouldBe Some("https://tibia.fandom.com/wiki/Grim_Reaper")
+    page("grim reapers").map(CreatureWiki.urlForTitle) shouldBe
+      Some("https://tibia.fandom.com/wiki/Grim_Reaper")
     CreatureWiki.urlForTitle("Goshnar's Megalomania") shouldBe
       "https://tibia.fandom.com/wiki/Goshnar's_Megalomania"
   }
@@ -79,7 +79,6 @@ class CreatureWikiSpec extends AnyFunSuite with Matchers {
     // "cyclopes" is not "cyclops" plus a suffix, so only the table gets there.
     val withTable = new CreatureWiki(List("Grim Reaper"), Map("cyclopes" -> "Cyclops"))
     withTable.titleFor("cyclopes") shouldBe Some("Cyclops")
-    withTable.urlFor("cyclopes") shouldBe Some("https://tibia.fandom.com/wiki/Cyclops")
     // Still keyed loosely, like everything else the endpoint reports.
     withTable.titleFor("CYCLOPES") shouldBe Some("Cyclops")
     new CreatureWiki(List("Grim Reaper")).titleFor("cyclopes") shouldBe None

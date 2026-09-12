@@ -19,9 +19,6 @@ object FragSide {
 
   /** An allied player died. Somebody on their side got a frag. */
   case object Ally extends FragSide("ally")
-
-  def fromStored(value: String): Option[FragSide] =
-    List(Enemy, Ally).find(_.stored == value)
 }
 
 /** One player killing another, on one world, on one server-save day.

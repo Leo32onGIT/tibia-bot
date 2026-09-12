@@ -9,9 +9,8 @@ import scala.util.Try
 /** One boss and the shape of its spawn cycle.
  *
  *  `windowMin`/`windowMax` are days between spawns, `spawnPoints` how many
- *  places it can appear at once. Neither is read yet — the prediction that uses
- *  them is a later phase — but they travel with the catalogue because they are
- *  what makes it worth having a catalogue rather than a list of names.
+ *  places it can appear at once. All three are what [[BossPredictor]] reads, and
+ *  are what makes this worth having as a catalogue rather than a list of names.
  *
  *  `raceName` is how kill statistics names the boss when that differs from its
  *  own name: tibia.com counts Yeti kills under "yetis" and Rotworm Queen under
@@ -57,9 +56,6 @@ object BossCatalogue extends StrictLogging {
    *  is matched on. Lowercased because the endpoint's casing is not something
    *  to depend on — it already mixes "yetis" with "Rotworm Queens". */
   lazy val byRace: Map[String, Boss] = bosses.map(boss => boss.race.toLowerCase -> boss).toMap
-
-  /** Whether a kill statistics entry is one of the bosses worth storing. */
-  def isBoss(race: String): Boolean = byRace.contains(race.toLowerCase)
 
   private def load(): List[Boss] = {
     val parsed = for {

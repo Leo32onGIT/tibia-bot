@@ -173,16 +173,15 @@ final class StatisticsService(
       // quiet world. DailyStatistics.gains drops them, and asking for the extra
       // rows means dropping one does not silently shorten the list.
       val movers = experience.dailyMovers(world, day, DailyStatistics.TopGains * 2)
-      // One query for every boss on the world rather than seventy-four. `from`
-      // is the whole retained history: a world boss counts in months, so
-      // narrowing this to recent days would hide exactly the bosses worth
-      // predicting.
+      // One query for every boss on the world rather than seventy-four, over the
+      // whole retained history: a world boss counts in months, so narrowing this
+      // to recent days would hide exactly the bosses worth predicting.
       //
-      // This now includes the closing day itself, because the post waits for
-      // that snapshot to be filed — so a boss killed yesterday reads as seen
+      // It includes the closing day itself, because the post waits for that
+      // snapshot to be filed — so a boss killed yesterday reads as seen
       // yesterday rather than as never seen at all.
       val average = worldOnline.averages(world, day)
-      val sightings = killStatistics.sightings(world, killStatistics.earliestDay(world).getOrElse(day))
+      val sightings = killStatistics.sightings(world)
       val predictions = BossPredictor.predictAll(sightings, day)
       // One query for both halves of the creature embed, and only where there is
       // an embed to fill: the day's rows are ordered by kills, so the creatures

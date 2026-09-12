@@ -135,12 +135,6 @@ object StatisticsEmbeds {
     if (sections.isEmpty) Nil else EmbedPages.build(CreatureColor, sections.mkString("\n"))
   }
 
-  /** A section is its heading and its rows. Absent sections are dropped by the
-   *  caller rather than printed empty, so a quiet day is short rather than a
-   *  column of headings with nothing under them.
-   *
-   *  The label carries no emoji: the `##` title above it has one, and repeating
-   *  the trick on every `###` under that turns a hierarchy into a row of badges. */
   /** A name as the post prints it, linked to its wiki page where there is one.
    *
    *  Both lists go through here so a boss and a creature are dressed the same:
@@ -152,6 +146,12 @@ object StatisticsEmbeds {
   private def linked(shown: String, title: Option[String]): String =
     title.fold(shown)(page => s"[$shown](${CreatureWiki.urlForTitle(page)})")
 
+  /** A section is its heading and its rows. Absent sections are dropped by the
+   *  caller rather than printed empty, so a quiet day is short rather than a
+   *  column of headings with nothing under them.
+   *
+   *  The label carries no emoji: the `##` title above it has one, and repeating
+   *  the trick on every `###` under that turns a hierarchy into a row of badges. */
   private def section(title: String, rows: List[String]): String =
     (s"### $title" :: rows).mkString("\n")
 

@@ -70,11 +70,12 @@ final class CreatureWiki(singulars: List[String], overrides: Map[String, String]
     guessed ++ exact ++ overrides.map { case (race, title) => race.toLowerCase -> title }
 
   /** The wiki's title for a reported race, or none if nothing on the list
-   *  pluralises to it. */
+   *  pluralises to it.
+   *
+   *  The title rather than the URL, because a row needs both halves of it: the
+   *  link, and the wiki's spelling to print the race in — see
+   *  [[CreatureWiki.urlForTitle]] and [[CreatureWiki.casedLike]]. */
   def titleFor(race: String): Option[String] = byRace.get(race.trim.toLowerCase)
-
-  /** The page URL for a reported race, ready to sit inside a Discord link. */
-  def urlFor(race: String): Option[String] = titleFor(race).map(CreatureWiki.urlForTitle)
 }
 
 object CreatureWiki {

@@ -282,11 +282,10 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
            |ON highscore_events (world, observed);""".stripMargin
 
-      // Experience history, which posts nothing and exists for the statistics
-      // channel to read later. Two tables because the honest hourly reading and
-      // the thing worth keeping for a year are different sizes: raw readings are
-      // 1.63M rows a day across 68 worlds, so they live a week, while the rollup
-      // carries one row per character per server-save day at a fortieth of that.
+      // Experience history, which the statistics post reads. One row per
+      // character per server-save day. A second table behind it kept every
+      // hourly reading — 1.63M rows a day across 68 worlds — for an intra-day
+      // curve nothing was ever built to draw; it is dropped below.
       val createExperienceDailyTable =
         s"""CREATE TABLE IF NOT EXISTS experience_daily (
            |world VARCHAR(255) NOT NULL,

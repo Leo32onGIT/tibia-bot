@@ -8,19 +8,27 @@ import java.time.LocalDate
 /** One boss's kills on one world on one server-save day. */
 final case class BossKills(world: String, saveDay: LocalDate, race: String, killed: Int, playersKilled: Int)
 
-/** A world's day in one row: the headlines, kept so the eventual embed does not
- *  have to store or re-read fifteen hundred races to say three things.
+/** A world's day in one row: the headlines, without the fifteen hundred races
+ *  they were derived from.
  *
  *  `mostKilled` is the creature players killed most of. `deadliest` is the
  *  creature that killed the most players — never `players` or
  *  `(elemental forces)`, which are not creatures; see
  *  [[KillStatistics.deadliestCreature]]. `playerDeaths` is the PvP figure those
- *  first two exclude, reported on its own because it is genuinely interesting
- *  and merely miscategorised by the endpoint.
+ *  first two exclude.
  *
  *  The two headline races are Options because a world can have a day where
  *  nothing killed a player at all, and a small world can have a day where
- *  nothing was killed. */
+ *  nothing was killed.
+ *
+ *  ==Nothing displays any of this==
+ *  The post's creature list reads `killsOn` instead, which is the day's actual
+ *  rows and can be ordered and linked. What these five figures are for is
+ *  [[figures]] — the fingerprint that recognises tibia.com's roll — and the
+ *  row's existence, which is how [[KillStatistics]]'s callers tell a filed day
+ *  from an unfiled one. Kept as the headlines rather than as an opaque hash
+ *  because a fingerprint you can read is worth more in a log than one you
+ *  cannot, and they are free to carry. */
 final case class DayKillSummary(
     world: String,
     saveDay: LocalDate,
@@ -99,21 +107,16 @@ object KillStatistics {
 
   /** The five Dream Courts bosses, whether or not they died.
    *
-   *  Kept for a reason nothing reads yet. The bot decides which of the five is
-   *  a world's boss of the day from a wiki page whose per-world offsets drift —
-   *  a server reset bumps a world's rotation and the page stays wrong until
-   *  somebody edits it — and for forty-three worlds the page admits it does not
-   *  know at all. The kill figures are the one source that could answer it from
-   *  evidence instead, because the boss of the day is the one people can
-   *  actually go and kill.
+   *  The bot decides which of the five is a world's boss of the day from a wiki
+   *  page whose per-world offsets drift — a server reset bumps a world's
+   *  rotation and the page stays wrong until somebody edits it — and for
+   *  forty-three worlds the page admits it does not know at all. The kill
+   *  figures are the one source that answers it from evidence instead, because
+   *  the boss of the day is the one people can actually go and kill.
    *
-   *  Whether they answer it is not settled. Several of the five are killed on
-   *  the same world on the same day, so the signal is which was killed *most*,
-   *  and on one day's data that agreed with the wiki only about half the time.
-   *  The test that separates a noisy estimator from a drifted page is whether a
-   *  world's answer advances by exactly one step per day, and that needs
-   *  consecutive days nobody has. Hence this: bank the days, decide later. A day
-   *  not banked cannot be recovered.
+   *  What these rows are for is [[DreamCourtEvidence]], which holds why one
+   *  day's kills are not an answer on their own and a fortnight of them is. A
+   *  day not banked cannot be recovered, which is why every day is.
    *
    *  Zeros included, like the catalogue and unlike the creatures. A day a boss
    *  was not killed is exactly as informative as a day it was — it is evidence
@@ -208,11 +211,12 @@ object KillStatistics {
       .filter(_.last_day_killed > 0)
   }
 
-  /** The creature players killed most of. None on a day with no kills at all. */
+  /** The creature players killed most of. None on a day with no kills at all.
+   *
+   *  The head of [[topKilled]] by definition, so it is taken from there rather
+   *  than stating the same filter and ordering a second time. */
   def mostKilledCreature(entries: List[KillStatisticsEntry]): Option[(String, Int)] =
-    entries.filter(entry => isCreature(entry.race) && entry.last_day_killed > 0)
-      .sortBy(entry => (-entry.last_day_killed, entry.race))
-      .headOption
+    topKilled(entries, limit = 1).headOption
       .map(entry => (entry.race, entry.last_day_killed))
 
   /** The creature that killed the most players, PvP and the environment
