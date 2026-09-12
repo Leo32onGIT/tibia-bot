@@ -1257,41 +1257,21 @@ object BotApp extends App with StrictLogging {
     probeCandidates = Config.Statistics.KillStatistics.probeCandidates
   )(ex)
 
-  if (Config.Statistics.KillStatistics.enabled) {
-    // Primary only, like the highscore sweep and for the same reason: reading
-    // the same 68 pages from two addresses through one TibiaData instance would
-    // double the load on tibia.com for identical rows, and the rows land in the
-    // shared cache that every bot can read anyway.
-    if (Config.BotRole.current != Config.BotRole.Secondary) {
-      // A minute in rather than five: a restart inside the server-save window
-      // must not sit out the roll, since the day's post is waiting behind it.
-      // An early tick with no worlds registered yet costs nothing and the next
-      // one picks them up.
-      actorSystem.scheduler.scheduleWithFixedDelay(
-        1.minute, Config.Statistics.KillStatistics.tickInterval)(
-        () => { killStatisticsService.tick(); () })(ex)
-      logger.info("Daily kill statistics snapshot enabled for every tracked world")
-    }
-
-    // The measurement of when tibia.com's nightly batch actually runs. Primary
-    // only and one request a minute inside its window, for the same reason the
-    // snapshot is: it asks the same host the same question.
-    if (Config.Statistics.KillStatistics.RollProbe.enabled &&
-        Config.BotRole.current != Config.BotRole.Secondary) {
-      actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 1.minute)(
-        () => { killStatisticsRollProbe.tick(); () })(ex)
-      logger.info("Kill statistics roll probe enabled — watching for the nightly batch")
-    }
+  // Primary only, like the highscore sweep and for the same reason: reading the
+  // same 68 pages from two addresses through one TibiaData instance would double
+  // the load on tibia.com for identical rows, and the rows land in the shared
+  // cache that every bot can read anyway.
+  if (Config.Statistics.KillStatistics.enabled &&
+      Config.BotRole.current != Config.BotRole.Secondary) {
+    // A minute in rather than five: a restart inside the server-save window must
+    // not sit out the roll, since the day's post is waiting behind it. An early
+    // tick with no worlds registered yet costs nothing and the next one picks
+    // them up.
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      1.minute, Config.Statistics.KillStatistics.tickInterval)(
+      () => { killStatisticsService.tick(); () })(ex)
+    logger.info("Daily kill statistics snapshot enabled for every tracked world")
   }
-
-  /** Watches one world across the small hours to time tibia.com's kill
-   *  statistics batch. Temporary, and reads nothing the bot depends on. */
-  private lazy val killStatisticsRollProbe = new statistics.RollProbe(
-    api = killStatisticsApi,
-    world = () => streamSupervisor.activeWorlds.toList.sorted.headOption,
-    from = Config.Statistics.KillStatistics.RollProbe.from,
-    to = Config.Statistics.KillStatistics.RollProbe.to
-  )(ex)
 
   if (Config.Statistics.enabled) {
     // Every bot, for the same reason the advance feed is: this only reads the

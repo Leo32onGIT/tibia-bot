@@ -163,14 +163,6 @@ object Config {
         val minDays: Int = dreamCourts.getInt("min-days")
         val minLead: Int = dreamCourts.getInt("min-lead")
       }
-
-      /** The temporary measurement of when tibia.com's nightly batch runs. */
-      object RollProbe {
-        private val probe = killStatistics.getConfig("roll-probe")
-        val enabled: Boolean = probe.getBoolean("enabled")
-        val from: java.time.LocalTime = java.time.LocalTime.parse(probe.getString("from"))
-        val to: java.time.LocalTime = java.time.LocalTime.parse(probe.getString("to"))
-      }
     }
   }
 

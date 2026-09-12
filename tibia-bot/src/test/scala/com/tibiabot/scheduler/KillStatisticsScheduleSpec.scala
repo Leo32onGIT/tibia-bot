@@ -32,13 +32,7 @@ class KillStatisticsScheduleSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  test("the boundary itself counts as published") {
-    KillStatisticsSchedule.published(berlin("2026-09-11T04:00:00+02:00")) shouldBe true
-    KillStatisticsSchedule.published(berlin("2026-09-11T03:59:00+02:00")) shouldBe false
-  }
-
-  test("the batch is believed to fall between three and twenty past") {
-    // Written down so the probe's readings have something to disagree with.
+  test("the batch falls between three and twenty past, and the boundary clears it") {
     KillStatisticsSchedule.publishedFrom.toString shouldBe "03:00"
     KillStatisticsSchedule.publishedBy.toString shouldBe "03:20"
     KillStatisticsSchedule.boundary.isAfter(KillStatisticsSchedule.publishedBy) shouldBe true

@@ -37,9 +37,12 @@ import java.time.{LocalDate, LocalTime, ZonedDateTime}
  */
 object KillStatisticsSchedule {
 
-  /** When the nightly batch is believed to run, in Berlin time. Reported as
-   *  03:00-03:20; [[com.tibiabot.statistics.RollProbe]] is what will tell us
-   *  whether that holds. */
+  /** When the nightly batch runs, in Berlin time — 03:00-03:20, measured rather
+   *  than taken on trust.
+   *
+   *  Nothing reads these: the roll is recognised by comparing a live read
+   *  against the day already filed, never by the clock. They are here because
+   *  [[boundary]] is derived from them and would otherwise be a bare number. */
   val publishedFrom: LocalTime = LocalTime.of(3, 0)
   val publishedBy: LocalTime = LocalTime.of(3, 20)
 
@@ -61,11 +64,5 @@ object KillStatisticsSchedule {
     val berlin = at.withZoneSameInstant(Clock.Berlin)
     val shifted = berlin.minusHours(boundary.getHour.toLong).minusMinutes(boundary.getMinute.toLong)
     shifted.toLocalDate.minusDays(1)
-  }
-
-  /** Whether `at` is past the point the day's figures should exist. */
-  def published(at: ZonedDateTime): Boolean = {
-    val berlin = at.withZoneSameInstant(Clock.Berlin)
-    !berlin.toLocalTime.isBefore(boundary)
   }
 }
