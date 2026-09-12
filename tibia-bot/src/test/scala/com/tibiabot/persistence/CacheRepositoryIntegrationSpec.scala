@@ -63,10 +63,24 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     ensureCacheSchema(provider)
     val repo = new JdbcCacheRepository(provider)
     val listWorld = "Itestlistx"
+    val otherWorld = "Itestlistz"
 
     repo.getList(listWorld)
     repo.addToList("ListChar", List("OldName"), listWorld, List("OldWorld"),
       "SomeGuild", "200", "Knight", "2026-05-30T09:00:00Z", ZonedDateTime.parse("2026-05-30T10:00:00Z"))
+    // Somebody else's row, which nothing here ever orphans.
+    //
+    // It is what keeps the keep-set below from coming out empty, and without it
+    // this test only passed on a database that happened to be holding rows from
+    // somewhere else. On a clean one "ListChar" was the only name in the table,
+    // so the keep-set was empty — and an empty keep-set prunes nothing at all,
+    // which is the guard the very next test exists to assert. The two
+    // contradicted each other and the shared table decided which won.
+    //
+    // It also makes the "orphan-only" in this test's name mean something: that
+    // a name still listed survives the same prune that drops an orphan.
+    repo.addToList("KeptChar", Nil, otherWorld, Nil, "OtherGuild", "300", "Druid",
+      "2026-05-30T09:00:00Z", ZonedDateTime.parse("2026-05-30T10:00:00Z"))
 
     val rows = repo.getList(listWorld)
     rows.map(_.name) should contain("ListChar")
@@ -83,6 +97,7 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     // else in the shared table is named in the keep set and must survive.
     repo.pruneList(everyone - "listchar")
     repo.getList(listWorld).map(_.name) should not contain "ListChar"
+    repo.getList(otherWorld).map(_.name) should contain("KeptChar")
     allCachedNames(provider) shouldBe (everyone - "listchar")
   }
 
