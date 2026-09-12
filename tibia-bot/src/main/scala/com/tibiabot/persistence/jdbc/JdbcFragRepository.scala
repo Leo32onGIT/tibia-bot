@@ -15,7 +15,27 @@ import scala.collection.mutable.ListBuffer
  *  `JdbcActivityRepository` and `JdbcGalthenRepository` take. */
 final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends FragRepository {
 
-  private def ensureTable(conn: Connection): Unit = {
+  /** Guilds whose table this process has already seen to.
+   *
+   *  Every call below has to be sure the table is there, but `record` and
+   *  `attachDeathMessage` run on the death path — once per death per guild —
+   *  and the check is five statements: the create, the index, and an
+   *  INFORMATION_SCHEMA lookup for each of the two added columns. That is five
+   *  round trips of ceremony around one insert, every death, forever.
+   *
+   *  Memoised per process rather than made conditional, so the shape of the
+   *  check does not have to change: it still runs in full, just once per guild
+   *  per boot. A restart pays it again, which is exactly when a schema could
+   *  have been changed underneath us. */
+  private val ensured = scala.collection.concurrent.TrieMap.empty[String, Unit]
+
+  private def ensureTable(guildId: String, conn: Connection): Unit =
+    if (!ensured.contains(guildId)) {
+      createTable(conn)
+      ensured.put(guildId, ())
+    }
+
+  private def createTable(conn: Connection): Unit = {
     val statement = conn.createStatement()
     statement.executeUpdate(
       """CREATE TABLE IF NOT EXISTS frag_event (
@@ -51,7 +71,7 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
 
   def record(guildId: String, events: List[FragEvent]): Unit =
     if (events.nonEmpty) JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      ensureTable(conn)
+      ensureTable(guildId, conn)
       // DO NOTHING rather than an update: the key already carries the instant, so
       // a second write of the same row is a death being reprocessed, not a
       // correction.
@@ -80,7 +100,7 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
   def attachDeathMessage(guildId: String, world: String, victim: String,
                          occurredAt: Instant, messageId: String): Unit =
     if (messageId.nonEmpty) JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      ensureTable(conn)
+      ensureTable(guildId, conn)
       // Every killer of that death gets the same message, so this is keyed on the
       // victim and the instant rather than on one row. Only rows still holding
       // the empty string are touched, so a re-post cannot overwrite a good id.
@@ -98,7 +118,7 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
   def tally(guildId: String, world: String, saveDay: LocalDate,
             topFraggers: Int, topRepeats: Int): FragTally =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      ensureTable(conn)
+      ensureTable(guildId, conn)
       val counts = sideCounts(conn, world, saveDay)
       // Five a side taken separately and then merged, so a one-sided day cannot
       // crowd the other side out of its own post.
@@ -216,7 +236,7 @@ final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends F
 
   def removeExpired(guildId: String, before: LocalDate): Unit =
     JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
-      ensureTable(conn)
+      ensureTable(guildId, conn)
       val statement = conn.prepareStatement("DELETE FROM frag_event WHERE save_day < ?;")
       statement.setDate(1, SqlDate.valueOf(before))
       statement.executeUpdate()
