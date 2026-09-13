@@ -97,23 +97,25 @@ object PvpEmbeds {
       StatLines.level(delta.level),
       s"$icon **${StatLines.number(delta.gained)}**")
 
-  /** The kill, with the death it came from hanging off the name as a link.
+  /** The kill, closing with a link to the death it came from.
    *
-   *  One row rather than a line of subtext under it. The link sits after the
-   *  side icon, in the run of markers a reader is already reading left to right,
-   *  because it says something about that character rather than about the row.
+   *  One row rather than a line of subtext under it, and the link is its own
+   *  cell at the end rather than another marker beside the name: the markers
+   *  say what a character *is*, and this is somewhere to go.
+   *
    *  A bare URL would be the one thing Discord turns into a preview card, but
    *  not inside an embed — those are only made from a message's own text — so
    *  the mark carries it.
    *
-   *  The link is dropped rather than rendered dead when the death was never
-   *  posted, which leaves a row that still reads on its own. */
+   *  Dropped rather than rendered dead when the death was never posted, which
+   *  [[StatLines.cells]] closes the row up around: no trailing separator with
+   *  nothing after it. */
   private def killLine(kill: TopKill, sideIcon: String => String, vocationOf: String => String,
-                       jumpUrl: String => Option[String]): String = {
-    val jump = jumpUrl(kill.deathMessageId).map(url => s"[:link:]($url)").getOrElse("")
-    val name = List(who(kill.name, sideIcon, vocationOf), jump).filter(_.nonEmpty).mkString(" ")
-    StatLines.cells(name, StatLines.level(kill.level))
-  }
+                       jumpUrl: String => Option[String]): String =
+    StatLines.cells(
+      who(kill.name, sideIcon, vocationOf),
+      StatLines.level(kill.level),
+      jumpUrl(kill.deathMessageId).map(url => s"[:link:]($url)").getOrElse(""))
 
   /** The frag tables keep names, not vocations — a killer is a name on a death
    *  message and nothing more — so both icons are looked up by that name here.

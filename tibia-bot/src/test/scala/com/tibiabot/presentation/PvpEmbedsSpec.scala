@@ -143,14 +143,21 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("[:link:](https://discord.com/x/222)")
   }
 
-  test("the link sits after the side icon, on the row itself") {
-    // Not a line of subtext under it, and not before the marker it follows: the
-    // whole run reads left to right as one answer about that character.
+  test("the link closes the row, after the level") {
+    // A cell of its own at the end, not a line of subtext under the row and not
+    // another marker beside the name — the markers say what the character is,
+    // the link is somewhere to go.
     val embed = build(tally(topEnemy = Some(TopKill("Bubble", 402, FragSide.Enemy, "111"))))
     embed.getDescription.linesIterator.toList should contain(
-      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> " +
-        "[:link:](https://discord.com/x/111) · *402*")
+      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · *402* " +
+        "· [:link:](https://discord.com/x/111)")
     embed.getDescription should not include "-# "
+  }
+
+  test("a row with no link does not end in a dangling separator") {
+    val embed = build(tally(topAlly = Some(TopKill("Bubble", 402, FragSide.Ally, ""))))
+    embed.getDescription.linesIterator.toList should contain(
+      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · *402*")
   }
 
   test("a kill whose death was never posted still reads, without a dead link") {
