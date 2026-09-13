@@ -152,6 +152,30 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |time VARCHAR(255) NOT NULL
            |);""".stripMargin
 
+      // Guild and vocation for everyone a world's poll has seen online lately.
+      // Keyed per world rather than globally, like every other cache here: a
+      // name is only unique within one.
+      //
+      // `seen` is bumped well inside the expiry window for a character who is
+      // still around (see TibiaBot's sheetCacheState), so a row going missing
+      // means they really have not been online, not that nothing about them
+      // changed.
+      val createCharacterSheetTable =
+        s"""CREATE TABLE IF NOT EXISTS character_sheet (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |guild_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |seen TIMESTAMP NOT NULL,
+           |PRIMARY KEY (world, name)
+           |);""".stripMargin
+
+      // The expiry sweep is the only query that does not lead with the world.
+      val createCharacterSheetSeenIndex =
+        s"""CREATE INDEX IF NOT EXISTS character_sheet_seen ON character_sheet (seen);""".stripMargin
+
       val createSatchelTable =
         s"""CREATE TABLE IF NOT EXISTS satchel (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -407,6 +431,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createKillStatisticsSummaryIndex)
       newStatement.executeUpdate(createWorldOnlineDailyTable)
       newStatement.executeUpdate(createWorldOnlineDailyIndex)
+      newStatement.executeUpdate(createCharacterSheetTable)
+      newStatement.executeUpdate(createCharacterSheetSeenIndex)
 
       newStatement.close()
     }

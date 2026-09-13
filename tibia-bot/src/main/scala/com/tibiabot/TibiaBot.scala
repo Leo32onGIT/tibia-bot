@@ -18,7 +18,7 @@ import net.dv8tion.jda.api.requests.ErrorResponse
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
 
-import java.time.ZonedDateTime
+import java.time.{Duration, ZonedDateTime}
 import scala.collection.immutable.ListMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
@@ -124,6 +124,15 @@ class TibiaBot(
    *  list shows has moved, without reading the row back to find out. Rebuilt
    *  from nothing on restart, so the first scan of each listed player refreshes. */
   private var listCacheState: Map[String, (Int, String, String)] = Map.empty
+  /** What was last written to the character-sheet cache, keyed by lowercased
+   *  name: the fields the row carries, and when it was written.
+   *
+   *  The same trick listCacheState plays, with one addition: the write is
+   *  repeated for a character nothing has changed about once the row is
+   *  `sheetRefresh` old. That table expires on `seen`, so writing only on change
+   *  would quietly delete the steadiest characters on the world — the ones who
+   *  log in every day and never move guild — and never write them again. */
+  private var sheetCacheState: Map[String, ((String, String, Int), ZonedDateTime)] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -145,6 +154,12 @@ class TibiaBot(
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
+  // How old a character-sheet row is allowed to get before the next poll that
+  // sees that character writes it again. Well inside the 25 hours the table
+  // keeps, so a character who is around every day never expires out of it, and
+  // long enough that the steady state is a few hundred writes an hour per world
+  // rather than a thousand every poll.
+  private val sheetRefresh = Duration.ofHours(6)
   private val cooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
   private val cooldownMinutes = 30L
   // Benign, operator-side failures (channel/message deleted, perms removed) —
@@ -247,6 +262,11 @@ class TibiaBot(
     // local val: this whole flow stage runs at concurrency 1, single-threaded per tick.
     val levelUpBuffer = mutable.Map.empty[String, (TextChannel, ListBuffer[String])]
 
+    // Guild and vocation for everyone this tick read a sheet for, filed together
+    // at the end of the stage. Safe as a plain local for the same reason
+    // levelUpBuffer is: the stage runs at concurrency 1.
+    val sheetBuffer = ListBuffer.empty[domain.SheetCache]
+
     val newDeaths = characterResponses.flatMap {
       case Right(char) =>
         val charName = char.character.character.name
@@ -280,6 +300,27 @@ class TibiaBot(
               sheet.last_login.getOrElse(""), ZonedDateTime.now())
             listCacheState = listCacheState + (charName.toLowerCase -> fingerprint)
           }
+        }
+
+        // Keep the same sheet for everybody else, which is who a PVP summary is
+        // mostly made of: a character reached through a hunted guild is on
+        // nobody's list by name and so has no cached sheet of their own, and
+        // every row about them used to render with no vocation and no guild
+        // marker for that reason alone. The poll has already paid for this
+        // sheet — dropping the two fields that outlive the tick bought nothing.
+        //
+        // Guarded the same way the list cache above is, with a refresh so the
+        // row cannot expire under a character who is still here; see
+        // sheetCacheState.
+        val sheetKey = charName.toLowerCase
+        val sheetFields = (guildName, char.character.character.vocation, char.character.character.level.toInt)
+        val unchanged = sheetCacheState.get(sheetKey).exists {
+          case (fields, writtenAt) => fields == sheetFields && writtenAt.plus(sheetRefresh).isAfter(now)
+        }
+        if (!unchanged) {
+          sheetBuffer += domain.SheetCache(world, sheetKey, charName, guildName,
+            char.character.character.vocation, char.character.character.level.toInt, now)
+          sheetCacheState = sheetCacheState + (sheetKey -> ((sheetFields, now)))
         }
 
         // Incoming world transfer, detected once for the world rather than once
@@ -848,6 +889,16 @@ class TibiaBot(
     // tracking this world, and doing that inside a mapAsync(1) stage put it on
     // the critical path for that tick's deaths and for the next poll behind
     // them, despite only actually firing every ~2 minutes per guild at best.
+
+    // Fire and forget, off the stream thread: this is a cache nothing in this
+    // tick reads, and a poll must not wait on a write that only a post hours
+    // from now will care about. A failure costs the icons on some rows of a
+    // daily summary, which is not worth holding a world's deaths for.
+    if (sheetBuffer.nonEmpty) {
+      val rows = sheetBuffer.toList
+      Future(BotApp.addSheetsCache(rows)).failed.foreach(error =>
+        logger.warn(s"Could not cache ${rows.size} character sheet(s) for world '$world': ${error.getMessage}"))
+    }
 
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
@@ -1886,6 +1937,10 @@ class TibiaBot(
       diff < deathRecentDuration
     }
     levelTracker.prune(now, recentLevelExpiry)
+    // Fingerprints for characters who have stopped showing up. Their rows are
+    // swept from the table on the same window, so keeping the memo would only
+    // suppress the write that puts them back.
+    sheetCacheState = sheetCacheState.filter { case (_, (_, writtenAt)) => writtenAt.plusHours(25).isAfter(now) }
   }
 
   private def vocEmoji(vocation: String): String = presentation.Emojis.vocEmoji(vocation)

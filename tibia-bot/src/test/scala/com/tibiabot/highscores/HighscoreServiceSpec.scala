@@ -37,6 +37,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
 
   private object NoopRepo extends HighscoreRepository {
     def load(world: String, category: String): Map[String, HighscoreRecord] = Map.empty
+    def vocations(world: String): Map[String, String] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
     def recordEvents(events: List[HighscoreEvent]): Unit = ()
     def events(world: String, since: Instant): List[HighscoreEvent] = Nil
@@ -170,6 +171,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     val filed = mutable.ListBuffer.empty[HighscoreEvent]
     val repo = new HighscoreRepository {
       def load(world: String, category: String): Map[String, HighscoreRecord] = previous
+      def vocations(world: String): Map[String, String] = Map.empty
       def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
       def recordEvents(events: List[HighscoreEvent]): Unit = filed.synchronized { filed ++= events }
       def events(world: String, since: Instant): List[HighscoreEvent] = Nil

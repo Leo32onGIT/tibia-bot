@@ -24,6 +24,7 @@ import scala.jdk.CollectionConverters._
 import java.time.ZoneId
 import scala.util.Random
 import scala.concurrent.Await
+import scala.util.control.NonFatal
 import com.tibiabot.presentation.Embeds.BrandColor
 import com.tibiabot.presentation.Names
 
@@ -41,6 +42,7 @@ object BotApp extends App with StrictLogging {
   type WorldTransfer = domain.WorldTransfer; val WorldTransfer = domain.WorldTransfer
   type DeathsCache = domain.DeathsCache; val DeathsCache = domain.DeathsCache
   type LevelsCache = domain.LevelsCache; val LevelsCache = domain.LevelsCache
+  type SheetCache = domain.SheetCache; val SheetCache = domain.SheetCache
   type ListCache = domain.ListCache; val ListCache = domain.ListCache
   type SatchelStamp = domain.SatchelStamp; val SatchelStamp = domain.SatchelStamp
   type BoostedStamp = domain.BoostedStamp; val BoostedStamp = domain.BoostedStamp
@@ -1367,44 +1369,111 @@ object BotApp extends App with StrictLogging {
       }
     }
 
+  /** What one world's post knows about a character beyond their name: which
+   *  guild they are in, and what vocation they are.
+   *
+   *  Two caches behind one lookup, because neither covers the post on its own.
+   *  The sheets kept for the hunted and allied lists are a character's own page
+   *  and outlive any absence, but exist only for players somebody listed *by
+   *  name*. The poll's sheet cache covers everybody a world has seen online in
+   *  the last day, which on a PVP day is nearly everyone in the post — including
+   *  the people hunted through their guild, who have no sheet of their own and
+   *  used to render with no icons at all.
+   *
+   *  The poll's copy wins where both have somebody: they were read on the same
+   *  schedule, and the list cache is only rewritten when something it shows
+   *  moves, so its copy is the older of the two for anybody who changed guild
+   *  without changing level. Field by field rather than row by row, because the
+   *  two blanks do not mean the same thing — a blank guild is the answer "they
+   *  are in none", which has to win over a stale guild name, while a blank
+   *  vocation is only ever a gap, since every character has one.
+   *
+   *  Empty rather than fatal if a read fails: the post is worth more than its
+   *  icons, and this runs with the whole day's figures already in hand.
+   */
+  private final case class StatisticsSheet(guild: String, vocation: String)
+
+  private def statisticsSheets(world: String): Map[String, StatisticsSheet] = {
+    def read[A](what: String)(query: => Map[String, A]): Map[String, A] =
+      try query catch {
+        case NonFatal(error) =>
+          logger.warn(s"Statistics: could not read the $what for '$world': ${error.getMessage}")
+          Map.empty[String, A]
+      }
+    val listed = read("cached list sheets")(
+      cacheRepository.getList(world).map(row =>
+        row.name.toLowerCase -> StatisticsSheet(row.guild, row.vocation)).toMap)
+    val seen = read("cached online sheets")(
+      cacheRepository.getSheets(world).map { case (key, row) =>
+        key -> StatisticsSheet(row.guild, row.vocation) })
+    (listed.keySet ++ seen.keySet).iterator.map { key =>
+      val fresh = seen.get(key)
+      val older = listed.get(key)
+      key -> StatisticsSheet(
+        guild = fresh.map(_.guild).orElse(older.map(_.guild)).getOrElse(""),
+        vocation = fresh.map(_.vocation).filter(_.nonEmpty)
+          .orElse(older.map(_.vocation)).getOrElse(""))
+    }.toMap
+  }
+
   /** The ally/enemy icon a character gets in one discord's statistics post.
    *
    *  This is what makes the post guild-specific: the board is the world's top
    *  thousand and identical everywhere, but who on it counts as an ally is that
    *  discord's own answer. Same classification the online list and the deaths
-   *  channel use, so a name carries the same icon wherever it appears.
+   *  channel use, so a name carries the same icon wherever it appears — which
+   *  means the guild markers too, not just the player ones.
    *
-   *  Guild names are not known here — the experience tables store a character's
-   *  vocation and level, never their guild — so a character is classified on the
-   *  player lists alone. Somebody hunted through their guild rather than by name
-   *  therefore reads as neutral, which is a quieter wrong answer than fetching
-   *  sixty character sheets every morning to avoid it.
+   *  A character's guild comes from the cached sheets, and failing that from
+   *  this discord's activity rows, which still know the membership of a hunted
+   *  guild for a member who has not been online in a day. Nothing is fetched: a
+   *  name none of the three has reads as neutral, which is now a rare answer
+   *  rather than the usual one.
    */
-  private def statisticsSideIcon(guildId: String): String => String = {
+  private def statisticsSideIcon(guildId: String, sheets: Map[String, StatisticsSheet]): String => String = {
     val allies = alliedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
     val hunted = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val alliedGuilds = alliedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val huntedGuilds = huntedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val activity = activityIndex(guildId)
     name => {
       val key = name.toLowerCase
-      if (allies.contains(key)) Config.ally
-      else if (hunted.contains(key)) Config.enemy
-      else ""
+      val guildName = sheets.get(key).map(_.guild).filter(_.nonEmpty)
+        .orElse(activity.get(key).map(_.guild)).getOrElse("")
+      presentation.GuildIcons.guildIcon(
+        guildName,
+        allyGuild = alliedGuilds.contains(guildName.toLowerCase),
+        huntedGuild = huntedGuilds.contains(guildName.toLowerCase),
+        allyPlayer = allies.contains(key),
+        huntedPlayer = hunted.contains(key))
     }
   }
 
   /** A character's vocation on one world, by lowercased name, for the PVP rows.
    *
    *  Frags store names and nothing else — a killer is a name on a death message —
-   *  so the vocation has to come from somewhere that already knows it. That is
-   *  the cached character sheets the hunted and allied lists are drawn from,
-   *  which covers exactly the population a PVP post is about: a frag needs a
-   *  listed victim, and the fraggers worth naming are on somebody's list too.
+   *  so the vocation has to come from somewhere that already knows it. The
+   *  cached sheets answer for anybody a world has seen in the last day or that
+   *  somebody lists by name; the world's highscore readings answer for the rest,
+   *  which is mostly people who fought and then did not log in again before the
+   *  post went out.
    *
-   *  Read once per post rather than per row, and empty for anybody with no sheet
-   *  cached — which renders as no icon rather than a guessed one.
+   *  Sheets first: they are a character's own page, where a highscore reading is
+   *  a row in a table that a rename or a transfer can leave behind.
+   *
+   *  Both read once per post rather than per row, and empty for anybody neither
+   *  knows — which renders as no icon rather than a guessed one.
    */
-  private def statisticsVocation(world: String): String => String = {
-    val sheets = cacheRepository.getList(world).map(row => row.name.toLowerCase -> row.vocation).toMap
-    name => sheets.getOrElse(name.toLowerCase, "")
+  private def statisticsVocation(world: String, sheets: Map[String, StatisticsSheet]): String => String = {
+    val scores = try highscoreRepository.vocations(world) catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not read the highscore vocations for '$world': ${error.getMessage}")
+        Map.empty[String, String]
+    }
+    name => {
+      val key = name.toLowerCase
+      sheets.get(key).map(_.vocation).filter(_.nonEmpty).getOrElse(scores.getOrElse(key, ""))
+    }
   }
 
   /** A link back to the deaths-channel post a kill came from, or None when it was
@@ -1505,7 +1574,11 @@ object BotApp extends App with StrictLogging {
     targets = () => statisticsTargets(),
     announce = (target, report, frags, enemyLosses) =>
       statisticsChannelFor(target).foreach { channel =>
-        val side = statisticsSideIcon(target.guildId)
+        // Read before the send is queued rather than inside it: both lookups are
+        // database reads, and the queue is paced.
+        val sheets = statisticsSheets(target.world)
+        val side = statisticsSideIcon(target.guildId, sheets)
+        val vocation = statisticsVocation(target.world, sheets)
         outboundSender.enqueue("statistics") { () =>
           // The world, then the war, then what the world killed, then what might
           // happen today — one message, so a channel somebody scrolls through
@@ -1521,7 +1594,7 @@ object BotApp extends App with StrictLogging {
               report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
               Config.levelUpEmoji, Config.levelDownEmoji) :::
             presentation.PvpEmbeds.build(
-              target.world, frags, enemyLosses, side, statisticsVocation(target.world),
+              target.world, frags, enemyLosses, side, vocation,
               Config.barEmoji,
               presentation.Bars.Scale.forWorld(report.averageOnline, report.averageLevel),
               Config.levelDownEmoji, jumpToDeath(target)) :::
@@ -1580,6 +1653,7 @@ object BotApp extends App with StrictLogging {
       }
       removeDeathsCache(ZonedDateTime.now())
       removeLevelsCache(ZonedDateTime.now())
+      removeSheetsCache(ZonedDateTime.now())
       cleanHuntedList()
       reviewQuietListedPlayers()
       galthenService.cleanExpired()
@@ -2368,6 +2442,13 @@ object BotApp extends App with StrictLogging {
 
   private def removeLevelsCache(time: ZonedDateTime): Unit =
     cacheRepository.removeExpiredLevels(time)
+
+  def getSheetsCache(world: String): Map[String, SheetCache] = cacheRepository.getSheets(world)
+
+  def addSheetsCache(rows: List[SheetCache]): Unit = cacheRepository.recordSheets(rows)
+
+  private def removeSheetsCache(time: ZonedDateTime): Unit =
+    cacheRepository.removeExpiredSheets(time)
 
   def getRenameCooldowns(world: String): Map[String, ZonedDateTime] = renameCooldownRepository.loadForWorld(world)
 

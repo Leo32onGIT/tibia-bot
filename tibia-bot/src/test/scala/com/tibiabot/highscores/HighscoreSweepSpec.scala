@@ -59,6 +59,7 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     val upserts = mutable.ListBuffer.empty[(String, String, List[HighscoreEntry], Instant)]
     val filed = mutable.ListBuffer.empty[HighscoreEvent]
     def load(world: String, category: String): Map[String, HighscoreRecord] = seed
+    def vocations(world: String): Map[String, String] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit =
       upserts += ((world, category, entries, snapshotAt))
     def recordEvents(events: List[HighscoreEvent]): Unit = filed ++= events

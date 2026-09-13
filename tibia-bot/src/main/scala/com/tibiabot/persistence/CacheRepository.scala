@@ -1,6 +1,6 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.{BoostedCache, DeathsCache, LevelsCache, ListCache}
+import com.tibiabot.domain.{BoostedCache, DeathsCache, LevelsCache, ListCache, SheetCache}
 
 import java.time.ZonedDateTime
 
@@ -36,6 +36,28 @@ trait CacheRepository {
    *  losing a row something still wants.
    */
   def pruneList(keep: Set[String]): Int
+
+  /** Every character this world's poll has seen online inside the retention
+   *  window, as lowercased name -> their last sheet.
+   *
+   *  One query per world for a caller that wants a handful of names and cannot
+   *  say which until it has them — see [[com.tibiabot.domain.SheetCache]] for
+   *  what this exists to answer. */
+  def getSheets(world: String): Map[String, SheetCache]
+
+  /** File what the poll just read, in one batch, last reading of a name winning.
+   *
+   *  A batch rather than a row at a time because the caller has a whole world's
+   *  online population in hand at once, and because the writes it skips — a
+   *  character whose sheet has not moved — are decided before it gets here. */
+  def recordSheets(rows: List[SheetCache]): Unit
+
+  /** Drop sheets for characters not seen for 25 hours relative to `now`.
+   *
+   *  The same window the levels cache keeps, and for the same reason: the daily
+   *  statistics post reports the save day that just closed, so a character who
+   *  fought at the start of it must still be here when the post goes out. */
+  def removeExpiredSheets(now: ZonedDateTime): Unit
 
   /** Read `botId`'s own boosted boss/creature row (creating the table, the
    *  bot_id column and that bot's row if needed).

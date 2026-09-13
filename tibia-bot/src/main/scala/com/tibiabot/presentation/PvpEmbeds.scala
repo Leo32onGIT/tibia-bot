@@ -35,10 +35,10 @@ object PvpEmbeds {
 
   /** @param barScale  how this world turns frags into a bar — what fills it, and
    *                   what an ordinary character on it is worth; see [[Bars.Scale]]
-   *  @param vocationOf the vocation of a character, by lowercased name, from the
-   *                   sheets the hunted and allied lists are drawn from; empty
-   *                   for somebody nothing has recorded, which renders as no
-   *                   icon rather than a guessed one
+   *  @param vocationOf the vocation of a character, by lowercased name, from
+   *                   whatever the caller has already recorded about them; empty
+   *                   for somebody nothing has, which renders as no icon rather
+   *                   than a guessed one
    *  @param jumpUrl builds a link back to a death from its stored message id,
    *                 or None when the death was never posted — the channel can be
    *                 off, the level under `deaths_min`, or the send have failed
@@ -69,9 +69,9 @@ object PvpEmbeds {
       if (enemyLosses.isEmpty) None
       else Some(section("Most Exp Lost", enemyLosses.map(lossLine(_, sideIcon, xpDown)))),
       frags.topEnemyKilled.map(kill =>
-        section("Top Enemy Killed", killLines(kill, sideIcon, vocationOf, jumpUrl))),
+        section("Top Enemy Killed", List(killLine(kill, sideIcon, vocationOf, jumpUrl)))),
       frags.topAllyKilled.map(kill =>
-        section("Top Ally Killed", killLines(kill, sideIcon, vocationOf, jumpUrl)))
+        section("Top Ally Killed", List(killLine(kill, sideIcon, vocationOf, jumpUrl))))
     ).flatten
 
     EmbedPages.build(PvpColor, sections.mkString("\n"))
@@ -97,15 +97,22 @@ object PvpEmbeds {
       StatLines.level(delta.level),
       s"$icon **${StatLines.number(delta.gained)}**")
 
-  /** The kill itself, and under it the death it came from — as subtext, since the
-   *  kill is the fact and the link is a way to go and look at it.
+  /** The kill, with the death it came from hanging off the name as a link.
+   *
+   *  One row rather than a line of subtext under it. The link sits after the
+   *  side icon, in the run of markers a reader is already reading left to right,
+   *  because it says something about that character rather than about the row.
+   *  A bare URL would be the one thing Discord turns into a preview card, but
+   *  not inside an embed — those are only made from a message's own text — so
+   *  the mark carries it.
    *
    *  The link is dropped rather than rendered dead when the death was never
-   *  posted, which leaves a line that still reads on its own. */
-  private def killLines(kill: TopKill, sideIcon: String => String, vocationOf: String => String,
-                        jumpUrl: String => Option[String]): List[String] = {
-    val row = StatLines.cells(who(kill.name, sideIcon, vocationOf), StatLines.level(kill.level))
-    row :: jumpUrl(kill.deathMessageId).map(url => s"-# [Jump to the death]($url)").toList
+   *  posted, which leaves a row that still reads on its own. */
+  private def killLine(kill: TopKill, sideIcon: String => String, vocationOf: String => String,
+                       jumpUrl: String => Option[String]): String = {
+    val jump = jumpUrl(kill.deathMessageId).map(url => s"[:link:]($url)").getOrElse("")
+    val name = List(who(kill.name, sideIcon, vocationOf), jump).filter(_.nonEmpty).mkString(" ")
+    StatLines.cells(name, StatLines.level(kill.level))
   }
 
   /** The frag tables keep names, not vocations — a killer is a name on a death

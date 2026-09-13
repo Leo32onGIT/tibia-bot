@@ -120,6 +120,7 @@ class DailyPostPipelineSpec extends AnyFunSuite with Matchers with ScalaFutures 
 
   private object NoopHighscores extends HighscoreRepository {
     def load(world: String, category: String): Map[String, HighscoreRecord] = Map.empty
+    def vocations(world: String): Map[String, String] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
     def recordEvents(events: List[HighscoreEvent]): Unit = ()
     def events(world: String, since: Instant): List[HighscoreEvent] = Nil

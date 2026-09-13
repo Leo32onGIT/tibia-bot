@@ -48,6 +48,26 @@ final class JdbcHighscoreRepository(connectionProvider: ConnectionProvider) exte
       records.result()
     }
 
+  /** Read across every category at once, which is what makes this worth having:
+   *  a character in any one of a world's lists answers for the whole post, and
+   *  the weapon-skill lists between them hold most of the people a PVP summary
+   *  names. The same character in several categories carries the same vocation,
+   *  so the duplicates collapse on the way into the map rather than in SQL. */
+  def vocations(world: String): Map[String, String] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        "SELECT name,vocation FROM highscore_value WHERE world = ? AND vocation <> '';")
+      statement.setString(1, world)
+      val result = statement.executeQuery()
+
+      val vocations = Map.newBuilder[String, String]
+      while (result.next())
+        vocations += Option(result.getString("name")).getOrElse("") -> result.getString("vocation")
+
+      statement.close()
+      vocations.result()
+    }
+
   def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit =
     if (entries.nonEmpty) JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(

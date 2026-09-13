@@ -30,6 +30,22 @@ trait HighscoreRepository {
    *  character. */
   def load(world: String, category: String): Map[String, HighscoreRecord]
 
+  /** Every character one world's lists have a reading for, as lowercased name ->
+   *  vocation.
+   *
+   *  Read by the PVP post, whose rows keep a name and nothing else — a killer is
+   *  a name on a death message. The cached character sheets behind the hunted
+   *  and allied lists answer for the players somebody listed by name, and this
+   *  answers for everybody else: a character reached through a hunted *guild*
+   *  has no sheet of their own, and the people who show up in a PVP summary are
+   *  exactly the people a world's weapon-skill lists are made of.
+   *
+   *  One query per world rather than one per name, because the caller wants a
+   *  handful of names and cannot say which until the tally is in hand. Rows
+   *  whose vocation was never recorded are left out, so a lookup that misses and
+   *  one that finds an empty string are the same answer. */
+  def vocations(world: String): Map[String, String]
+
   /** Write a whole list's readings in one batch, inserting new characters and
    *  updating existing ones.
    *

@@ -139,15 +139,25 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
       topAlly = Some(TopKill("Sarnoxx", 388, FragSide.Ally, "222"))))
     embed.getDescription should include("### Top Enemy Killed")
     embed.getDescription should include("### Top Ally Killed")
-    embed.getDescription should include("-# [Jump to the death](https://discord.com/x/111)")
-    embed.getDescription should include("-# [Jump to the death](https://discord.com/x/222)")
+    embed.getDescription should include("[:link:](https://discord.com/x/111)")
+    embed.getDescription should include("[:link:](https://discord.com/x/222)")
+  }
+
+  test("the link sits after the side icon, on the row itself") {
+    // Not a line of subtext under it, and not before the marker it follows: the
+    // whole run reads left to right as one answer about that character.
+    val embed = build(tally(topEnemy = Some(TopKill("Bubble", 402, FragSide.Enemy, "111"))))
+    embed.getDescription.linesIterator.toList should contain(
+      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> " +
+        "[:link:](https://discord.com/x/111) · *402*")
+    embed.getDescription should not include "-# "
   }
 
   test("a kill whose death was never posted still reads, without a dead link") {
     val embed = build(tally(topEnemy = Some(TopKill("Vestrik", 402, FragSide.Enemy, ""))))
     embed.getDescription should include("**[Vestrik](")
     embed.getDescription should include("*402*")
-    embed.getDescription should not include "Jump to the death"
+    embed.getDescription should not include ":link:"
   }
 
   test("sections with nothing in them are absent rather than empty headings") {
