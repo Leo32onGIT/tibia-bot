@@ -1264,7 +1264,7 @@ class TibiaBot(
                               val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                               val adminEmbed = new EmbedBuilder()
                               adminEmbed.setTitle(":robot: enemy automatically detected:")
-                              adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
+                              adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})**)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
                               sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
