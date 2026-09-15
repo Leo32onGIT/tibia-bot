@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{FiniteDuration, MILLISECONDS}
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The pacing figure the sweep reads between requests.
@@ -20,13 +20,23 @@ final class HighscoreGap(initial: FiniteDuration) {
   def set(gap: FiniteDuration): Unit = current = gap
 }
 
+/** @param seedLatency what to assume a page costs beyond its sleep until a
+ *                     sweep has measured it. Defaulted rather than configured:
+ *                     it is replaced within one sweep, so it is a starting
+ *                     point and not a setting anybody has to keep right. */
 final case class HighscoreSettings(
     window: FiniteDuration,
     workers: Int,
-    minRequestGap: FiniteDuration
+    minRequestGap: FiniteDuration,
+    seedLatency: FiniteDuration = HighscorePace.SeedLatency
 )
 
-/** What a whole snapshot's sweep did, for the log line and the dashboard. */
+/** What a whole snapshot's sweep did, for the log line and the dashboard.
+ *
+ *  `latency` is what one page cost beyond its sleep, which is the figure the
+ *  next sweep paces itself by — see [[HighscorePace.observedLatency]]. It is
+ *  here rather than kept privately because a sweep that no longer fits its
+ *  window shows up in this number first. */
 final case class SweepSummary(
     snapshotAt: Instant,
     worlds: Int,
@@ -34,7 +44,8 @@ final case class SweepSummary(
     pagesRead: Int,
     pagesFailed: Int,
     advances: Int,
-    took: java.time.Duration
+    took: java.time.Duration,
+    latency: FiniteDuration
 )
 
 /** Drives the highscore sweep: notices when tibia.com has rebuilt the
@@ -67,6 +78,13 @@ final class HighscoreService(
   private val running = new AtomicBoolean(false)
   @volatile private var lastSnapshot: Option[Instant] = None
   @volatile private var lastSummary: Option[SweepSummary] = None
+
+  /** What a page cost beyond its sleep, the last time a sweep measured it.
+   *
+   *  Seeded rather than configured, and replaced by every sweep that finishes,
+   *  so the pacing tracks however far away tibia.com is today without a knob
+   *  anybody has to keep right. A restart costs one sweep at the seed. */
+  @volatile private var latency: FiniteDuration = settings.seedLatency
 
   def snapshotSeen: Option[Instant] = lastSnapshot
   def lastSweep: Option[SweepSummary] = lastSummary
@@ -121,13 +139,31 @@ final class HighscoreService(
     val items = for { world <- sweptWorlds; list <- lists } yield (world, list)
 
     val requests = HighscorePace.requestsFor(sweptWorlds.size, lists.size, Highscores.MaxPages)
-    val gap = HighscorePace.perRequestGap(requests, settings.window, settings.workers, settings.minRequestGap)
+    val perRequest = latency
+    val gap = HighscorePace.perRequestGap(
+      requests, settings.window, settings.workers, settings.minRequestGap, perRequest)
     pace.set(gap)
 
-    val estimate = HighscorePace.estimatedDuration(requests, gap, settings.workers)
+    val estimate = HighscorePace.estimatedDuration(requests, gap, settings.workers, perRequest)
     logger.info(
       s"Highscores: snapshot $snapshotAt is new — sweeping ${sweptWorlds.size} world(s), " +
-        s"$requests page(s) at ${gap.toMillis}ms across ${settings.workers} lane(s), ~${estimate.toMinutes}m")
+        s"$requests page(s) at ${gap.toMillis}ms + ~${perRequest.toMillis}ms each " +
+        s"across ${settings.workers} lane(s), ~${estimate.toMinutes}m")
+
+    // Said out loud, because a sweep that outlives its window does not fail —
+    // it finishes late, the next probe finds it still running and skips, and
+    // the one after that starts later still, until whole snapshots go unread.
+    // That is what happened through September 2026 while the estimate said 44
+    // minutes and the sweep took 72, so the estimate saying so is the guard.
+    // Nothing is adjusted here, and the floor is half the condition rather than
+    // an aside: above it the arithmetic has already sized the gap to the window
+    // and any excess is the rounding of a part-page, while at it there is no
+    // gap left to give back and the only way to go faster is a burst.
+    if (gap <= settings.minRequestGap && estimate > settings.window)
+      logger.warn(
+        s"Highscores: ${sweptWorlds.size} world(s) will not fit — ~${estimate.toMinutes}m of work " +
+          s"in a ${settings.window.toMinutes}m window, held at the ${gap.toMillis}ms floor. " +
+          "Snapshots will start being missed; raise highscores.workers or window-fraction")
 
     // Round-robin rather than contiguous blocks, so no lane ends up holding all
     // of the local-instance lists while the others sit on public ones.
@@ -135,6 +171,16 @@ final class HighscoreService(
 
     Future.sequence(lanes.map(lane => runLane(lane, snapshotAt))).map { laneResults =>
       val results = laneResults.flatten
+      val took = java.time.Duration.between(startedAt, now())
+
+      // Only the pages actually asked for: readPages stops at the end of a short
+      // list rather than walking to 20, and the ones it never asked for cost
+      // nothing to divide into the time this took.
+      val attempted = results.map(one => one.pagesRead + one.pagesFailed).sum
+      val measured = HighscorePace.observedLatency(
+        FiniteDuration(took.toMillis, MILLISECONDS), attempted, gap, settings.workers)
+      measured.foreach(latency = _)
+
       val summary = SweepSummary(
         snapshotAt = snapshotAt,
         worlds = sweptWorlds.size,
@@ -142,12 +188,14 @@ final class HighscoreService(
         pagesRead = results.map(_.pagesRead).sum,
         pagesFailed = results.map(_.pagesFailed).sum,
         advances = results.map(_.advances.size).sum,
-        took = java.time.Duration.between(startedAt, now())
+        took = took,
+        latency = measured.getOrElse(perRequest)
       )
       lastSummary = Some(summary)
       logger.info(
         s"Highscores: swept ${summary.lists} list(s) over ${summary.worlds} world(s) in ${summary.took.toMinutes}m — " +
-          s"${summary.pagesRead} page(s) read, ${summary.pagesFailed} failed, ${summary.advances} advance(s)")
+          s"${summary.pagesRead} page(s) read, ${summary.pagesFailed} failed, ${summary.advances} advance(s), " +
+          s"${summary.latency.toMillis}ms per page")
     }
   }
 

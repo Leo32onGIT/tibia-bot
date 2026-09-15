@@ -65,7 +65,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
       sweep = new HighscoreSweep(api, NoopRepo, NoopExperience, () => pace.get, _ => Future.unit),
       pace = pace,
       trackedWorlds = () => worlds,
-      settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli)
+      settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli, seedLatency = Duration.Zero)
     )
   }
 
@@ -198,7 +198,7 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
       sweep = new HighscoreSweep(api, repo, NoopExperience, () => pace.get, _ => Future.unit),
       pace = pace,
       trackedWorlds = () => List("Antica"),
-      settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli)
+      settings = HighscoreSettings(1.second, workers = 2, minRequestGap = 1.milli, seedLatency = Duration.Zero)
     )
     await(svc.tick())
 
@@ -208,5 +208,44 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     // behalf.
     svc.lastSweep.map(_.advances) shouldBe Some(HighscoreLists.skills.size)
     filed.map(_.category).distinct.toSet shouldBe HighscoreLists.skills.map(_.category.slug).toSet
+  }
+
+  /** Hands back `start`, then `start + took`, once per sweep. `runSweep` reads
+   *  the clock exactly twice — once before the lanes, once after — so this
+   *  makes a sweep take a known time without one actually taking it. */
+  private class SweepClock(start: Instant, took: java.time.Duration) extends (() => Instant) {
+    private val reads = new AtomicInteger(0)
+    def apply(): Instant = if (reads.getAndIncrement() % 2 == 0) start else start.plus(took)
+  }
+
+  test("what one sweep measured is what the next one is paced by") {
+    // The September 2026 drift in miniature. One world is 240 pages over two
+    // lanes in a ten-minute window, so the sleeps alone come to 5s a page. Let
+    // each page really take 5.4s, and the 400ms the request cost has to come
+    // out of the next sweep's sleeping rather than be added on top of it —
+    // otherwise every sweep overruns by the same margin, later each time, until
+    // it starts missing snapshots altogether.
+    val api = new StubApi()
+    val pace = new HighscoreGap(1.milli)
+    val perLane = HighscoreLists.all.size * Highscores.MaxPages / 2
+    val svc = new HighscoreService(
+      api = api,
+      sweep = new HighscoreSweep(api, NoopRepo, NoopExperience, () => pace.get, _ => Future.unit),
+      pace = pace,
+      trackedWorlds = () => List("Antica"),
+      settings = HighscoreSettings(10.minutes, workers = 2, minRequestGap = 1.milli, seedLatency = Duration.Zero),
+      now = new SweepClock(Instant.parse("2026-09-02T06:00:00Z"), java.time.Duration.ofMillis(5400L * perLane))
+    )
+
+    await(svc.tick())
+    // Nothing measured yet, so the first sweep spends the whole budget sleeping.
+    pace.get shouldBe 5.seconds
+    svc.lastSweep.map(_.latency) shouldBe Some(400.millis)
+
+    api.generatedAt = "2026-09-02T07:00:00Z"
+    await(svc.tick())
+    // And the second one hands those 400ms back, so it lands on the budget
+    // rather than 8% past it.
+    pace.get shouldBe 4600.millis
   }
 }
