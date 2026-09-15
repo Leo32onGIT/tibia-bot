@@ -551,13 +551,27 @@ final class RespawnDashboardRoute(
       post {
         withWrite(guildId, AccessTier.Moderator) { userId =>
           entity(as[String]) { body =>
-            val fields = RespawnDashboardRoute.parseBody(body)
-            (fields.get("code").map(_.trim).filter(_.nonEmpty),
-             fields.get("startsAt").flatMap(RespawnDashboardRoute.instantAt),
-             fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption).filter(_ > 0)) match {
-              case (Some(code), Some(start), Some(minutes)) =>
-                actionResult(guildId, actions.editSlot(guildId, userId, code, start, minutes))
-              case _ => badRequest("Changing a slot's length needs a spawn, which day, and how long.")
+            RespawnDashboardRoute.slotEditIn(body) match {
+              case Some((code, start, to, minutes)) =>
+                actionResult(guildId, actions.editSlot(guildId, userId, code, start, to, minutes))
+              case None => badRequest("Changing a slot needs a spawn, which day, and how long.")
+            }
+          }
+        }
+      }
+    } ~
+    // The owner's own version of the two above. Behind the member gate, with the
+    // check that it really is theirs made where the write happens rather than
+    // here: this route knows who is asking, and only the service knows whose
+    // evening it is.
+    path("g" / Segment / "edit-booking") { guildId =>
+      post {
+        withWrite(guildId, AccessTier.Member) { userId =>
+          entity(as[String]) { body =>
+            RespawnDashboardRoute.slotEditIn(body) match {
+              case Some((code, start, to, minutes)) =>
+                actionResult(guildId, actions.editOwnSlot(guildId, userId, code, start, to, minutes))
+              case None => badRequest("Changing a booking needs a spawn, which day, and how long.")
             }
           }
         }
@@ -968,6 +982,19 @@ object RespawnDashboardRoute {
   }
 
   private def instant(when: java.time.ZonedDateTime): JsValue = JsString(when.toInstant.toString)
+
+  /** The four fields both ways of changing one window take. `toStartsAt` is
+   *  absent when only the length is changing, and a blank one reads the same —
+   *  the page sends the field either way rather than deciding what to omit. */
+  private[web] def slotEditIn(body: String): Option[(String, java.time.ZonedDateTime,
+                                                     Option[java.time.ZonedDateTime], Int)] = {
+    val fields = parseBody(body)
+    for {
+      code <- fields.get("code").map(_.trim).filter(_.nonEmpty)
+      start <- fields.get("startsAt").flatMap(instantAt)
+      minutes <- fields.get("minutes").flatMap(m => scala.util.Try(m.toInt).toOption).filter(_ > 0)
+    } yield (code, start, fields.get("toStartsAt").filter(_.trim.nonEmpty).flatMap(instantAt), minutes)
+  }
 
   /** How many rows of "up next" a spawn sends. Matches
    *  `RespawnEmbeds.RowsPerList`, because the panel and the Discord card are

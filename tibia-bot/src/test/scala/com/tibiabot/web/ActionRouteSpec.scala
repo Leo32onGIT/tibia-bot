@@ -118,9 +118,20 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
       moderatorCalls = moderatorCalls :+ s"move:$code:${startsAt.toInstant}:$toUserId"; result
     }
     def editSlot(guildId: String, actorId: String, code: String,
-                 startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] = {
-      moderatorCalls = moderatorCalls :+ s"edit:$code:${startsAt.toInstant}:$minutes"; result
+                 startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                 minutes: Int): Future[ActionResult] = {
+      moderatorCalls = moderatorCalls :+
+        s"edit:$code:${startsAt.toInstant}:${toStartsAt.map(_.toInstant).getOrElse("-")}:$minutes"
+      result
     }
+    def editOwnSlot(guildId: String, actorId: String, code: String,
+                    startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                    minutes: Int): Future[ActionResult] = {
+      memberCalls = memberCalls :+
+        s"edit-own:$code:${startsAt.toInstant}:${toStartsAt.map(_.toInstant).getOrElse("-")}:$minutes"
+      result
+    }
+    var memberCalls: List[String] = Nil
   }
 
   private def auth = new DiscordAuth(
@@ -480,11 +491,48 @@ class ActionRouteSpec extends AnyFunSuite with Matchers with ScalatestRouteTest 
     Post("/dashboard/g/g1/edit-slot",
       body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":120}""")) ~>
       signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    Post("/dashboard/g/g1/edit-slot",
+      body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z",
+            |"toStartsAt":"2026-08-14T12:00:00Z","minutes":120}""".stripMargin)) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
     actions.moderatorCalls shouldBe List(
       "forceLeave:415", "reassign:415->u9", "grant:u9:60",
       "add:999:Edron:Deep Cave:Orc Warlord", "remove:999", "spawnmax:415:60", "extend:415:30",
       "drop:415:2026-08-13T11:00:00Z", "move:415:2026-08-13T11:00:00Z:u9",
-      "edit:415:2026-08-13T11:00:00Z:120")
+      "edit:415:2026-08-13T11:00:00Z:-:120",
+      "edit:415:2026-08-13T11:00:00Z:2026-08-14T12:00:00Z:120")
+  }
+
+  /** Putting your own evening right is a member's, not a moderator's — it is
+   *  cancelling and booking again in one move, which they may already do. Whether
+   *  the evening is actually theirs is settled where the write happens; this only
+   *  says the door is open to somebody with no role. */
+  test("a plain member may change and move a booking of their own") {
+    val actions = new RecordingActions
+    val r = routes(actions)
+    Post("/dashboard/g/g1/edit-booking",
+      body("""{"code":"415","startsAt":"2026-08-13T11:00:00Z",
+            |"toStartsAt":"2026-08-13T12:30:00Z","minutes":90}""".stripMargin)) ~>
+      signedIn ~> r ~> check { status shouldBe StatusCodes.OK }
+    actions.memberCalls shouldBe List("edit-own:415:2026-08-13T11:00:00Z:2026-08-13T12:30:00Z:90")
+    // And none of it went down the moderator path.
+    actions.moderatorCalls shouldBe empty
+  }
+
+  test("an owner's edit with no day, or an unreadable one, never reaches the service") {
+    val actions = new RecordingActions
+    val r = routes(actions)
+    List(
+      """{"startsAt":"2026-08-13T11:00:00Z","minutes":90}""",
+      """{"code":"415","minutes":90}""",
+      """{"code":"415","startsAt":"not a time","minutes":90}""",
+      """{"code":"415","startsAt":"2026-08-13T11:00:00Z","minutes":0}"""
+    ).foreach { payload =>
+      Post("/dashboard/g/g1/edit-booking", body(payload)) ~> signedIn ~> r ~> check {
+        withClue(s"$payload: ")(status shouldBe StatusCodes.BadRequest)
+      }
+    }
+    actions.memberCalls shouldBe empty
   }
 
   test("an empty max claim clears the spawn's own ceiling rather than failing") {

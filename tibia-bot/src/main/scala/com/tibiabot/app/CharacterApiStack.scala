@@ -62,7 +62,12 @@ object CharacterApiStack {
       if (Config.CharacterCache.enabled) new tibiadata.AgeCachedTibiaApi(source, Config.CharacterCache.settings(pollInterval))
       else source
 
-    val tibiaDataSource = ageCached(shared)
+    // Under the age cache, so a skippable fetch still costs nothing and the
+    // repaired sheet is what gets replayed. Over the TibiaData source alone:
+    // the fansite API reports these deaths correctly, so leaving that side
+    // untouched keeps the shadow comparison grading the substitution against
+    // the real number. See DeathLevelRepair.
+    val tibiaDataSource = ageCached(new tibiadata.DeathLevelRepairTibiaApi(shared))
     if (Config.FansiteApi.enabled) {
       // Each source gets its own age cache, so each keeps its own schedule and
       // its own phase; DualCharacterApi only chooses between what they hold.

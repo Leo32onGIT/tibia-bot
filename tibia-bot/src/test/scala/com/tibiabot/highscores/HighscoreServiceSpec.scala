@@ -1,6 +1,6 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.{ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{ExperienceDelta, FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
 import com.tibiabot.tibiadata._
 import com.tibiabot.tibiadata.response._
@@ -37,9 +37,11 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
 
   private object NoopRepo extends HighscoreRepository {
     def load(world: String, category: String): Map[String, HighscoreRecord] = Map.empty
+    def vocations(world: String): Map[String, String] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
     def recordEvents(events: List[HighscoreEvent]): Unit = ()
     def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
     def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
     def maxEventId(): Long = 0L
     def feedCursor(botId: String): Option[Long] = None
@@ -49,10 +51,10 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
   }
 
   private object NoopExperience extends ExperienceRepository {
-    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
-    def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
-    def removeExpiredReadings(before: Instant): Unit = ()
+    def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
@@ -169,9 +171,11 @@ class HighscoreServiceSpec extends AnyFunSuite with Matchers {
     val filed = mutable.ListBuffer.empty[HighscoreEvent]
     val repo = new HighscoreRepository {
       def load(world: String, category: String): Map[String, HighscoreRecord] = previous
+      def vocations(world: String): Map[String, String] = Map.empty
       def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
       def recordEvents(events: List[HighscoreEvent]): Unit = filed.synchronized { filed ++= events }
       def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
       def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
       def maxEventId(): Long = 0L
       def feedCursor(botId: String): Option[Long] = None

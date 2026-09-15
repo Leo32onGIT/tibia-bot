@@ -152,6 +152,30 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |time VARCHAR(255) NOT NULL
            |);""".stripMargin
 
+      // Guild and vocation for everyone a world's poll has seen online lately.
+      // Keyed per world rather than globally, like every other cache here: a
+      // name is only unique within one.
+      //
+      // `seen` is bumped well inside the expiry window for a character who is
+      // still around (see TibiaBot's sheetCacheState), so a row going missing
+      // means they really have not been online, not that nothing about them
+      // changed.
+      val createCharacterSheetTable =
+        s"""CREATE TABLE IF NOT EXISTS character_sheet (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |display_name VARCHAR(255) NOT NULL,
+           |guild_name VARCHAR(255) NOT NULL,
+           |vocation VARCHAR(64) NOT NULL,
+           |char_level INT NOT NULL,
+           |seen TIMESTAMP NOT NULL,
+           |PRIMARY KEY (world, name)
+           |);""".stripMargin
+
+      // The expiry sweep is the only query that does not lead with the world.
+      val createCharacterSheetSeenIndex =
+        s"""CREATE INDEX IF NOT EXISTS character_sheet_seen ON character_sheet (seen);""".stripMargin
+
       val createSatchelTable =
         s"""CREATE TABLE IF NOT EXISTS satchel (
            |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -282,21 +306,10 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
            |ON highscore_events (world, observed);""".stripMargin
 
-      // Experience history, which posts nothing and exists for the statistics
-      // channel to read later. Two tables because the honest hourly reading and
-      // the thing worth keeping for a year are different sizes: raw readings are
-      // 1.63M rows a day across 68 worlds, so they live a week, while the rollup
-      // carries one row per character per server-save day at a fortieth of that.
-      val createExperienceReadingTable =
-        s"""CREATE TABLE IF NOT EXISTS experience_reading (
-           |world VARCHAR(255) NOT NULL,
-           |name VARCHAR(255) NOT NULL,
-           |observed TIMESTAMP NOT NULL,
-           |char_level INT NOT NULL,
-           |experience BIGINT NOT NULL,
-           |PRIMARY KEY (world, name, observed)
-           |);""".stripMargin
-
+      // Experience history, which the statistics post reads. One row per
+      // character per server-save day. A second table behind it kept every
+      // hourly reading — 1.63M rows a day across 68 worlds — for an intra-day
+      // curve nothing was ever built to draw; it is dropped below.
       val createExperienceDailyTable =
         s"""CREATE TABLE IF NOT EXISTS experience_daily (
            |world VARCHAR(255) NOT NULL,
@@ -311,13 +324,87 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
 
       // The prunes delete by time across every world, and neither primary key
       // leads with the column they filter on.
-      val createExperienceReadingIndex =
-        s"""CREATE INDEX IF NOT EXISTS experience_reading_observed
-           |ON experience_reading (observed);""".stripMargin
-
       val createExperienceDailyIndex =
         s"""CREATE INDEX IF NOT EXISTS experience_daily_save_day
            |ON experience_daily (save_day);""".stripMargin
+
+      // The statistics post's movers query asks for one world's whole day, which
+      // the primary key cannot serve: it leads with world but puts name before
+      // save_day, so a lookup by (world, save_day) has to walk every day that
+      // world has retained — ninety thousand rows, once per world, inside the
+      // 45-minute window every morning. This turns that side of the join into a
+      // range seek; the other side is already a full primary-key hit.
+      val createExperienceDailyWorldDayIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_daily_world_day
+           |ON experience_daily (world, save_day);""".stripMargin
+
+      // A day's kill statistics, kept for the boss catalogue only. The endpoint
+      // returns about 1,500 races per world, 1,277 of them non-zero on an
+      // ordinary day — 87k rows a day across 68 worlds, 32M a year, on a box
+      // already at 80% disk. The 74 catalogued bosses are the part any of this
+      // is for, and they come to 5k rows a day instead.
+      //
+      // Every catalogued boss is written, zeroes included: "not seen for N days"
+      // is only measurable if a day we looked and saw nothing is distinguishable
+      // from a day we did not look.
+      val createKillStatisticsBossTable =
+        s"""CREATE TABLE IF NOT EXISTS kill_statistics_boss (
+           |world VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |race VARCHAR(255) NOT NULL,
+           |killed INT NOT NULL,
+           |players_killed INT NOT NULL,
+           |PRIMARY KEY (world, save_day, race)
+           |);""".stripMargin
+
+      // The rest of the day in one row, so the headline figures survive without
+      // keeping the 1,500 races they were derived from.
+      val createKillStatisticsSummaryTable =
+        s"""CREATE TABLE IF NOT EXISTS kill_statistics_summary (
+           |world VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |most_killed_race VARCHAR(255) NOT NULL DEFAULT '',
+           |most_killed INT NOT NULL DEFAULT 0,
+           |deadliest_race VARCHAR(255) NOT NULL DEFAULT '',
+           |deadliest_kills INT NOT NULL DEFAULT 0,
+           |player_deaths INT NOT NULL DEFAULT 0,
+           |total_killed BIGINT NOT NULL DEFAULT 0,
+           |total_players_killed INT NOT NULL DEFAULT 0,
+           |PRIMARY KEY (world, save_day)
+           |);""".stripMargin
+
+      // The prune deletes by day across every world, and the primary keys above
+      // both lead with world.
+      val createKillStatisticsBossIndex =
+        s"""CREATE INDEX IF NOT EXISTS kill_statistics_boss_save_day
+           |ON kill_statistics_boss (save_day);""".stripMargin
+
+      // How busy a world was and how high its people are, one row a day. Running
+      // sums and a count rather than averages, so a sample can be added without
+      // reading anything back and every bot polling the world can contribute to
+      // the same figure — two bots recording the same minute inflate both halves
+      // equally and leave the quotient where it was.
+      //
+      // level_total sums every online character's level, so dividing it by
+      // `total` gives the average level of somebody on that world rather than an
+      // average of per-poll averages, which a quiet hour would skew.
+      val createWorldOnlineDailyTable =
+        s"""CREATE TABLE IF NOT EXISTS world_online_daily (
+           |world VARCHAR(255) NOT NULL,
+           |save_day DATE NOT NULL,
+           |samples INT NOT NULL DEFAULT 0,
+           |total BIGINT NOT NULL DEFAULT 0,
+           |level_total BIGINT NOT NULL DEFAULT 0,
+           |PRIMARY KEY (world, save_day)
+           |);""".stripMargin
+
+      val createWorldOnlineDailyIndex =
+        s"""CREATE INDEX IF NOT EXISTS world_online_daily_save_day
+           |ON world_online_daily (save_day);""".stripMargin
+
+      val createKillStatisticsSummaryIndex =
+        s"""CREATE INDEX IF NOT EXISTS kill_statistics_summary_save_day
+           |ON kill_statistics_summary (save_day);""".stripMargin
 
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
@@ -328,10 +415,24 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createHighscoreEventsIndex)
       newStatement.executeUpdate(createHighscoreFeedCursorTable)
 
-      newStatement.executeUpdate(createExperienceReadingTable)
       newStatement.executeUpdate(createExperienceDailyTable)
-      newStatement.executeUpdate(createExperienceReadingIndex)
+
+      // Written every hour for a year and never once read: the only statements
+      // that ever named it were an INSERT and a DELETE. It was banked for an
+      // intra-day experience curve that was never built, and cost more than half
+      // the disk this feature uses. Dropped rather than left to age out, so the
+      // space comes back on the next start rather than a week later.
+      newStatement.executeUpdate("DROP TABLE IF EXISTS experience_reading;")
       newStatement.executeUpdate(createExperienceDailyIndex)
+      newStatement.executeUpdate(createExperienceDailyWorldDayIndex)
+      newStatement.executeUpdate(createKillStatisticsBossTable)
+      newStatement.executeUpdate(createKillStatisticsSummaryTable)
+      newStatement.executeUpdate(createKillStatisticsBossIndex)
+      newStatement.executeUpdate(createKillStatisticsSummaryIndex)
+      newStatement.executeUpdate(createWorldOnlineDailyTable)
+      newStatement.executeUpdate(createWorldOnlineDailyIndex)
+      newStatement.executeUpdate(createCharacterSheetTable)
+      newStatement.executeUpdate(createCharacterSheetSeenIndex)
 
       newStatement.close()
     }
@@ -443,6 +544,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |online_allies_min INT NOT NULL DEFAULT 0,
               |online_enemies_min INT NOT NULL DEFAULT 0,
               |online_neutrals_min INT NOT NULL DEFAULT 0,
+              |statistics_channel VARCHAR(255) NOT NULL DEFAULT '0',
+              |statistics_posted VARCHAR(255) NOT NULL DEFAULT '',
               |PRIMARY KEY (name)
               |);""".stripMargin
 

@@ -1,6 +1,6 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.{BoostedCache, DeathsCache, LevelsCache, ListCache}
+import com.tibiabot.domain.{BoostedCache, DeathsCache, LevelsCache, ListCache, SheetCache}
 import com.tibiabot.persistence.{CacheRepository, ConnectionProvider}
 
 import java.sql.Timestamp
@@ -110,6 +110,73 @@ final class JdbcCacheRepository(connectionProvider: ConnectionProvider) extends 
       results.foreach { uid =>
         statement.executeUpdate(s"DELETE from levels where id = $uid;")
       }
+      statement.close()
+    }
+
+  def getSheets(world: String): Map[String, SheetCache] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        "SELECT world,name,display_name,guild_name,vocation,char_level,seen FROM character_sheet WHERE world = ?;")
+      statement.setString(1, world)
+      val result = statement.executeQuery()
+
+      val results = Map.newBuilder[String, SheetCache]
+      while (result.next()) {
+        val name = Option(result.getString("name")).getOrElse("")
+        results += name -> SheetCache(
+          world = Option(result.getString("world")).getOrElse(""),
+          name = name,
+          displayName = Option(result.getString("display_name")).getOrElse(name),
+          guild = Option(result.getString("guild_name")).getOrElse(""),
+          vocation = Option(result.getString("vocation")).getOrElse(""),
+          level = result.getInt("char_level"),
+          seen = result.getTimestamp("seen").toInstant.atZone(ZoneOffset.UTC))
+      }
+
+      statement.close()
+      results.result()
+    }
+
+  /** One round trip for a whole poll's worth of characters.
+   *
+   *  Deduped on the way in for the reason the highscore upsert is: Postgres
+   *  refuses to touch the same row twice in one statement, and a poll can carry
+   *  a name twice — under its current spelling and under a former one on the
+   *  tick a rename is first seen. */
+  def recordSheets(rows: List[SheetCache]): Unit =
+    if (rows.nonEmpty) JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        """INSERT INTO character_sheet(world, name, display_name, guild_name, vocation, char_level, seen)
+          |VALUES (?,?,?,?,?,?,?)
+          |ON CONFLICT (world, name)
+          |DO UPDATE SET
+          |  display_name = excluded.display_name,
+          |  guild_name = excluded.guild_name,
+          |  vocation = excluded.vocation,
+          |  char_level = excluded.char_level,
+          |  seen = excluded.seen;""".stripMargin)
+      rows.groupBy(row => (row.world, row.name)).values.map(_.last).foreach { row =>
+        statement.setString(1, row.world)
+        statement.setString(2, row.name)
+        statement.setString(3, row.displayName)
+        statement.setString(4, row.guild)
+        statement.setString(5, row.vocation)
+        statement.setInt(6, row.level)
+        statement.setTimestamp(7, Timestamp.from(row.seen.toInstant))
+        statement.addBatch()
+      }
+      statement.executeBatch()
+      statement.close()
+    }
+
+  /** One statement rather than the read-then-delete the deaths and levels sweeps
+   *  do: this table is keyed and indexed on the column being compared, so there
+   *  is nothing for Scala to decide and no count worth logging. */
+  def removeExpiredSheets(now: ZonedDateTime): Unit =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement("DELETE FROM character_sheet WHERE seen < ?;")
+      statement.setTimestamp(1, Timestamp.from(now.minusHours(25).toInstant))
+      statement.executeUpdate()
       statement.close()
     }
 

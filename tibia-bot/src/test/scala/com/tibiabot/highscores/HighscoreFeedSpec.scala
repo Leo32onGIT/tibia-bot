@@ -26,9 +26,11 @@ class HighscoreFeedSpec extends AnyFunSuite with Matchers {
     val cursors = mutable.Map.empty[String, Long]
     var rows: List[FiledEvent] = seed
     def load(world: String, category: String): Map[String, HighscoreRecord] = Map.empty
+    def vocations(world: String): Map[String, String] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = ()
     def recordEvents(events: List[HighscoreEvent]): Unit = ()
     def events(world: String, since: Instant): List[HighscoreEvent] = Nil
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
     def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = rows.filter(_.id > afterId).sortBy(_.id).take(limit)
     def maxEventId(): Long = if (rows.isEmpty) 0L else rows.map(_.id).max
     def feedCursor(botId: String): Option[Long] = cursors.get(botId)

@@ -15,8 +15,12 @@ package com.tibiabot.presentation
  */
 object DeathEffect {
 
+  /** Served by the landing page rather than from raw githubusercontent: it is
+   *  our own domain behind our own proxy, so the path is ours to redirect if
+   *  any of this moves again. The files live in Leo32onGIT/tibia-bot-resources
+   *  under discord/effects. */
   private def resource(file: String): String =
-    s"https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/$file"
+    s"https://violentbot.xyz/discord/effects/$file"
 
   /** Animation for a player kill — set at the kill site, since "pvp" is a
    *  classification (killer.player), never a killer name the API sends. */

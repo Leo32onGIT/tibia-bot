@@ -28,7 +28,7 @@ import net.dv8tion.jda.api.modals.Modal
  *  since the whole use of it is copying three lines out an hour later, while a paste
  *  that failed to read should be ephemeral so a guild channel is not left holding
  *  somebody's typo. That same hour is why a split carries the analyser text back
- *  as a file — see [[LootSplitEmbeds.paste]]. `RespawnModals` also refuses anything
+ *  as a file — see [[com.tibiabot.presentation.LootSplitEmbeds.paste]]. `RespawnModals` also refuses anything
  *  submitted with no guild, which is every submission from a DM.
  */
 object LootSplit extends StrictLogging {

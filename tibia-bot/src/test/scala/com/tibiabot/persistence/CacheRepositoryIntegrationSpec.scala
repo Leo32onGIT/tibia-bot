@@ -1,5 +1,6 @@
 package com.tibiabot.persistence
 
+import com.tibiabot.domain.SheetCache
 import com.tibiabot.persistence.JdbcConnectionProvider
 import com.tibiabot.persistence.jdbc.JdbcCacheRepository
 import org.scalatest.funsuite.AnyFunSuite
@@ -38,6 +39,40 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     repo.getLevels(world).map(_.name) should not contain "Char B"
   }
 
+  test("character sheet cache: record, get, re-record and expiry") {
+    val provider = pgOrCancel()
+    ensureCacheSchema(provider)
+    val repo = new JdbcCacheRepository(provider)
+    val seen = ZonedDateTime.parse("2026-05-30T10:00:00Z")
+
+    repo.recordSheets(List(
+      SheetCache(world, "char c", "Char C", "Bones", "Elite Knight", 302, seen),
+      SheetCache(world, "char d", "Char D", "", "Master Sorcerer", 180, seen)))
+
+    val sheets = repo.getSheets(world)
+    sheets("char c").guild shouldBe "Bones"
+    sheets("char c").displayName shouldBe "Char C"
+    sheets("char c").vocation shouldBe "Elite Knight"
+    // Somebody in no guild is a row like any other, not an absent one: "we
+    // looked and they have no guild" is an answer the post wants.
+    sheets("char d").guild shouldBe ""
+
+    // A second reading of the same name replaces the first rather than doubling
+    // it — a guild swap is the case this table exists to notice.
+    repo.recordSheets(List(
+      SheetCache(world, "char c", "Char C", "Red Rose", "Elite Knight", 303, seen.plusHours(2))))
+    val swapped = repo.getSheets(world)
+    swapped should have size 2
+    swapped("char c").guild shouldBe "Red Rose"
+    swapped("char c").level shouldBe 303
+
+    // Past the 25-hour window measured from the *last* reading, not the first.
+    repo.removeExpiredSheets(seen.plusHours(26))
+    repo.getSheets(world).keySet shouldBe Set("char c")
+    repo.removeExpiredSheets(seen.plusHours(28))
+    repo.getSheets(world) shouldBe empty
+  }
+
   /** Every name in the shared cache, whichever world it belongs to.
    *
    *  `getList` filters by world, which is not enough here: pruning is defined
@@ -63,10 +98,24 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     ensureCacheSchema(provider)
     val repo = new JdbcCacheRepository(provider)
     val listWorld = "Itestlistx"
+    val otherWorld = "Itestlistz"
 
     repo.getList(listWorld)
     repo.addToList("ListChar", List("OldName"), listWorld, List("OldWorld"),
       "SomeGuild", "200", "Knight", "2026-05-30T09:00:00Z", ZonedDateTime.parse("2026-05-30T10:00:00Z"))
+    // Somebody else's row, which nothing here ever orphans.
+    //
+    // It is what keeps the keep-set below from coming out empty, and without it
+    // this test only passed on a database that happened to be holding rows from
+    // somewhere else. On a clean one "ListChar" was the only name in the table,
+    // so the keep-set was empty — and an empty keep-set prunes nothing at all,
+    // which is the guard the very next test exists to assert. The two
+    // contradicted each other and the shared table decided which won.
+    //
+    // It also makes the "orphan-only" in this test's name mean something: that
+    // a name still listed survives the same prune that drops an orphan.
+    repo.addToList("KeptChar", Nil, otherWorld, Nil, "OtherGuild", "300", "Druid",
+      "2026-05-30T09:00:00Z", ZonedDateTime.parse("2026-05-30T10:00:00Z"))
 
     val rows = repo.getList(listWorld)
     rows.map(_.name) should contain("ListChar")
@@ -83,6 +132,7 @@ class CacheRepositoryIntegrationSpec extends AnyFunSuite with Matchers with Post
     // else in the shared table is named in the keep set and must survive.
     repo.pruneList(everyone - "listchar")
     repo.getList(listWorld).map(_.name) should not contain "ListChar"
+    repo.getList(otherWorld).map(_.name) should contain("KeptChar")
     allCachedNames(provider) shouldBe (everyone - "listchar")
   }
 

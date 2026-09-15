@@ -40,7 +40,22 @@ case class Worlds(name: String,
    *  0 means no floor, which is what every world had before these existed. */
   onlineAlliesMin: Int = 0,
   onlineEnemiesMin: Int = 0,
-  onlineNeutralsMin: Int = 0
+  onlineNeutralsMin: Int = 0,
+  /** Where the daily statistics post goes.
+   *
+   *  Made by `/setup` alongside the deaths and levels channels, and rebuilt by
+   *  `/repair` when it is gone — the same convention every other channel here
+   *  follows. "0" therefore means one thing only: a world set up before this
+   *  existed, which `/repair` gives a channel to the first time it is run. */
+  statisticsChannel: String = "0",
+  /** The last server-save day this world's statistics post covered, as an ISO
+   *  date, or "" if it has never posted.
+   *
+   *  Stored rather than held in memory because the post fires inside a
+   *  45-minute window that the 30-second tick visits about ninety times: an
+   *  in-memory guard answers all but the first of those, and answers nothing at
+   *  all after a restart mid-window, which would post the same day twice. */
+  statisticsPosted: String = ""
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

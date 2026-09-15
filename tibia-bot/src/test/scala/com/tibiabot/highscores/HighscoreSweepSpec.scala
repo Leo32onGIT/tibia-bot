@@ -1,6 +1,6 @@
 package com.tibiabot.highscores
 
-import com.tibiabot.domain.{ExperiencePoint, FiledEvent, HighscoreEvent, HighscoreRecord}
+import com.tibiabot.domain.{ExperienceDelta, FiledEvent, HighscoreEvent, HighscoreRecord}
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
 import com.tibiabot.tibiadata._
 import com.tibiabot.tibiadata.response._
@@ -59,10 +59,12 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     val upserts = mutable.ListBuffer.empty[(String, String, List[HighscoreEntry], Instant)]
     val filed = mutable.ListBuffer.empty[HighscoreEvent]
     def load(world: String, category: String): Map[String, HighscoreRecord] = seed
+    def vocations(world: String): Map[String, String] = Map.empty
     def upsertAll(world: String, category: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit =
       upserts += ((world, category, entries, snapshotAt))
     def recordEvents(events: List[HighscoreEvent]): Unit = filed ++= events
     def events(world: String, since: Instant): List[HighscoreEvent] = filed.toList
+    def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent] = None
     def eventsAfter(afterId: Long, limit: Int): List[FiledEvent] = Nil
     def maxEventId(): Long = 0L
     def feedCursor(botId: String): Option[Long] = None
@@ -72,14 +74,12 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
   }
 
   private class StubExperience extends ExperienceRepository {
-    val readings = mutable.ListBuffer.empty[(String, Int, Instant)]
     val dailies = mutable.ListBuffer.empty[(String, Int, LocalDate)]
-    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit =
-      readings += ((world, entries.size, observed))
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit =
       dailies += ((world, entries.size, saveDay))
-    def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint] = Nil
-    def removeExpiredReadings(before: Instant): Unit = ()
+    def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
@@ -173,7 +173,7 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     result.characters shouldBe 1
   }
 
-  test("the experience list feeds the history tables and announces nothing") {
+  test("the experience list feeds the rollup and announces nothing") {
     val experience = HighscoreLists.experience
     val previous = Map("bubble" -> HighscoreRecord("bubble", "Bubble", "Elite Knight", 400, 1000L, snapshot.minusSeconds(3600)))
     val api = new StubApi(fullList(List(entry("Bubble", 2000L))))
@@ -183,17 +183,15 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
 
     result.advances shouldBe empty
     repo.filed shouldBe empty
-    history.readings.map(_._3).toList shouldBe List(snapshot)
     history.dailies should have size 1
     // 05:40 UTC is 07:40 Berlin, before the 10:00 save, so it belongs to the
     // previous save day rather than the calendar one.
     history.dailies.head._3 shouldBe LocalDate.parse("2026-09-01")
   }
 
-  test("a skill list never touches the history tables") {
+  test("a skill list never touches the rollup") {
     val history = new StubExperience
     await(sweeper(new StubApi(fullList(List(entry("Bubble", 116)))), new StubRepo, history).sweepList(world, sword, snapshot))
-    history.readings shouldBe empty
     history.dailies shouldBe empty
   }
 }

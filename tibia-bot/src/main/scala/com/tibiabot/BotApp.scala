@@ -24,6 +24,7 @@ import scala.jdk.CollectionConverters._
 import java.time.ZoneId
 import scala.util.Random
 import scala.concurrent.Await
+import scala.util.control.NonFatal
 import com.tibiabot.presentation.Embeds.BrandColor
 import com.tibiabot.presentation.Names
 
@@ -41,6 +42,7 @@ object BotApp extends App with StrictLogging {
   type WorldTransfer = domain.WorldTransfer; val WorldTransfer = domain.WorldTransfer
   type DeathsCache = domain.DeathsCache; val DeathsCache = domain.DeathsCache
   type LevelsCache = domain.LevelsCache; val LevelsCache = domain.LevelsCache
+  type SheetCache = domain.SheetCache; val SheetCache = domain.SheetCache
   type ListCache = domain.ListCache; val ListCache = domain.ListCache
   type SatchelStamp = domain.SatchelStamp; val SatchelStamp = domain.SatchelStamp
   type BoostedStamp = domain.BoostedStamp; val BoostedStamp = domain.BoostedStamp
@@ -113,6 +115,10 @@ object BotApp extends App with StrictLogging {
   private val connectionProvider: persistence.ConnectionProvider =
     new persistence.PooledConnectionProvider(Config.postgresHost, Config.postgresPassword)
   private val schemaInitializer = new persistence.SchemaInitializer(connectionProvider)
+  private val killStatisticsRepository: persistence.KillStatisticsRepository =
+    new persistence.jdbc.JdbcKillStatisticsRepository(connectionProvider)
+  private val fragRepository: persistence.FragRepository =
+    new persistence.jdbc.JdbcFragRepository(connectionProvider)
   private val boostedRepository: persistence.BoostedRepository =
     new persistence.jdbc.JdbcBoostedRepository(connectionProvider)
   private lazy val wikiClient: wiki.WikiClient = new wiki.FandomWikiClient()
@@ -122,6 +128,11 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcDeathScreenshotRepository(connectionProvider)
   private val cacheRepository: persistence.CacheRepository =
     new persistence.jdbc.JdbcCacheRepository(connectionProvider)
+
+  /** Written by every world stream on its ordinary poll, read once a day by the
+   *  statistics post. Public because the writer is TibiaBot, not this object. */
+  val worldOnlineRepository: persistence.WorldOnlineRepository =
+    new persistence.jdbc.JdbcWorldOnlineRepository(connectionProvider)
   private val activityRepository: persistence.ActivityRepository =
     new persistence.jdbc.JdbcActivityRepository(connectionProvider)
   private val worldTransferRepository: persistence.WorldTransferRepository =
@@ -739,6 +750,10 @@ object BotApp extends App with StrictLogging {
   // streamState is declared above (before tibiaDataClient). BotApp delegates so
   // existing call sites (BotApp.activityData / modifyActivityData / ...) are unchanged.
   def activityData: Map[String, List[PlayerCache]] = streamState.activityData
+
+  /** See [[com.tibiabot.state.StreamState.activityIndex]] — `activityData` for
+   *  one guild, as a name lookup, delegated like the accessors around it. */
+  def activityIndex(guildId: String): domain.ActivityIndex = streamState.activityIndex(guildId)
   def worldTransfersData: Map[String, List[WorldTransfer]] = streamState.worldTransfersData
   def huntedPlayersData: Map[String, List[Players]] = streamState.huntedPlayersData
   def alliedPlayersData: Map[String, List[Players]] = streamState.alliedPlayersData
@@ -751,12 +766,15 @@ object BotApp extends App with StrictLogging {
    *  serves whoever lists that player, so it is worth writing if anybody does.
    *  The per-guild checks in TibiaBot answer a different question — whether
    *  *this* discord cares — and cannot stand in for this one.
+   *
+   *  Against the flattened index rather than the lists themselves: this is asked
+   *  once per online character per world per poll, and walking every guild's
+   *  list to answer it made a miss — which is nearly all of them, since most
+   *  players online are on nobody's list — cost the entire set of listed names.
+   *  See [[com.tibiabot.state.StreamState.listedNames]].
    */
-  def isOnAnyList(name: String): Boolean = {
-    val lower = name.toLowerCase
-    huntedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower)) ||
-      alliedPlayersData.values.exists(_.exists(_.name.toLowerCase == lower))
-  }
+  def isOnAnyList(name: String): Boolean =
+    streamState.listedNames.contains(name.toLowerCase)
 
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
@@ -1106,8 +1124,14 @@ object BotApp extends App with StrictLogging {
   /** Its own client, and so its own in-flight ceiling. A highscores sweep is
    *  thousands of requests an hour on a schedule nobody is waiting for; sharing
    *  the character poll's permits would let it sit in front of a death. */
-  private lazy val highscoresApi: tibiadata.HighscoresApi =
+  private lazy val scrapingClient: TibiaDataClient =
     new TibiaDataClient(inFlight = new tibiadata.InFlightLimit(Config.Highscores.maxInFlight))(actorSystem)
+  private lazy val highscoresApi: tibiadata.HighscoresApi = scrapingClient
+  /** The same client. The daily kill statistics snapshot is 68 requests once a
+   *  day, so a third connection pool for it would cost more than it carries —
+   *  and it is background scraping on the same footing as the sweep above, which
+   *  is what that client's separate ceiling is for. */
+  private lazy val killStatisticsApi: tibiadata.KillStatisticsApi = scrapingClient
 
   /** The guild a character is in, for the ally/enemy classification.
    *
@@ -1222,6 +1246,390 @@ object BotApp extends App with StrictLogging {
     logger.info("Highscores advance feed enabled for this bot's guilds")
   }
 
+  /** Banks one kill statistics snapshot per world per day, as soon after server
+   *  save as tibia.com's figures actually roll. The daily post waits on the rows
+   *  it writes, so this is on the critical path for how quickly that post lands. */
+  private lazy val killStatisticsService = new statistics.KillStatisticsService(
+    api = killStatisticsApi,
+    repository = killStatisticsRepository,
+    trackedWorlds = () => streamSupervisor.activeWorlds.toList,
+    gap = () => Config.Statistics.KillStatistics.requestGap,
+    delay = wait => org.apache.pekko.pattern.after(wait, actorSystem.scheduler)(Future.unit)(ex),
+    settle = Config.Statistics.KillStatistics.settle,
+    probeCandidates = Config.Statistics.KillStatistics.probeCandidates
+  )(ex)
+
+  // Primary only, like the highscore sweep and for the same reason: reading the
+  // same 68 pages from two addresses through one TibiaData instance would double
+  // the load on tibia.com for identical rows, and the rows land in the shared
+  // cache that every bot can read anyway.
+  if (Config.Statistics.KillStatistics.enabled &&
+      Config.BotRole.current != Config.BotRole.Secondary) {
+    // A minute in rather than five: a restart inside the server-save window must
+    // not sit out the roll, since the day's post is waiting behind it. An early
+    // tick with no worlds registered yet costs nothing and the next one picks
+    // them up.
+    actorSystem.scheduler.scheduleWithFixedDelay(
+      1.minute, Config.Statistics.KillStatistics.tickInterval)(
+      () => { killStatisticsService.tick(); () })(ex)
+    logger.info("Daily kill statistics snapshot enabled for every tracked world")
+  }
+
+  if (Config.Statistics.enabled) {
+    // Every bot, for the same reason the advance feed is: this only reads the
+    // shared cache and writes to Discord, and a bot can only write to its own
+    // guilds. Nothing here reaches tibia.com, so there is no fleet-wide work to
+    // hand to the primary.
+    actorSystem.scheduler.scheduleWithFixedDelay(4.minutes, Config.Statistics.tickInterval)(() => {
+      try statisticsService.tick()
+      catch { case error: Throwable => logger.warn("Failed to post daily statistics", error) }
+    })(ex)
+    logger.info("Daily statistics post enabled for this bot's guilds")
+  }
+
+  /** File one reading of how busy a world is, from the poll that already has it.
+   *
+   *  Fire-and-forget off the stream thread for the same reason recordFrags is:
+   *  the world's poll must not wait on a write it has no use for. A failure
+   *  costs one sample out of the fourteen hundred a day, which moves an average
+   *  by nothing, so it is logged at debug and forgotten.
+   *
+   *  Every bot tracking the world writes its own samples into the same row. That
+   *  is safe by construction — the row holds a sum and a count, so a duplicated
+   *  minute lifts both and leaves the average where it was. */
+  def recordWorldOnline(world: String, online: Int, levelTotal: Long, at: ZonedDateTime): Unit = {
+    val saveDay = scheduler.ServerSaveSchedule.lastServerSave(at).toLocalDate
+    Future {
+      worldOnlineRepository.recordSample(world, saveDay, online, levelTotal)
+    }(ex).failed.foreach(error =>
+      logger.debug(s"Could not record the online sample for '$world': ${error.getMessage}"))(ex)
+  }
+
+  /** File a death's frags for one guild.
+   *
+   *  Called from the death path, which runs on the world's stream thread and
+   *  must not be held up by a database write it does not need the result of —
+   *  and must certainly not be brought down by one. A failure costs one death's
+   *  frags out of a day's tally.
+   *
+   *  Skipped entirely when the guild has no statistics channel: the tally exists
+   *  only to be posted there, so recording for a server that will never read it
+   *  is a write per death for nothing. A guild that turns the channel on starts
+   *  counting from that moment, which is the same cold start the feature has
+   *  everywhere.
+   */
+  def recordFrags(guildId: String, events: List[domain.FragEvent]): Unit =
+    if (events.nonEmpty && hasStatisticsChannel(guildId, events.head.world)) {
+      Future {
+        fragRepository.record(guildId, events)
+      }(ex).failed.foreach(error =>
+        logger.warn(s"Could not record ${events.size} frag(s) for guild '$guildId': ${error.getMessage}"))(ex)
+    }
+
+  /** Note which deaths-channel post a death produced, so the daily summary can
+   *  link back to it.
+   *
+   *  Fire and forget on the stream thread, like recordFrags: a summary that
+   *  cannot offer a jump link is a smaller loss than a death post held up behind
+   *  a database write. */
+  def attachDeathMessage(guildId: String, world: String, victim: String,
+                         occurredAt: Instant, messageId: String): Unit =
+    if (messageId.nonEmpty && hasStatisticsChannel(guildId, world)) {
+      Future {
+        fragRepository.attachDeathMessage(guildId, world, victim, occurredAt, messageId)
+      }(ex).failed.foreach(error =>
+        logger.warn(s"Could not attach the death post for '$victim' in guild '$guildId': ${error.getMessage}"))(ex)
+    }
+
+  private def hasStatisticsChannel(guildId: String, world: String): Boolean =
+    worldsData.getOrElse(guildId, Nil)
+      .exists(w => w.name.equalsIgnoreCase(world) && w.statisticsChannel != null &&
+        w.statisticsChannel.nonEmpty && w.statisticsChannel != "0")
+
+  /** The statistics channels waiting on a post, one per world per discord.
+   *
+   *  Unlike the Levels audience above this needs no per-world show flags: the
+   *  post is the same for every discord tracking the world, because everything
+   *  in it is a fact about the world rather than about anyone's hunted list. A
+   *  world whose channel is "0" was set up before this existed and is absent
+   *  until `/repair` gives it one. */
+  private def statisticsTargets(): List[statistics.StatisticsTarget] =
+    worldsData.toList.flatMap { case (guildId, worlds) =>
+      worlds.collect {
+        case world if world.statisticsChannel != null && world.statisticsChannel != "0" &&
+                      world.statisticsChannel.nonEmpty && paywallService.isActive(guildId, world.name) =>
+          statistics.StatisticsTarget(
+            guildId = guildId,
+            guildLabel = Option(discordGateway.guildById(guildId)).map(_.getName).getOrElse(guildId),
+            world = world.name,
+            channelId = world.statisticsChannel,
+            posted = world.statisticsPosted,
+            huntedNames = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+          )
+      }
+    }
+
+  /** What one world's post knows about a character beyond their name: which
+   *  guild they are in, and what vocation they are.
+   *
+   *  Two caches behind one lookup, because neither covers the post on its own.
+   *  The sheets kept for the hunted and allied lists are a character's own page
+   *  and outlive any absence, but exist only for players somebody listed *by
+   *  name*. The poll's sheet cache covers everybody a world has seen online in
+   *  the last day, which on a PVP day is nearly everyone in the post — including
+   *  the people hunted through their guild, who have no sheet of their own and
+   *  used to render with no icons at all.
+   *
+   *  The poll's copy wins where both have somebody: they were read on the same
+   *  schedule, and the list cache is only rewritten when something it shows
+   *  moves, so its copy is the older of the two for anybody who changed guild
+   *  without changing level. Field by field rather than row by row, because the
+   *  two blanks do not mean the same thing — a blank guild is the answer "they
+   *  are in none", which has to win over a stale guild name, while a blank
+   *  vocation is only ever a gap, since every character has one.
+   *
+   *  Empty rather than fatal if a read fails: the post is worth more than its
+   *  icons, and this runs with the whole day's figures already in hand.
+   */
+  private final case class StatisticsSheet(guild: String, vocation: String)
+
+  private def statisticsSheets(world: String): Map[String, StatisticsSheet] = {
+    def read[A](what: String)(query: => Map[String, A]): Map[String, A] =
+      try query catch {
+        case NonFatal(error) =>
+          logger.warn(s"Statistics: could not read the $what for '$world': ${error.getMessage}")
+          Map.empty[String, A]
+      }
+    val listed = read("cached list sheets")(
+      cacheRepository.getList(world).map(row =>
+        row.name.toLowerCase -> StatisticsSheet(row.guild, row.vocation)).toMap)
+    val seen = read("cached online sheets")(
+      cacheRepository.getSheets(world).map { case (key, row) =>
+        key -> StatisticsSheet(row.guild, row.vocation) })
+    (listed.keySet ++ seen.keySet).iterator.map { key =>
+      val fresh = seen.get(key)
+      val older = listed.get(key)
+      key -> StatisticsSheet(
+        guild = fresh.map(_.guild).orElse(older.map(_.guild)).getOrElse(""),
+        vocation = fresh.map(_.vocation).filter(_.nonEmpty)
+          .orElse(older.map(_.vocation)).getOrElse(""))
+    }.toMap
+  }
+
+  /** The ally/enemy icon a character gets in one discord's statistics post.
+   *
+   *  This is what makes the post guild-specific: the board is the world's top
+   *  thousand and identical everywhere, but who on it counts as an ally is that
+   *  discord's own answer. Same classification the online list and the deaths
+   *  channel use, so a name carries the same icon wherever it appears — which
+   *  means the guild markers too, not just the player ones.
+   *
+   *  A character's guild comes from the cached sheets, and failing that from
+   *  this discord's activity rows, which still know the membership of a hunted
+   *  guild for a member who has not been online in a day. Nothing is fetched: a
+   *  name none of the three has reads as neutral, which is now a rare answer
+   *  rather than the usual one.
+   */
+  private def statisticsSideIcon(guildId: String, sheets: Map[String, StatisticsSheet]): String => String = {
+    val allies = alliedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val hunted = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val alliedGuilds = alliedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val huntedGuilds = huntedGuildsData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+    val activity = activityIndex(guildId)
+    name => {
+      val key = name.toLowerCase
+      val guildName = sheets.get(key).map(_.guild).filter(_.nonEmpty)
+        .orElse(activity.get(key).map(_.guild)).getOrElse("")
+      presentation.GuildIcons.guildIcon(
+        guildName,
+        allyGuild = alliedGuilds.contains(guildName.toLowerCase),
+        huntedGuild = huntedGuilds.contains(guildName.toLowerCase),
+        allyPlayer = allies.contains(key),
+        huntedPlayer = hunted.contains(key))
+    }
+  }
+
+  /** A character's vocation on one world, by lowercased name, for the PVP rows.
+   *
+   *  Frags store names and nothing else — a killer is a name on a death message —
+   *  so the vocation has to come from somewhere that already knows it. The
+   *  cached sheets answer for anybody a world has seen in the last day or that
+   *  somebody lists by name; the world's highscore readings answer for the rest,
+   *  which is mostly people who fought and then did not log in again before the
+   *  post went out.
+   *
+   *  Sheets first: they are a character's own page, where a highscore reading is
+   *  a row in a table that a rename or a transfer can leave behind.
+   *
+   *  Both read once per post rather than per row, and empty for anybody neither
+   *  knows — which renders as no icon rather than a guessed one.
+   */
+  private def statisticsVocation(world: String, sheets: Map[String, StatisticsSheet]): String => String = {
+    val scores = try highscoreRepository.vocations(world) catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not read the highscore vocations for '$world': ${error.getMessage}")
+        Map.empty[String, String]
+    }
+    name => {
+      val key = name.toLowerCase
+      sheets.get(key).map(_.vocation).filter(_.nonEmpty).getOrElse(scores.getOrElse(key, ""))
+    }
+  }
+
+  /** A link back to the deaths-channel post a kill came from, or None when it was
+   *  never posted — the channel can be off, the level under the world's minimum,
+   *  or the send have failed. */
+  private def jumpToDeath(target: statistics.StatisticsTarget): String => Option[String] = {
+    val deathsChannel = worldsData.getOrElse(target.guildId, Nil)
+      .find(_.name.equalsIgnoreCase(target.world)).map(_.deathsChannel).getOrElse("0")
+    messageId =>
+      if (messageId.isEmpty || deathsChannel == "0" || deathsChannel.isEmpty) None
+      else Some(s"https://discord.com/channels/${target.guildId}/$deathsChannel/$messageId")
+  }
+
+  /** Replace whatever this bot last put in a statistics channel with today's post.
+   *
+   *  The channel shows one thing — the last server save day — the way the online
+   *  list shows one roster, so the same convention applies: read the recent
+   *  history, purge this bot's own messages, then post. That clears yesterday's
+   *  summary and, the first time it runs, the `/setup` intro as well.
+   *
+   *  Only this bot's messages go. Anything a person said in there is theirs, and
+   *  several bots can share a guild.
+   *
+   *  The purge list is fixed at the moment of the history read, so today's post
+   *  is not in it and cannot be caught by a delete that lands after the send.
+   *  A history read that fails still posts — a stale summary above a fresh one
+   *  is worth more than losing the day over a tidy-up. */
+  private def replaceStatisticsPost(
+      channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+      messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]
+  ): Unit = {
+    def post(): Unit = sendInOrder(channel, messages)
+    channel.getHistory.retrievePast(100).queue(
+      history => {
+        try {
+          val mine = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
+          if (!mine.isEmpty) channel.purgeMessages(mine)
+        } catch {
+          case error: Throwable =>
+            logger.warn(s"Could not clear the statistics channel in '${channel.getGuild.getId}': ${error.getMessage}")
+        }
+        post()
+      },
+      (error: Throwable) => {
+        logger.warn(s"Could not read the statistics channel in '${channel.getGuild.getId}': ${error.getMessage}")
+        post()
+      })
+  }
+
+  /** Send a day's messages to one channel, in the order they were built.
+   *
+   *  Chained rather than queued separately: two `queue()` calls are two
+   *  independent requests and nothing promises the first lands first, which on
+   *  the one day a post needs two messages would put the bosses above the
+   *  board. Chaining also keeps the whole post to a single slot in the outbound
+   *  queue, which is what the pacing there is counting.
+   */
+  private def sendInOrder(channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+                          messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]): Unit = {
+    def send(embeds: List[net.dv8tion.jda.api.entities.MessageEmbed]) =
+      channel.sendMessageEmbeds(embeds.asJava).setSuppressedNotifications(true)
+    messages match {
+      case Nil => ()
+      case first :: rest =>
+        rest.foldLeft[net.dv8tion.jda.api.requests.RestAction[net.dv8tion.jda.api.entities.Message]](
+          send(first))((sent, next) => sent.flatMap(_ => send(next))).queue(null, null)
+    }
+  }
+
+  /** Store that a world's day has been posted, in the database and in the copy
+   *  of the row `statisticsTargets` reads back thirty seconds later. Both, or
+   *  the same day posts again for the rest of the server-save window. */
+  private def recordStatisticsPosted(target: statistics.StatisticsTarget, day: java.time.LocalDate): Unit = {
+    worldConfigRepository.updateWorldString(target.guildId, target.world, "statistics_posted", day.toString)
+    modifyWorldsData { data =>
+      data.get(target.guildId) match {
+        case None => data
+        case Some(worlds) => data.updated(target.guildId, worlds.map { world =>
+          if (world.name.equalsIgnoreCase(target.world)) world.copy(statisticsPosted = day.toString) else world
+        })
+      }
+    }
+  }
+
+  /** The daily statistics post. Runs on every bot and fetches nothing — the
+   *  figures were already written to the shared cache by the primary's hourly
+   *  highscore sweep, so all this does is read them and post to its own guilds.
+   *
+   *  One message, four embeds. Nothing waits on anything: the kill statistics
+   *  the last two read were published overnight and filed at four in the
+   *  morning, six hours before this runs. */
+  private lazy val statisticsService = new statistics.StatisticsService(
+    experience = experienceRepository,
+    highscores = highscoreRepository,
+    killStatistics = killStatisticsRepository,
+    frags = fragRepository,
+    worldOnline = worldOnlineRepository,
+    targets = () => statisticsTargets(),
+    announce = (target, report, frags, enemyLosses) =>
+      statisticsChannelFor(target).foreach { channel =>
+        // Read before the send is queued rather than inside it: both lookups are
+        // database reads, and the queue is paced.
+        val sheets = statisticsSheets(target.world)
+        val side = statisticsSideIcon(target.guildId, sheets)
+        val vocation = statisticsVocation(target.world, sheets)
+        outboundSender.enqueue("statistics") { () =>
+          // The world, then the war, then what the world killed, then what might
+          // happen today — one message, so a channel somebody scrolls through
+          // reads as one entry per day. A day too big for Discord's 6,000
+          // characters spills onto a second message rather than losing rows.
+          //
+          // The last two are absent only when the day's kill statistics were
+          // never filed, since both read that snapshot. Normally they were, six
+          // hours earlier — tibia.com publishes them overnight, not at server
+          // save — so this is the tibia.com-was-down case rather than a race.
+          val embeds =
+            presentation.StatisticsEmbeds.build(
+              report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
+              Config.levelUpEmoji, Config.levelDownEmoji) :::
+            presentation.PvpEmbeds.build(
+              target.world, frags, enemyLosses, side, vocation,
+              Config.barEmoji,
+              presentation.Bars.Scale.forWorld(report.averageOnline, report.averageLevel),
+              Config.levelDownEmoji, jumpToDeath(target)) :::
+            creatureEmbeds(report)
+          replaceStatisticsPost(channel, presentation.EmbedPages.messages(embeds))
+        }
+      },
+    recordPosted = recordStatisticsPosted
+  )
+
+  /** The half of the post that reads the day's kill statistics: what the world
+   *  killed, and which bosses that history says might be up.
+   *
+   *  Built in one place because it travels as a unit — on the message the board
+   *  goes out on where the snapshot was already filed, and on a message of its
+   *  own where it was not. Empty until then, which is what keeps the two paths
+   *  from posting a prediction that cannot see yesterday. */
+  private def creatureEmbeds(
+      report: statistics.DailyReport
+  ): List[net.dv8tion.jda.api.entities.MessageEmbed] =
+    if (report.kills.isEmpty) Nil
+    else
+      presentation.StatisticsEmbeds.creatureStats(
+        report, Config.creatureEmoji, Config.goldEmoji, Config.specialKillEmojis.getOrElse(_, ""),
+        Config.creatureWiki.titleFor) :::
+      presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
+
+  /** The statistics channel for one target, if this bot can write to it. */
+  private def statisticsChannelFor(
+      target: statistics.StatisticsTarget
+  ): Option[net.dv8tion.jda.api.entities.channel.concrete.TextChannel] =
+    Option(discordGateway.guildById(target.guildId))
+      .flatMap(guild => Option(guild.getTextChannelById(target.channelId)))
+      .filter(channel => channel.canTalk() || !Config.prod)
+
   // run the scheduler to clean cache and update dashboard every hour.
   // scheduleWithFixedDelay (not the deprecated schedule) so a slow cycle — this
   // body makes blocking API calls at server save — can't pile up behind itself.
@@ -1245,6 +1653,7 @@ object BotApp extends App with StrictLogging {
       }
       removeDeathsCache(ZonedDateTime.now())
       removeLevelsCache(ZonedDateTime.now())
+      removeSheetsCache(ZonedDateTime.now())
       cleanHuntedList()
       reviewQuietListedPlayers()
       galthenService.cleanExpired()
@@ -1593,6 +2002,10 @@ object BotApp extends App with StrictLogging {
     catch { case ex: Throwable => logger.warn("Failed to run the inactive-guild prune sweep", ex) }
     try pruneHighscoreHistory()
     catch { case ex: Throwable => logger.warn("Failed to run the highscore history prune", ex) }
+    try pruneKillStatistics()
+    catch { case ex: Throwable => logger.warn("Failed to run the kill statistics prune", ex) }
+    try pruneFrags()
+    catch { case ex: Throwable => logger.warn("Failed to run the frag prune", ex) }
   })(ex)
 
   /** Retention for the highscore tables.
@@ -1606,13 +2019,54 @@ object BotApp extends App with StrictLogging {
   private def pruneHighscoreHistory(): Unit =
     if (Config.Highscores.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
       val now = Instant.now()
-      experienceRepository.removeExpiredReadings(now.minusSeconds(Config.Highscores.experienceRawRetention.toSeconds))
       experienceRepository.removeExpiredDaily(
         now.minusSeconds(Config.Highscores.experienceDailyRetention.toSeconds)
           .atZone(domain.time.Clock.Berlin).toLocalDate)
       highscoreRepository.removeExpiredEvents(now.minusSeconds(Config.Highscores.eventRetention.toSeconds))
       val staleBefore = now.minusSeconds(Config.Highscores.scoreRetention.toSeconds)
       streamSupervisor.activeWorlds.foreach(world => highscoreRepository.removeStale(world, staleBefore))
+    }
+
+  /** Drop kill statistics older than the retention.
+   *
+   *  Its own prune rather than a line in the one above, because it answers to a
+   *  different setting and a much longer one: the longest boss window is 175
+   *  days, and a history shorter than the window it is meant to measure can only
+   *  ever say "not seen recently".
+   *
+   *  Primary-only like the sweep that writes it — the rows are in the shared
+   *  cache, so one bot pruning them is enough for the fleet. */
+  private def pruneKillStatistics(): Unit =
+    if (Config.Statistics.KillStatistics.enabled && Config.BotRole.current != Config.BotRole.Secondary) {
+      val before = Instant.now()
+        .minusSeconds(Config.Statistics.KillStatistics.retention.toSeconds)
+        .atZone(domain.time.Clock.Berlin).toLocalDate
+      killStatisticsRepository.removeExpired(before)
+      // The online rollup rides the same cutoff. It is one row per world per day
+      // against the boss history's thousands, so a retention of its own would be
+      // a second setting to keep in step for no saving worth having.
+      worldOnlineRepository.removeExpired(before)
+    }
+
+  /** Drop frag rows older than the retention, per guild.
+   *
+   *  Guild by guild because the rows are, and only for guilds that actually have
+   *  a statistics channel — a guild with none has no rows, and opening its
+   *  database to prove that is a connection for nothing.
+   *
+   *  Not primary-only, unlike the two prunes above: these live in each guild's
+   *  own database, and only the bot that serves a guild can reach it. */
+  private def pruneFrags(): Unit =
+    if (Config.Statistics.enabled) {
+      val before = Instant.now()
+        .minusSeconds(Config.Statistics.fragRetention.toSeconds)
+        .atZone(domain.time.Clock.Berlin).toLocalDate
+      statisticsTargets().map(_.guildId).distinct.foreach { guildId =>
+        try fragRepository.removeExpired(guildId, before)
+        catch {
+          case ex: Throwable => logger.warn(s"Could not prune frags for guild '$guildId'", ex)
+        }
+      }
     }
 
   /** A guild with no worlds tracked (its own per-guild database may not even
@@ -1989,6 +2443,13 @@ object BotApp extends App with StrictLogging {
   private def removeLevelsCache(time: ZonedDateTime): Unit =
     cacheRepository.removeExpiredLevels(time)
 
+  def getSheetsCache(world: String): Map[String, SheetCache] = cacheRepository.getSheets(world)
+
+  def addSheetsCache(rows: List[SheetCache]): Unit = cacheRepository.recordSheets(rows)
+
+  private def removeSheetsCache(time: ZonedDateTime): Unit =
+    cacheRepository.removeExpiredSheets(time)
+
   def getRenameCooldowns(world: String): Map[String, ZonedDateTime] = renameCooldownRepository.loadForWorld(world)
 
   def recordRenameCooldown(world: String, channelId: String, at: ZonedDateTime): Unit =
@@ -2140,15 +2601,42 @@ object BotApp extends App with StrictLogging {
    *  map corrects itself rather than inheriting past mistakes. `shiftOnFailure`
    *  says what to do when the wiki can't be read: the server-save refresh advances
    *  the map we hold, so an outage still rotates, while `/admin`'s Dreamscar leaves
-   *  it alone — that exists to *undo* drift, not add some. */
+   *  it alone — that exists to *undo* drift, not add some.
+   *
+   *  The wiki read is then checked against what the worlds actually killed, which
+   *  is the only source that can catch an offset the page has wrong — see
+   *  [[statistics.DreamCourtService]]. A local shift is deliberately not checked:
+   *  the evidence would be answering a map nobody has re-read, and the next
+   *  successful read is a better place to correct it. */
   private def refreshDreamScarBosses(shiftOnFailure: Boolean): Unit =
     fetchDreamScarBosses() match {
-      case Some(bosses) => dreamScar = bosses
+      case Some(bosses) => dreamScar = correctDreamScarBosses(bosses)
       case None if shiftOnFailure =>
         logger.warn("Advancing the Dream Courts bosses locally instead of re-reading them")
         dreamScar = shiftAllBossesUp(dreamScar)
       case None => ()
     }
+
+  /** The wiki's answer with the worlds the kill history is confident about put
+   *  right. Primary only: it reads the shared cache and writes nothing, so on the
+   *  secondary it would be the same answer computed twice — that bot picks the
+   *  corrections up from the same rows in its own refresh. */
+  private def correctDreamScarBosses(fromWiki: Map[String, String]): Map[String, String] =
+    try dreamCourtService.correct(
+      fromWiki, ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toLocalDate)
+    catch {
+      case error: Throwable =>
+        logger.warn("Could not check the Dream Courts bosses against the kill history", error)
+        fromWiki
+    }
+
+  private lazy val dreamCourtService = new statistics.DreamCourtService(
+    killStatistics = killStatisticsRepository,
+    mode = () => statistics.DreamCourtMode.parse(Config.Statistics.KillStatistics.DreamCourts.mode),
+    window = Config.Statistics.KillStatistics.DreamCourts.windowDays,
+    minDays = Config.Statistics.KillStatistics.DreamCourts.minDays,
+    minLead = Config.Statistics.KillStatistics.DreamCourts.minLead
+  )
 
   def fetchCreatureNames(): List[String] = wikiClient.creatureNames()
 

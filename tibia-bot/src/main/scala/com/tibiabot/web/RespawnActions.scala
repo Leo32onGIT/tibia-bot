@@ -53,6 +53,17 @@ object RespawnActions {
       else " It now runs into the next booking, which will be cancelled and its owner put in the queue."
     }.getOrElse("")
 
+  /** What a changed window now is, said the way somebody reads it back.
+   *
+   *  A moved one leads with when, because that is what they just changed and
+   *  where they will look to check it landed; one that only got longer or
+   *  shorter has nothing to say about when and would be padded by it. */
+  def slotEdited(what: String, spawn: String, edit: com.tibiabot.respawn.SlotEdit): String =
+    if (edit.moved)
+      s"The $what for $spawn now starts ${clock(edit.startsAt)} and runs for " +
+        s"${minutes(edit.minutes)}."
+    else s"The $what for $spawn now runs for ${minutes(edit.minutes)}."
+
   def describe(outcome: ClaimOutcome): ActionResult = outcome match {
     case ClaimOutcome.Claimed(respawn, claim) =>
       ActionResult(ok = true, s"${respawn.displayName} is yours for ${minutes(claim.durationMinutes)}.")

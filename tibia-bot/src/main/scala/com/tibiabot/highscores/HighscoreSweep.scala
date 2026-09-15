@@ -74,7 +74,6 @@ final class HighscoreSweep(
    *  within the minute and this reading is an hour old. */
   private def recordHistory(world: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = {
     val saveDay = ServerSaveSchedule.lastServerSave(snapshotAt.atZone(com.tibiabot.domain.time.Clock.Berlin)).toLocalDate
-    experience.recordReadings(world, entries, snapshotAt)
     experience.recordDaily(world, entries, saveDay)
   }
 

@@ -24,7 +24,8 @@ import java.time.ZonedDateTime
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
-import com.tibiabot.presentation.Names
+import scala.util.Try
+import com.tibiabot.presentation.{AdminLog, Names}
 
 /** createChannels' result: an embed always, plus confirm/cancel buttons only
  *  when it's prompting to reassign a paused world's seat (see
@@ -170,6 +171,23 @@ final class ChannelService(
         s":gear: The command log is now <#${channel.getId}>.$leftBehind")
     }
     embedBuild.build()
+  }
+
+  /** The statistics channel's name, in the same small-caps the other per-world
+   *  channels use. */
+  private val statisticsChannelName = "📊・sᴛᴀᴛɪsᴛɪᴄs"
+
+  /** Names no world: it is posted inside that world's own category, and every
+   *  other channel's intro there does the same. */
+  private val statisticsIntro: String =
+    ":speech_balloon: This channel posts a daily summary at **server save**.\n\n" +
+      "It includes who gained and lost the most experience, the highest skill anyone reached, " +
+      "PVP statistics for the day and which bosses are due to spawn today."
+
+  private def commandLogOf(guild: Guild): TextChannel = {
+    val config = discordRetrieveConfig(guild)
+    val adminChannelId = if (config.nonEmpty) config.getOrElse("admin_channel", "") else ""
+    if (adminChannelId.nonEmpty && adminChannelId.forall(_.isDigit)) guild.getTextChannelById(adminChannelId) else null
   }
 
   /** The bot's own override on its "Violent Bot" category.
@@ -336,7 +354,7 @@ final class ChannelService(
     val bountyMention = if (bountyRoleId == null || bountyRoleId == "0") "**Bounty**" else s"<@&$bountyRoleId>"
     new EmbedBuilder()
       .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
-      .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
+      .setThumbnail("https://violentbot.xyz/discord/effects/Phantasmal_Ooze.gif")
       .setColor(BrandColor)
       // Not "add or remove yourself from the role": three of the five buttons do
       // that, and the last two open a form that sets up a DM subscription (the
@@ -713,9 +731,10 @@ final class ChannelService(
         val deathsChannel = guild.createTextChannel("💀・ᴅᴇᴀᴛʜs", newCategory).complete()
         val levelsChannel = guild.createTextChannel("💖・ʟᴇᴠᴇʟs", newCategory).complete()
         val activityChannel = guild.createTextChannel("📝・ᴀᴄᴛɪᴠɪᴛʏ", newCategory).complete()
+        val statisticsChannel = guild.createTextChannel(statisticsChannelName, newCategory).complete()
 
         val publicRole = guild.getPublicRole
-        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel)
+        val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, statisticsChannel)
         channelList.foreach(grantWorldPerms(_, botRole, publicRole))
 
         val notificationsConfig = discordRetrieveConfig(guild)
@@ -737,12 +756,18 @@ final class ChannelService(
         val deathsId = deathsChannel.getId
         val categoryId = newCategory.getId
         val activityId = activityChannel.getId
+        val statisticsId = statisticsChannel.getId
 
         postChannelIntro(guild.getTextChannelById(levelsId), s":speech_balloon: This channel shows levels that have been gained on this world.\n\nYou can filter what appears in this channel using the **`/settings filter levels`** command.")
         postChannelIntro(guild.getTextChannelById(deathsId), s":speech_balloon: This channel shows deaths that occur on this world.\n\nYou can filter what appears in this channel using the **`/settings filter deaths`** command.")
         postChannelIntro(guild.getTextChannelById(activityId), s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
 
+        postChannelIntro(guild.getTextChannelById(statisticsId), statisticsIntro)
+
         worldCreateConfig(guild, world, alliesId, enemiesId, neutralsId, levelsId, deathsId, categoryId, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "0", "0", activityId)
+        // Written after the insert rather than threaded through worldCreateConfig,
+        // whose positional signature is already sixteen arguments long.
+        worldRepairConfig(guild, world, "statistics_channel", statisticsId)
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
           val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(guild.getIdLong, guild.getJDA.getSelfUser.getId)
@@ -833,6 +858,7 @@ final class ChannelService(
       val activityChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.activityChannel))
       val fullblessChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.fullblessChannel))
       val onlineCombinedInfo: Option[String] = cache.flatMap(_.headOption.map(_.onlineCombined))
+      val statisticsChannelInfo: Option[String] = cache.flatMap(_.headOption.map(_.statisticsChannel))
 
       // get admin ids
       val discordConfig = discordRetrieveConfig(guild)
@@ -850,6 +876,12 @@ final class ChannelService(
       val deathsChannel = guild.getTextChannelById(deathsChannelInfo.getOrElse("0"))
       val activityChannel = guild.getTextChannelById(activityChannelInfo.getOrElse("0"))
       val onlineCombinedVal = onlineCombinedInfo.getOrElse("true")
+      // "0" on every world set up before the daily post existed, which reads the
+      // same as a deleted channel and is repaired the same way — the path that
+      // gives those worlds their bounty role for the first time does likewise.
+      val statisticsChannelId = statisticsChannelInfo.filter(id => id.nonEmpty && id.forall(_.isDigit)).getOrElse("0")
+      val statisticsChannel = guild.getTextChannelById(statisticsChannelId)
+      val statisticsMissing = statisticsChannel == null
 
       val onlineCombineCheck = onlineCombinedVal == "false" && (enemiesChannel == null || neutralsChannel == null)
 
@@ -987,7 +1019,7 @@ final class ChannelService(
         }
       }
 
-      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || adminChannel == null || boostedChannel == null) {
+      if (alliesChannel == null || onlineCombineCheck || levelsChannel == null || deathsChannel == null || activityChannel == null || statisticsMissing || adminChannel == null || boostedChannel == null) {
         if (category == null) { // category has been deleted:
           // create the category
           val newCategory = guild.createCategory(world).complete()
@@ -1114,6 +1146,24 @@ final class ChannelService(
           }
           // post initial embed in activity channel
           postChannelIntro(recreateActivityChannel, s":speech_balloon: This channel shows change activity for *allied* or *enemy* players.\n\nIt will show events when a players **joins** or **leaves** one of these tracked guilds or **changes their name**.")
+        }
+        if (statisticsMissing) {
+          val recreateStatisticsChannel = guild.createTextChannel(statisticsChannelName, category).complete()
+          channelList += ((recreateStatisticsChannel, false))
+          worldRepairConfig(guild, worldFormal, "statistics_channel", recreateStatisticsChannel.getId)
+          // update the record in worldsData
+          if (streamState.worldsData.contains(guild.getId)) {
+            val worldsList = streamState.worldsData(guild.getId)
+            val updatedWorldsList = worldsList.map { world =>
+              if (world.name.toLowerCase == worldFormal.toLowerCase) {
+                world.copy(statisticsChannel = recreateStatisticsChannel.getId)
+              } else {
+                world
+              }
+            }
+            streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
+          }
+          postChannelIntro(recreateStatisticsChannel, statisticsIntro)
         }
 
         if (boostedChannel == null) {

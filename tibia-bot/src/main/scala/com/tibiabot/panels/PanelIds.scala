@@ -78,8 +78,12 @@ object PanelIds {
    *  and so the least often wanted — and the command log after them, which is set
    *  once for the server and then forgotten about.
    *
-   *  Seven, so they no longer fit one row; Panels.rows splits them 5 and 2. */
-  val settingsActions: List[String] = List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
+   *  Seven, so they no longer fit one row; Panels.rows splits them 5 and 2. The
+   *  daily statistics post is not among them: its channel is part of a world
+   *  like the deaths and levels channels are, made by `/setup` and rebuilt by
+   *  `/repair`, so there is nothing here to turn on. */
+  val settingsActions: List[String] =
+    List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
 
   // --- hunted/allies actions ----------------------------------------------
 

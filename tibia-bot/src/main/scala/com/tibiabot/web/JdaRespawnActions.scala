@@ -371,16 +371,34 @@ final class JdaRespawnActions(
     }
 
   def editSlot(guildId: String, actorId: String, code: String,
-               startsAt: java.time.ZonedDateTime, minutes: Int): Future[ActionResult] =
+               startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+               minutes: Int): Future[ActionResult] =
+    changeSlot(guildId, actorId, code, startsAt, toStartsAt, minutes,
+      com.tibiabot.respawn.SlotEditor.Moderator)
+
+  def editOwnSlot(guildId: String, actorId: String, code: String,
+                  startsAt: java.time.ZonedDateTime, toStartsAt: Option[java.time.ZonedDateTime],
+                  minutes: Int): Future[ActionResult] =
+    changeSlot(guildId, actorId, code, startsAt, toStartsAt, minutes,
+      com.tibiabot.respawn.SlotEditor.Owner(actorId))
+
+  /** Both ways of putting one evening right. The only difference between them is
+   *  who is asking, which the service turns into which rules apply — so the
+   *  answer, the logging and the refusals are written once. */
+  private def changeSlot(guildId: String, actorId: String, code: String,
+                         startsAt: java.time.ZonedDateTime,
+                         toStartsAt: Option[java.time.ZonedDateTime], minutes: Int,
+                         by: com.tibiabot.respawn.SlotEditor): Future[ActionResult] =
     withActableGuild(guildId) { guild =>
       respawnService.resolve(guildId, code) match {
         case None => ActionResult(ok = false, s"No spawn matches '$code'.")
         case Some(respawn) =>
-          respawnService.editSlot(guild, respawn, startsAt, minutes) match {
+          respawnService.editSlot(guild, respawn, startsAt, minutes, toStartsAt, by) match {
             case Left(reason) => ActionResult(ok = false, reason)
             case Right(edit) =>
               logger.info(s"Dashboard: '$actorId' set ${edit.owner}'s ${respawn.code} " +
-                s"${if (edit.live) "hunt" else "slot"} at ${startsAt.toInstant} to ${edit.minutes}m " +
+                s"${if (edit.live) "hunt" else "slot"} at ${startsAt.toInstant} to ${edit.minutes}m" +
+                s"${if (edit.moved) s" starting ${edit.startsAt.toInstant}" else ""} " +
                 s"in guild '$guildId'")
               // That it now reaches into the next booking is said on the way
               // past rather than left to be discovered: the write has happened,
@@ -395,8 +413,7 @@ final class JdaRespawnActions(
               // card already use for them.
               val what = if (edit.live) "claim" else "booking"
               ActionResult(ok = true,
-                s"The $what for ${respawn.displayName} now runs for " +
-                  s"${com.tibiabot.presentation.RespawnEmbeds.humanDuration(edit.minutes)}.$overrun")
+                RespawnActions.slotEdited(what, respawn.displayName, edit) + overrun)
           }
       }
     }
@@ -615,6 +632,7 @@ object JdaRespawnActions {
     case Some(RespawnClaim.Outcome.ScheduleCancelled) => "booking cancelled"
     case Some(RespawnClaim.Outcome.SlotRemoved)  => "taken off the day"
     case Some(RespawnClaim.Outcome.SlotMoved)    => "given to somebody else"
+    case Some(RespawnClaim.Outcome.SlotRetimed)  => "moved to another time"
     case _                                       => ""
   }
 

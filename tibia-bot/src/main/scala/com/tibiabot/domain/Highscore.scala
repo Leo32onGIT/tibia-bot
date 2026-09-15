@@ -45,20 +45,30 @@ final case class HighscoreEvent(
     observed: Instant
 )
 
-/** One character's experience on one server-save day, as the `experience_daily`
- *  rollup holds it — the long-term half of the history the Statistics channel
- *  will read.
+/** What one character's experience did over a single server-save day — the
+ *  difference between its `experience_daily` rows a day apart.
  *
  *  Keyed by save day rather than calendar day because that is the boundary a
  *  Tibia player's day actually has, and the same one the respawn system's
- *  stamina already resets on. */
-final case class ExperiencePoint(
+ *  stamina already resets on.
+ *
+ *  `gained` is signed: a death costs experience, and the Statistics channel
+ *  reports the day's worst loss alongside its best gains. `level` and
+ *  `previousLevel` are the readings either side of the day, so a post can say
+ *  someone went from 412 to 418 without a second lookup.
+ *
+ *  Only characters present in both days' rollups can have one of these. A
+ *  character who entered the world's top thousand today has no baseline, and
+ *  "entered the list" is not a day's experience — see
+ *  [[com.tibiabot.persistence.ExperienceRepository.dailyGains]]. */
+final case class ExperienceDelta(
     name: String,
     displayName: String,
     vocation: String,
     level: Int,
+    previousLevel: Int,
     experience: Long,
-    saveDay: LocalDate
+    gained: Long
 )
 
 /** A [[HighscoreEvent]] as the table holds it, with the identity the feed

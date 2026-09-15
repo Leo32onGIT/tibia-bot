@@ -30,6 +30,22 @@ trait HighscoreRepository {
    *  character. */
   def load(world: String, category: String): Map[String, HighscoreRecord]
 
+  /** Every character one world's lists have a reading for, as lowercased name ->
+   *  vocation.
+   *
+   *  Read by the PVP post, whose rows keep a name and nothing else — a killer is
+   *  a name on a death message. The cached character sheets behind the hunted
+   *  and allied lists answer for the players somebody listed by name, and this
+   *  answers for everybody else: a character reached through a hunted *guild*
+   *  has no sheet of their own, and the people who show up in a PVP summary are
+   *  exactly the people a world's weapon-skill lists are made of.
+   *
+   *  One query per world rather than one per name, because the caller wants a
+   *  handful of names and cannot say which until the tally is in hand. Rows
+   *  whose vocation was never recorded are left out, so a lookup that misses and
+   *  one that finds an empty string are the same answer. */
+  def vocations(world: String): Map[String, String]
+
   /** Write a whole list's readings in one batch, inserting new characters and
    *  updating existing ones.
    *
@@ -47,6 +63,21 @@ trait HighscoreRepository {
   /** A world's advances since `since`, most recent first. For the dashboard and
    *  for answering "why did that not post?". */
   def events(world: String, since: Instant): List[HighscoreEvent]
+
+  /** The highest skill level anyone reached on one world between two instants,
+   *  or None if nobody advanced.
+   *
+   *  Experience is excluded, though in practice it is never in this table:
+   *  [[com.tibiabot.highscores.HighscoreDiff.advances]] yields nothing for a
+   *  list that does not post. The filter is here so the query says what it means
+   *  rather than depending on that staying true.
+   *
+   *  Ranked by the score reached, not by the size of the jump — the Statistics
+   *  channel is reporting "somebody hit magic level 131", which is a standing,
+   *  not a day's grinding. Categories are compared on their raw numbers, so fist
+   *  fighting will effectively never win this; that is a fair reflection of what
+   *  the lists look like, not a bug to normalise away. */
+  def topAdvance(world: String, from: Instant, to: Instant): Option[HighscoreEvent]
 
   /** Advances filed after `afterId`, oldest first, at most `limit` of them.
    *

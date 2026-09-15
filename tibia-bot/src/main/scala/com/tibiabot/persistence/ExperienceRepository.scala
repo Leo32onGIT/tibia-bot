@@ -1,24 +1,20 @@
 package com.tibiabot.persistence
 
-import com.tibiabot.domain.ExperiencePoint
+import com.tibiabot.domain.ExperienceDelta
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
-import java.time.{Instant, LocalDate}
+import java.time.LocalDate
 
-/** Persistence port for the experience history — the half of this feature that
- *  posts nothing and exists only so the Statistics channel has something to
- *  read when it is built.
+/** Persistence port for the experience history the Statistics channel reads.
  *
- *  Two tables rather than one, because the honest hourly reading and the thing
- *  worth keeping for a year are different sizes. A snapshot is a thousand rows
- *  per world; at 68 worlds and 24 snapshots that is 1.63M rows a day, which is
- *  58 GB a year on a disk already at 80%. So the raw readings live a week —
- *  enough for any intra-day curve — and a rollup carries one row per character
- *  per server-save day for the long term at about a fortieth of the volume. */
+ *  One table, holding one row per character per server-save day. There used to
+ *  be a second one keeping every hourly reading behind it, on the reasoning that
+ *  an intra-day curve would want them. Nothing was ever built that read it, and
+ *  measured against real Postgres it was 30 MB per world of the 58 this feature
+ *  uses — more than half the disk, for a table whose only statements were an
+ *  INSERT and a DELETE. If the curve is ever wanted, the readings are fifteen
+ *  lines to bring back; the year of them nobody looked at is not. */
 trait ExperienceRepository {
-
-  /** File one snapshot's readings. */
-  def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit
 
   /** Fold the same readings into the day's rollup.
    *
@@ -28,11 +24,43 @@ trait ExperienceRepository {
    *  restart — where a single timed write would simply miss the day. */
   def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit
 
-  /** One character's daily points from `from` onward, oldest first — the shape
-   *  an "experience gained" series wants. */
-  def daily(world: String, name: String, from: LocalDate): List[ExperiencePoint]
+  /** The day's biggest experience gains on one world, largest first.
+   *
+   *  A day's gain is the difference between the rollup for `saveDay` and the one
+   *  for the day before it, so a character present in only one of them is left
+   *  out entirely: entering the world's top thousand is not a day's experience,
+   *  and neither is dropping out of it. That also means the first `saveDay` a
+   *  world was ever swept has nothing to report, which is the correct answer
+   *  rather than a gap to paper over.
+   *
+   *  Only real gains, which the query itself enforces — on a very quiet world
+   *  the tenth-placed mover can be somebody who simply died, and listing them
+   *  under "top experience gained" would be wrong. So this comes back shorter
+   *  than `limit` on a quiet day, the same way [[dailyLosses]] does. */
+  def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
 
-  def removeExpiredReadings(before: Instant): Unit
+  /** The largest experience losses on one world that day, worst first. Same join
+   *  and same exclusions as [[dailyGains]], read from the other end.
+   *
+   *  Only real losses, which the query itself enforces — on a world where
+   *  almost everybody gained, the bottom of the ordering is still a gain, and
+   *  listing those under a heading that says losses would be wrong. So this
+   *  comes back shorter than `limit` on a quiet day and empty where nobody
+   *  ended the day down, which is the honest shape rather than a padded one. */
+  def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta]
+
+  /** The largest experience losses that day among a named set of characters,
+   *  worst first.
+   *
+   *  For the PVP post's "Most Exp Lost", where the set is one guild's hunted
+   *  list. Names are matched lowercased, the same key
+   *  [[com.tibiabot.highscores.HighscoreDiff.key]] stores.
+   *
+   *  Usually returns very little, and that is the honest answer rather than a
+   *  fault: this table holds the world's top thousand by experience, and most
+   *  tracked enemies are ordinary players who are not in it. An enemy with no row
+   *  has no figure at all, not a figure of zero. */
+  def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta]
 
   def removeExpiredDaily(before: LocalDate): Unit
 }

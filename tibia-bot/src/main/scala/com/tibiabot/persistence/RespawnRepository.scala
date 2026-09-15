@@ -367,6 +367,18 @@ trait RespawnRepository {
                      userName: String, nickname: String, characterName: String,
                      startsAt: ZonedDateTime, durationMinutes: Int, outcome: String): Boolean
 
+  /** Move a booked slot to another time, and set its length while there.
+   *
+   *  Only a booking with no rule behind it — an occurrence is identified by its
+   *  rule and the instant it starts on, so moving that instant would let the
+   *  materialiser write the old evening again. None when the row is gone, has
+   *  started, or turns out to be an occurrence after all.
+   *
+   *  Any request standing against it is dropped: the question was about the
+   *  evening its owner had, which is no longer the evening they hold. */
+  def retimeReservation(guildId: String, claimId: Long, startsAt: ZonedDateTime,
+                        durationMinutes: Int): Option[RespawnClaim]
+
   /** Put a booked slot in somebody else's name, keeping its time and length.
    *
    *  Any pending question goes with it: the answer would be about a slot that is

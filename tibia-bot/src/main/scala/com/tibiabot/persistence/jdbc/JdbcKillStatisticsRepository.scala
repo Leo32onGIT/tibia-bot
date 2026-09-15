@@ -1,0 +1,232 @@
+package com.tibiabot.persistence.jdbc
+
+import com.tibiabot.persistence.{ConnectionProvider, KillStatisticsRepository}
+import com.tibiabot.statistics.{BossKills, DayKillSummary}
+
+import java.sql.{Date => SqlDate}
+import java.time.LocalDate
+import scala.collection.mutable.ListBuffer
+
+/** JDBC implementation of KillStatisticsRepository against the shared bot_cache
+ *  database. Both tables are created up front by SchemaInitializer.initCache. */
+final class JdbcKillStatisticsRepository(connectionProvider: ConnectionProvider) extends KillStatisticsRepository {
+
+  def recordBossKills(rows: List[BossKills]): Unit =
+    if (rows.nonEmpty) JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // Upsert rather than insert-or-ignore: a re-run means the first attempt
+      // did not finish, and the later reading is the better one.
+      val statement = conn.prepareStatement(
+        s"""
+           |INSERT INTO kill_statistics_boss(world, save_day, race, killed, players_killed)
+           |VALUES (?,?,?,?,?)
+           |ON CONFLICT (world, save_day, race)
+           |DO UPDATE SET killed = excluded.killed, players_killed = excluded.players_killed;
+           |""".stripMargin
+      )
+      // A boss can only appear once per world per day; the catalogue is keyed by
+      // race, but a hand-edited file could still repeat one, and Postgres
+      // refuses to touch a row twice in one statement.
+      rows.groupBy(row => (row.world, row.saveDay, row.race.toLowerCase)).values.map(_.last).foreach { row =>
+        statement.setString(1, row.world)
+        statement.setDate(2, SqlDate.valueOf(row.saveDay))
+        statement.setString(3, row.race)
+        statement.setInt(4, row.killed)
+        statement.setInt(5, row.playersKilled)
+        statement.addBatch()
+      }
+      statement.executeBatch()
+      statement.close()
+    }
+
+  def recordSummary(summary: DayKillSummary): Unit =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |INSERT INTO kill_statistics_summary(world, save_day, most_killed_race, most_killed,
+           |  deadliest_race, deadliest_kills, player_deaths, total_killed, total_players_killed)
+           |VALUES (?,?,?,?,?,?,?,?,?)
+           |ON CONFLICT (world, save_day)
+           |DO UPDATE SET
+           |  most_killed_race = excluded.most_killed_race,
+           |  most_killed = excluded.most_killed,
+           |  deadliest_race = excluded.deadliest_race,
+           |  deadliest_kills = excluded.deadliest_kills,
+           |  player_deaths = excluded.player_deaths,
+           |  total_killed = excluded.total_killed,
+           |  total_players_killed = excluded.total_players_killed;
+           |""".stripMargin
+      )
+      statement.setString(1, summary.world)
+      statement.setDate(2, SqlDate.valueOf(summary.saveDay))
+      // "" and 0 for a day that had no such creature — the column pair is read
+      // back as None on the empty name, so absence survives the round trip.
+      statement.setString(3, summary.mostKilled.map(_._1).getOrElse(""))
+      statement.setInt(4, summary.mostKilled.map(_._2).getOrElse(0))
+      statement.setString(5, summary.deadliest.map(_._1).getOrElse(""))
+      statement.setInt(6, summary.deadliest.map(_._2).getOrElse(0))
+      statement.setInt(7, summary.playerDeaths)
+      statement.setLong(8, summary.totalKilled)
+      statement.setInt(9, summary.totalPlayersKilled)
+      statement.executeUpdate()
+      statement.close()
+    }
+
+  def hasDay(world: String, saveDay: LocalDate): Boolean =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        "SELECT 1 FROM kill_statistics_summary WHERE world = ? AND save_day = ?;")
+      statement.setString(1, world)
+      statement.setDate(2, SqlDate.valueOf(saveDay))
+      val result = statement.executeQuery()
+      val found = result.next()
+      statement.close()
+      found
+    }
+
+  def sightings(world: String): Map[String, List[(LocalDate, Int)]] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // No lower bound on the day: the retention prune is what limits this, and
+      // a world boss counts in months. This used to be handed the world's own
+      // earliest day, which took a second query to compute a bound that by
+      // definition excluded nothing.
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT race,save_day,killed
+           |FROM kill_statistics_boss
+           |WHERE world = ? AND (killed > 0 OR players_killed > 0)
+           |ORDER BY race ASC, save_day DESC;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      val result = statement.executeQuery()
+
+      // Built newest-first per race, which is the order the prediction reads
+      // them in — the query already sorts that way, so the buffers only need
+      // appending to and never reversing.
+      val byRace = scala.collection.mutable.LinkedHashMap.empty[String, ListBuffer[(LocalDate, Int)]]
+      while (result.next()) {
+        val race = Option(result.getString("race")).getOrElse("").toLowerCase
+        val day = result.getDate("save_day").toLocalDate
+        val killed = result.getInt("killed")
+        byRace.getOrElseUpdate(race, new ListBuffer[(LocalDate, Int)]()) += ((day, killed))
+      }
+
+      statement.close()
+      byRace.map { case (race, days) => race -> days.toList }.toMap
+    }
+
+  def killsOn(world: String, saveDay: LocalDate): List[BossKills] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT race,killed,players_killed
+           |FROM kill_statistics_boss
+           |WHERE world = ? AND save_day = ? AND killed > 0
+           |ORDER BY killed DESC, race ASC;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      statement.setDate(2, SqlDate.valueOf(saveDay))
+      val result = statement.executeQuery()
+
+      val rows = new ListBuffer[BossKills]()
+      while (result.next()) {
+        rows += BossKills(
+          world = world,
+          saveDay = saveDay,
+          race = Option(result.getString("race")).getOrElse(""),
+          killed = result.getInt("killed"),
+          playersKilled = result.getInt("players_killed")
+        )
+      }
+
+      statement.close()
+      rows.toList
+    }
+
+  def dailyCounts(from: LocalDate, races: Set[String]): Map[String, List[BossKills]] =
+    if (races.isEmpty) Map.empty
+    else JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // LOWER() on both sides rather than trusting the stored casing: these rows
+      // are written from the endpoint's own spelling and read against a list
+      // kept in code, and the two only have to agree case-insensitively.
+      val placeholders = races.toList.map(_ => "?").mkString(",")
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT world,race,save_day,killed,players_killed
+           |FROM kill_statistics_boss
+           |WHERE save_day >= ? AND LOWER(race) IN ($placeholders)
+           |ORDER BY world ASC, save_day DESC, race ASC;
+           |""".stripMargin
+      )
+      statement.setDate(1, SqlDate.valueOf(from))
+      races.toList.map(_.toLowerCase).zipWithIndex.foreach {
+        case (race, index) => statement.setString(index + 2, race)
+      }
+      val result = statement.executeQuery()
+
+      // Grouped as they arrive, which the ORDER BY has already put in world
+      // order, so each world's rows are one contiguous run and the buffers are
+      // only ever appended to.
+      val byWorld = scala.collection.mutable.LinkedHashMap.empty[String, ListBuffer[BossKills]]
+      while (result.next()) {
+        val world = Option(result.getString("world")).getOrElse("")
+        byWorld.getOrElseUpdate(world, new ListBuffer[BossKills]()) += BossKills(
+          world = world,
+          saveDay = result.getDate("save_day").toLocalDate,
+          race = Option(result.getString("race")).getOrElse(""),
+          killed = result.getInt("killed"),
+          playersKilled = result.getInt("players_killed")
+        )
+      }
+
+      statement.close()
+      byWorld.map { case (world, rows) => world -> rows.toList }.toMap
+    }
+
+  def summary(world: String, saveDay: LocalDate): Option[DayKillSummary] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""
+           |SELECT most_killed_race,most_killed,deadliest_race,deadliest_kills,
+           |       player_deaths,total_killed,total_players_killed
+           |FROM kill_statistics_summary
+           |WHERE world = ? AND save_day = ?;
+           |""".stripMargin
+      )
+      statement.setString(1, world)
+      statement.setDate(2, SqlDate.valueOf(saveDay))
+      val result = statement.executeQuery()
+
+      val row = if (result.next()) Some(DayKillSummary(
+        world = world,
+        saveDay = saveDay,
+        mostKilled = named(result.getString("most_killed_race"), result.getInt("most_killed")),
+        deadliest = named(result.getString("deadliest_race"), result.getInt("deadliest_kills")),
+        playerDeaths = result.getInt("player_deaths"),
+        totalKilled = result.getLong("total_killed"),
+        totalPlayersKilled = result.getInt("total_players_killed")
+      )) else None
+
+      statement.close()
+      row
+    }
+
+  def removeExpired(before: LocalDate): Unit =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val day = SqlDate.valueOf(before)
+      val bossRows = conn.prepareStatement("DELETE FROM kill_statistics_boss WHERE save_day < ?;")
+      bossRows.setDate(1, day)
+      bossRows.executeUpdate()
+      bossRows.close()
+      val summaryRows = conn.prepareStatement("DELETE FROM kill_statistics_summary WHERE save_day < ?;")
+      summaryRows.setDate(1, day)
+      summaryRows.executeUpdate()
+      summaryRows.close()
+    }
+
+  /** The stored empty name is what "there was no such creature that day" looks
+   *  like, so it must not come back as a creature called "". */
+  private def named(race: String, count: Int): Option[(String, Int)] =
+    Option(race).map(_.trim).filter(_.nonEmpty).map(name => (name, count))
+}

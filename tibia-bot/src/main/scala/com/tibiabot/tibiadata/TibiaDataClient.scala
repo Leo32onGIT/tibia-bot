@@ -8,7 +8,7 @@ import org.apache.pekko.http.scaladsl.model.headers.{HttpEncodingRange, HttpEnco
 import org.apache.pekko.http.scaladsl.model.{HttpRequest, HttpResponse}
 import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import org.apache.pekko.pattern.after
-import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse, Information}
+import com.tibiabot.tibiadata.response.{CharacterResponse, WorldResponse, WorldsResponse, GuildResponse, BoostedResponse, CreatureResponse, HighscoresResponse, KillStatisticsResponse, Information}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json.JsonParser.ParsingException
 import java.net.URLEncoder
@@ -32,7 +32,7 @@ class TibiaDataClient(
   metrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaData,
   localMetrics: com.tibiabot.tracking.ApiCallMetrics = com.tibiabot.tracking.ApiMetrics.tibiaDataLocal,
   inFlight: InFlightLimit = InFlightLimit.tibiaData
-)(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi with HighscoresApi {
+)(implicit val system: ActorSystem) extends JsonSupport with StrictLogging with TibiaApi with HighscoresApi with KillStatisticsApi {
 
   implicit private val executionContext: ExecutionContextExecutor = system.dispatcher
 
@@ -185,6 +185,20 @@ class TibiaDataClient(
       s"$publicApi/v4/world/$encodedName",
       resp => s"Failed to get world: '${encodedName.replaceAll("%20", " ")}' with status: '${resp.status}'",
       s"Failed to parse world: '${encodedName.replaceAll("%20", " ")}'")
+  }
+
+  /** One world's kill statistics for the day that just closed.
+   *
+   *  Public endpoint: it needs no vocation filter, so nothing here costs our own
+   *  instance — and therefore the boosted feed and a neighbouring droplet — a
+   *  tibia.com scrape. One request per world per day.
+   */
+  def getKillStatistics(world: String): Future[Either[String, KillStatisticsResponse]] = {
+    val encodedName = URLEncoder.encode(world, "UTF-8").replaceAll("\\+", "%20")
+    fetch[KillStatisticsResponse](
+      s"$publicApi/v4/killstatistics/$encodedName",
+      resp => s"Failed to get kill statistics: '${encodedName.replaceAll("%20", " ")}' with status: '${resp.status}'",
+      s"Failed to parse kill statistics: '${encodedName.replaceAll("%20", " ")}'")
   }
 
   def getWorlds(): Future[Either[String, WorldsResponse]] =

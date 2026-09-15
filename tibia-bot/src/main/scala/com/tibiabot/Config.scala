@@ -124,7 +124,6 @@ object Config {
 
     val scoreRetention: FiniteDuration = dur("score-retention")
     val eventRetention: FiniteDuration = dur("event-retention")
-    val experienceRawRetention: FiniteDuration = dur("experience-raw-retention")
     val experienceDailyRetention: FiniteDuration = dur("experience-daily-retention")
 
     /** The stretch of a snapshot the sweep may spread its requests over.
@@ -136,9 +135,48 @@ object Config {
     }
   }
 
+  /** The daily statistics post — see discord.conf's statistics block. */
+  object Statistics {
+    private val statistics = discord.getConfig("statistics")
+
+    val enabled: Boolean = statistics.getBoolean("enabled")
+    val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
+    val fragRetention: FiniteDuration = statistics.getDuration("frag-retention").toScala
+
+    /** The daily kill statistics snapshot, which the post above waits on. */
+    object KillStatistics {
+      private val killStatistics = statistics.getConfig("kill-statistics")
+      private def dur(key: String): FiniteDuration = killStatistics.getDuration(key).toScala
+
+      val enabled: Boolean = killStatistics.getBoolean("enabled")
+      val tickInterval: FiniteDuration = dur("tick-interval")
+      val requestGap: FiniteDuration = dur("request-gap")
+      val settle: java.time.Duration = killStatistics.getDuration("settle")
+      val probeCandidates: Int = killStatistics.getInt("probe-candidates")
+      val retention: FiniteDuration = dur("retention")
+
+      /** Correcting the Dream Courts boss of the day from the banked kills. */
+      object DreamCourts {
+        private val dreamCourts = killStatistics.getConfig("dream-courts")
+        val mode: String = dreamCourts.getString("mode")
+        val windowDays: Int = dreamCourts.getInt("window-days")
+        val minDays: Int = dreamCourts.getInt("min-days")
+        val minLead: Int = dreamCourts.getInt("min-lead")
+      }
+    }
+  }
+
   val creatureUrlMappings: Map[String, String] = mappings.getObject("creature-url-mappings").asScala.map {
     case (k, v) => k -> v.unwrapped().toString
   }.toMap
+
+  /** Fandom pages for the races no pluralisation rule reaches. Not to be
+   *  confused with creature-url-mappings above, which is the same idea for the
+   *  other wiki and carries that one's titles. */
+  val creatureRacePages: Map[String, String] =
+    mappings.getObject("kill-stats-page-overrides").asScala.map {
+      case (k, v) => k.toLowerCase -> v.unwrapped().toString
+    }.toMap
 
   // this is the message sent when the bot joins a discord or a user uses /help
   val helpText = s"**How to use the bot:**\n" +
@@ -187,12 +225,35 @@ object Config {
  val indentEmoji: String = discord.getString("indent-emoji")
  val dailyEmoji: String = discord.getString("daily-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")
+ /** The falling counterpart to [[levelUpEmoji]] — experience lost rather than
+  *  gained. The statistics post uses the pair in place of a + and a - sign. */
+ val newsEmoji: String = discord.getString("news-emoji")
+ val levelDownEmoji: String = discord.getString("lvldown-emoji")
+
+ /** The nine bar-segment emoji, keyed the way [[com.tibiabot.presentation.Bars]]
+  *  asks for them: a colour and a position in the run. */
+ val barEmoji: Map[(String, String), String] = (
+   for {
+     colour <- List("green", "red", "empty")
+     shape <- List("start", "mid", "end")
+   } yield (colour, shape) -> discord.getString(s"bar-$colour-$shape-emoji")
+ ).toMap
  val primalEmoji: String = discord.getString("primal-emoji")
  val hazardEmoji: String = discord.getString("hazard-emoji")
  val yesEmoji: String = discord.getString("yes-emoji")
  val noEmoji: String = discord.getString("no-emoji")
  val letterEmoji: String = discord.getString("letter-emoji")
  val goldEmoji: String = discord.getString("gold-emoji")
+
+ /** The daily post's special-kill icons, by the key
+  *  [[com.tibiabot.statistics.SpecialKills]] holds them under — which is not the
+  *  race the endpoint counts them by. Empty for a boss nothing is configured
+  *  for, which renders as no icon rather than a gap. */
+ val specialKillEmojis: Map[String, String] =
+   discord.getObject("special-kill-emojis").asScala.map {
+     case (key, value) => key -> value.unwrapped().toString
+   }.toMap
+
  val bossEmoji: String = discord.getString("boss-emoji")
  val creatureEmoji: String = discord.getString("creature-emoji")
  val torchOnEmoji: String = discord.getString("torch-on-emoji")
@@ -547,4 +608,9 @@ object Config {
   // creatures - dynamically fetched from the Tibia Fandom wiki (not TibiaData)
   val creaturesListFromApi: List[String] = BotApp.fetchCreatureNames()
   val creaturesList: List[String] = creaturesListFromApi.map(_.toLowerCase.trim)
+  // Indexed once here rather than per post: the daily statistics run asks it
+  // ten times a world, and the index is a few thousand keys built off the list
+  // above, which is already in memory.
+  val creatureWiki: presentation.CreatureWiki =
+    new presentation.CreatureWiki(creaturesListFromApi, creatureRacePages)
 }

@@ -12,6 +12,7 @@ import spray.json._
 import java.time.Instant
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.jdk.CollectionConverters._
 
 /** How the bot chooses between two upstreams telling it about the same
  *  character: the phase seeding that makes running both worth it, the failover
@@ -38,6 +39,33 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with BeforeAndAfter
   private def sheetFrom(at: Instant, level: Int = 1456): CharacterResponse = {
     val base = CharacterMapping.toCharacterResponse(payload, Some(at))
     base.copy(character = base.character.copy(character = base.character.character.copy(level = level.toDouble)))
+  }
+
+  /** The same sheet from a different world — something no amount of staleness
+   *  can explain, so the kind of difference that warns. */
+  private def onWorld(sheet: CharacterResponse, world: String): Either[String, CharacterResponse] =
+    Right(sheet.copy(character = sheet.character.copy(character = sheet.character.character.copy(world = world))))
+
+  /** What this class logged while `f` ran.
+   *
+   *  Warning at most once per distinct difference is a property of the log and
+   *  of nothing else — no caller can see it, and the answer handed back is the
+   *  same either way — so the log is what the test has to read. */
+  private def withCapturedLog[A](f: CapturedLog => A): A = {
+    val log = new CapturedLog
+    try f(log) finally log.detach()
+  }
+
+  private class CapturedLog {
+    private val appender = new ch.qos.logback.core.read.ListAppender[ch.qos.logback.classic.spi.ILoggingEvent]
+    private val logger =
+      org.slf4j.LoggerFactory.getLogger(classOf[DualCharacterApi]).asInstanceOf[ch.qos.logback.classic.Logger]
+    appender.start()
+    logger.addAppender(appender)
+    def warnings: List[String] = appender.list.asScala.toList
+      .filter(_.getLevel == ch.qos.logback.classic.Level.WARN)
+      .map(_.getFormattedMessage)
+    def detach(): Unit = { logger.detachAppender(appender); appender.stop() }
   }
 
   private class StubApi(var result: Either[String, CharacterResponse]) extends TibiaApi {
@@ -182,6 +210,54 @@ class DualCharacterApiSpec extends AnyFunSuite with Matchers with BeforeAndAfter
     f.tibiaData.result = Left("503")
     f.fansite.result = Right(sheetFrom(t0.plusSeconds(300)))
     f.get().isLeft shouldBe true
+  }
+
+  test("the same divergence is warned about once, not once per poll") {
+    // A stable difference is found again on every poll for as long as it lasts
+    // — days, for a settled death — so warning per fetch would bury the next
+    // distinct one under thousands of copies of this one.
+    val f = new Fixture(Config.FansiteApi.Shadow)
+    f.seed()
+    f.fansite.result = onWorld(sheetFrom(t0), "Somewhere Else")
+    withCapturedLog { log =>
+      f.get(); f.get(); f.get()
+      log.warnings.size shouldBe 1
+      log.warnings.head should include("world: tibiadata=Victoris fansite=Somewhere Else")
+    }
+  }
+
+  test("a divergence that changes is news again") {
+    // The dedup is per difference, not per character. A character that starts
+    // disagreeing about something else has not been reported.
+    val f = new Fixture(Config.FansiteApi.Shadow)
+    f.seed()
+    f.fansite.result = onWorld(sheetFrom(t0), "Somewhere Else")
+    withCapturedLog { log =>
+      f.get()
+      f.fansite.result = onWorld(sheetFrom(t0), "Somewhere Else Again")
+      f.get()
+      f.get()
+      log.warnings.size shouldBe 2
+    }
+  }
+
+  test("a divergence that comes back unchanged is still not news") {
+    // What is remembered is the last difference reported, not whether the last
+    // poll agreed. The sources are compared only up to the older copy's origin
+    // and that boundary moves every poll, so a difference sitting near it can
+    // come and go on its own — and a rule that reported each return would put
+    // the spam back for exactly the case it was meant to stop.
+    val f = new Fixture(Config.FansiteApi.Shadow)
+    f.seed()
+    withCapturedLog { log =>
+      f.fansite.result = onWorld(sheetFrom(t0), "Somewhere Else")
+      f.get()
+      f.fansite.result = Right(sheetFrom(t0))
+      f.get()
+      f.fansite.result = onWorld(sheetFrom(t0), "Somewhere Else")
+      f.get()
+      log.warnings.size shouldBe 1
+    }
   }
 
   test("the killer-level lookup never reaches the fansite API") {

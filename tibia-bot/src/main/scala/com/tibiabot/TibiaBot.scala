@@ -5,7 +5,8 @@ import org.apache.pekko.pattern.after
 import org.apache.pekko.stream.ActorAttributes.supervisionStrategy
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
 import org.apache.pekko.stream.{Attributes, Materializer, Supervision}
-import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, activityData, customSortData, Players}
+import com.tibiabot.BotApp.{alliedGuildsData, alliedPlayersData, discordsData, huntedGuildsData, huntedPlayersData, worldsData, customSortData, Players}
+import com.tibiabot.scheduler.ServerSaveSchedule
 import com.tibiabot.tibiadata.{TibiaApi, TibiaDataClient}
 import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers, WorldResponse}
 import com.typesafe.scalalogging.StrictLogging
@@ -17,7 +18,7 @@ import net.dv8tion.jda.api.requests.ErrorResponse
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
 
-import java.time.ZonedDateTime
+import java.time.{Duration, ZonedDateTime}
 import scala.collection.immutable.ListMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
@@ -123,6 +124,15 @@ class TibiaBot(
    *  list shows has moved, without reading the row back to find out. Rebuilt
    *  from nothing on restart, so the first scan of each listed player refreshes. */
   private var listCacheState: Map[String, (Int, String, String)] = Map.empty
+  /** What was last written to the character-sheet cache, keyed by lowercased
+   *  name: the fields the row carries, and when it was written.
+   *
+   *  The same trick listCacheState plays, with one addition: the write is
+   *  repeated for a character nothing has changed about once the row is
+   *  `sheetRefresh` old. That table expires on `seen`, so writing only on change
+   *  would quietly delete the steadiest characters on the world — the ones who
+   *  log in every day and never move guild — and never write them again. */
+  private var sheetCacheState: Map[String, ((String, String, Int), ZonedDateTime)] = Map.empty
   private var alliesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var enemiesListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
   private var neutralsListPurgeTimer: Map[String, ZonedDateTime] = Map.empty
@@ -144,6 +154,12 @@ class TibiaBot(
   private val deathRecentDuration = 30 * 60 // 30 minutes for a death to count as recent enough to be worth notifying
   private val onlineRecentDuration = 10 * 60 // 10 minutes for a character to still be checked for deaths after logging off
   private val recentLevelExpiry = 25 * 60 * 60 // 25 hours before deleting recentLevel entry
+  // How old a character-sheet row is allowed to get before the next poll that
+  // sees that character writes it again. Well inside the 25 hours the table
+  // keeps, so a character who is around every day never expires out of it, and
+  // long enough that the steady state is a few hundred writes an hour per world
+  // rather than a thousand every poll.
+  private val sheetRefresh = Duration.ofHours(6)
   private val cooldowns = new ConcurrentHashMap[String, ZonedDateTime]()
   private val cooldownMinutes = 30L
   // Benign, operator-side failures (channel/message deleted, perms removed) —
@@ -176,6 +192,10 @@ class TibiaBot(
 
       // get online data with durations (carries over guild/duration/flag, drops log-offs)
       onlineTracker.updateFromOnline(online.map(player => (player.name, player.level.toInt, player.vocation)), now)
+      // How busy this world is, and how high its people are — the two figures the
+      // PVP bar sizes itself against. Free here: the poll already carries every
+      // online character and their level, so this costs a fold and a write.
+      BotApp.recordWorldOnline(world, online.size, online.map(_.level.toLong).sum, now)
       hasOnlineData = true
       val onlineWithVocLvlAndDuration = onlineTracker.snapshot
       // Best-effort, fire-and-forget: piggybacks on this world's existing poll
@@ -242,6 +262,11 @@ class TibiaBot(
     // local val: this whole flow stage runs at concurrency 1, single-threaded per tick.
     val levelUpBuffer = mutable.Map.empty[String, (TextChannel, ListBuffer[String])]
 
+    // Guild and vocation for everyone this tick read a sheet for, filed together
+    // at the end of the stage. Safe as a plain local for the same reason
+    // levelUpBuffer is: the stage runs at concurrency 1.
+    val sheetBuffer = ListBuffer.empty[domain.SheetCache]
+
     val newDeaths = characterResponses.flatMap {
       case Right(char) =>
         val charName = char.character.character.name
@@ -275,6 +300,27 @@ class TibiaBot(
               sheet.last_login.getOrElse(""), ZonedDateTime.now())
             listCacheState = listCacheState + (charName.toLowerCase -> fingerprint)
           }
+        }
+
+        // Keep the same sheet for everybody else, which is who a PVP summary is
+        // mostly made of: a character reached through a hunted guild is on
+        // nobody's list by name and so has no cached sheet of their own, and
+        // every row about them used to render with no vocation and no guild
+        // marker for that reason alone. The poll has already paid for this
+        // sheet — dropping the two fields that outlive the tick bought nothing.
+        //
+        // Guarded the same way the list cache above is, with a refresh so the
+        // row cannot expire under a character who is still here; see
+        // sheetCacheState.
+        val sheetKey = charName.toLowerCase
+        val sheetFields = (guildName, char.character.character.vocation, char.character.character.level.toInt)
+        val unchanged = sheetCacheState.get(sheetKey).exists {
+          case (fields, writtenAt) => fields == sheetFields && writtenAt.plus(sheetRefresh).isAfter(now)
+        }
+        if (!unchanged) {
+          sheetBuffer += domain.SheetCache(world, sheetKey, charName, guildName,
+            char.character.character.vocation, char.character.character.level.toInt, now)
+          sheetCacheState = sheetCacheState + (sheetKey -> ((sheetFields, now)))
         }
 
         // Incoming world transfer, detected once for the world rather than once
@@ -408,8 +454,22 @@ class TibiaBot(
                 }
               }
 
+              // This discord's activity rows, as a name lookup rather than a list
+              // to scan. Taken once and shared by the three questions below: on
+              // the busiest world the discords watching it hold ~52,000 rows
+              // between them, and asking each question with equalsIgnoreCase
+              // walked all of them, for every character, every poll.
+              //
+              // One snapshot for all three rather than one read each, which is
+              // both cheaper and steadier: a row dropped by another world's
+              // stream mid-block used to be able to make `currentNameCheck`
+              // true and the lookup right after it empty. Deciding from a
+              // snapshot is what this block already does — every write below
+              // re-reads inside the lock before applying.
+              val activityRows = BotApp.activityIndex(guildId)
+
               val rename = presentation.GuildActivity.renameFromFormerNames(
-                activityData.getOrElse(guildId, List()),
+                activityRows,
                 charName,
                 formerNamesList,
                 formerName => onlineTracker.find(formerName).isDefined
@@ -471,7 +531,8 @@ class TibiaBot(
               if (!skipJoinLeave) {
 
                 // Check charName
-                val currentNameCheck = activityData.getOrElse(guildId, List()).exists(_.name.equalsIgnoreCase(charName))
+                val matchingActivityOption = activityRows.get(charName)
+                val currentNameCheck = matchingActivityOption.isDefined
 
                 // Did they just join one the tracked guilds?
                 var joinGuild = false
@@ -483,7 +544,6 @@ class TibiaBot(
 
                 // Player is already tracked
                 if (currentNameCheck) {
-                  val matchingActivityOption = activityData.getOrElse(guildId, List()).find(_.name.equalsIgnoreCase(charName))
                   val guildNameFromActivityData = matchingActivityOption.map(_.guild).getOrElse("")
                   val updatesTimeFromActivityData = matchingActivityOption.map(_.updatedTime).getOrElse(ZonedDateTime.parse("2022-01-01T01:00:00Z"))
 
@@ -830,6 +890,16 @@ class TibiaBot(
     // the critical path for that tick's deaths and for the next poll behind
     // them, despite only actually firing every ~2 minutes per guild at best.
 
+    // Fire and forget, off the stream thread: this is a cache nothing in this
+    // tick reads, and a poll must not wait on a write that only a post hours
+    // from now will care about. A failure costs the icons on some rows of a
+    // daily summary, which is not worth holding a world's deaths for.
+    if (sheetBuffer.nonEmpty) {
+      val rows = sheetBuffer.toList
+      Future(BotApp.addSheetsCache(rows)).failed.foreach(error =>
+        logger.warn(s"Could not cache ${rows.size} character sheet(s) for world '$world': ${error.getMessage}"))
+    }
+
     Future.successful(newDeaths)
   }.withAttributes(logAndResume)
 
@@ -1010,6 +1080,11 @@ class TibiaBot(
                 var vowelCheck = "" // this is for adding "an" or "a" in front of creature names
                 val killerBuffer = ListBuffer[String]()
                 val exivaBuffer = ListBuffer[(String, Option[Int])]()
+                // Every player killer, for the frag tally. Its own buffer rather
+                // than a reuse of exivaBuffer, which only fills for an ally death
+                // and only when the world has exiva lists on — it would miss every
+                // hunted-player kill and every world with the setting off.
+                val fragBuffer = ListBuffer[String]()
                 var exivaList = ""
                 val killerList = charDeath.death.killers // get all killers
 
@@ -1097,6 +1172,7 @@ class TibiaBot(
                             val summonerLevel = getKillerLevel(summoner, killerLevelsAt)
                             val summonerLevelText = summonerLevel.map(level => s" [$level]").getOrElse("")
                             killerBuffer += s"$vowel ${Config.summonEmoji} **$creature of [$summoner$summonerLevelText](${charUrl(summoner)})**"
+                            fragBuffer += summoner
                             if (embedColor == 13773097) {
                               if (exivaListCheck == "true") {
                                 exivaBuffer += ((summoner, summonerLevel))
@@ -1106,6 +1182,7 @@ class TibiaBot(
                             val killerLevel = getKillerLevel(k.name, killerLevelsAt)
                             val levelText = killerLevel.map(level => s" [$level]").getOrElse("")
                             killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**"
+                            fragBuffer += k.name
                             if (embedColor == 13773097) {
                               if (exivaListCheck == "true") {
                                 exivaBuffer += ((k.name, killerLevel))
@@ -1187,7 +1264,7 @@ class TibiaBot(
                               val commandUser = com.tibiabot.presentation.Names.user(BotApp.botUserName)
                               val adminEmbed = new EmbedBuilder()
                               adminEmbed.setTitle(":robot: enemy automatically detected:")
-                              adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})***.")
+                              adminEmbed.setDescription(s"$commandUser added the player\n$vocation **$level** — **[$player](${charUrl(player)})**\nto the hunted list for **$world**\n*(they killed the allied player **[${charName}](${charUrl(charName)})**)*.")
                               adminEmbed.setThumbnail(creatureImageUrl("Dark_Mage_Statue"))
                               adminEmbed.setColor(14397256) // orange for bot auto command
                               sendMessageWithRateLimit(adminTextChannel, "admin", embed = Some(adminEmbed), suppressNotifications = true)
@@ -1201,6 +1278,31 @@ class TibiaBot(
                 }
 
                 val epochSecond = ZonedDateTime.parse(charDeath.death.time).toEpochSecond
+
+                // File the frags. Only a listed victim counts: a neutral dying to
+                // another neutral is somebody else's war, and this guild's lists
+                // are what make it a frag at all — which is why the rows are
+                // guild-scoped while the rest of the Statistics channel is not.
+                //
+                // Deliberately not gated on the embed being shown. showEnemiesDeaths
+                // and deathsMin decide what a server wants to *see*; the frag
+                // happened either way, and a tally that quietly omitted low-level
+                // kills would be wrong rather than filtered.
+                if (fragBuffer.nonEmpty) {
+                  val victimSide =
+                    if (huntedPlayers || huntedGuilds) Some(domain.FragSide.Enemy)
+                    else if (allyPlayers || allyGuilds) Some(domain.FragSide.Ally)
+                    else None
+                  victimSide.foreach { side =>
+                    val diedAt = ZonedDateTime.parse(charDeath.death.time)
+                    val saveDay = ServerSaveSchedule.lastServerSave(diedAt).toLocalDate
+                    BotApp.recordFrags(guildId, fragBuffer.toList.distinct.map { killer =>
+                      domain.FragEvent(world, saveDay, killer, charName,
+                        charDeath.death.level.toInt, side, diedAt.toInstant, "")
+                    })
+                  }
+                }
+
                 val limit = 4065
                 val header = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}"
 
@@ -1267,6 +1369,14 @@ class TibiaBot(
                 recentEvents.record("death", s"$vocationEmoji $nameLink died at level $level by $killer $discordLabel")
               }
               validEmbeds.foreach { embed =>
+                // Discord only returns the message id once the post has been sent,
+                // so the frag rows are filed without one and this fills it in
+                // afterwards. Every send below carries it, because any of them can
+                // be the post a summary later wants to link back to.
+                val noteDeathMessage: java.util.function.Consumer[net.dv8tion.jda.api.entities.Message] =
+                  (message: net.dv8tion.jda.api.entities.Message) =>
+                    BotApp.attachDeathMessage(guildId, world, embed._3,
+                      java.time.Instant.ofEpochSecond(embed._7), message.getId)
                 try {
                   // Create screenshot button
                   val screenshotButton = Button.secondary(
@@ -1281,10 +1391,10 @@ class TibiaBot(
                     if (shouldPing) {
                       deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
                         .setEmbeds(embed._1.build())
-                        .queue()
+                        .queue(noteDeathMessage)
                     } else {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                        .queue()
+                        .queue(noteDeathMessage)
                     }
                     recordDeath(embed._3, embed._5, embed._8, embed._9)
                   } else if (embed._2 == "allypk") {
@@ -1293,10 +1403,10 @@ class TibiaBot(
                       if (shouldPing) {
                         deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
                           .setEmbeds(embed._1.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       } else {
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       }
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
@@ -1308,10 +1418,10 @@ class TibiaBot(
                       if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
                         deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
                           .setEmbeds(adjustedEmbed.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       } else {
                         deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
-                          .queue()
+                          .queue(noteDeathMessage)
                       }
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
@@ -1319,7 +1429,7 @@ class TibiaBot(
                     if (embed._5 >= minimumLevel) {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .setComponents(actionRow)
-                        .queue()
+                        .queue(noteDeathMessage)
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                       }
                   } else {
@@ -1327,7 +1437,7 @@ class TibiaBot(
                     if (embed._5 >= minimumLevel) {
                       deathsTextChannel.sendMessageEmbeds(embed._1.build())
                         .setSuppressedNotifications(true)
-                        .queue()
+                        .queue(noteDeathMessage)
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
                   }
@@ -1827,6 +1937,10 @@ class TibiaBot(
       diff < deathRecentDuration
     }
     levelTracker.prune(now, recentLevelExpiry)
+    // Fingerprints for characters who have stopped showing up. Their rows are
+    // swept from the table on the same window, so keeping the memo would only
+    // suppress the write that puts them back.
+    sheetCacheState = sheetCacheState.filter { case (_, (_, writtenAt)) => writtenAt.plusHours(25).isAfter(now) }
   }
 
   private def vocEmoji(vocation: String): String = presentation.Emojis.vocEmoji(vocation)
