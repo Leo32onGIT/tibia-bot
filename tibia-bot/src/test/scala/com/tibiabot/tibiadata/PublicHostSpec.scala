@@ -38,4 +38,32 @@ class PublicHostSpec extends AnyWordSpec with Matchers {
       TibiaDataClient.isPublicHost(Uri("/v4/worlds")) shouldBe true
     }
   }
+
+  /** The same question asked of the setting rather than of a request, which is
+   *  what decides whether the vocation filter can be used at all. */
+  "the own-instance test" should {
+
+    "recognise the hosts an instance of ours is actually reached on" in {
+      TibiaDataClient.isOwnInstance("http://tibiadata-api:8080") shouldBe true
+      TibiaDataClient.isOwnInstance("http://10.124.0.3:8081") shouldBe true
+      TibiaDataClient.isOwnInstance("http://localhost:8081") shouldBe true
+    }
+
+    "say no when TIBIADATA_HOST is the public API under another name" in {
+      // What .env.example ships, and so what a self-hosted bot runs with. Asking
+      // it for a vocation-filtered list earns HTTP 400 and nothing else.
+      TibiaDataClient.isOwnInstance("https://api.tibiadata.com") shouldBe false
+      TibiaDataClient.isOwnInstance("https://api.tibiadata.com/") shouldBe false
+      TibiaDataClient.isOwnInstance("  https://API.TibiaData.com  ") shouldBe false
+    }
+
+    "say no to anything with no host in it, rather than guessing" in {
+      // A false positive costs every magic level page of every sweep; a false
+      // negative costs one unfiltered list. So the unparseable cases go here.
+      TibiaDataClient.isOwnInstance("") shouldBe false
+      TibiaDataClient.isOwnInstance("   ") shouldBe false
+      TibiaDataClient.isOwnInstance("/v4") shouldBe false
+      TibiaDataClient.isOwnInstance("not a url at all") shouldBe false
+    }
+  }
 }

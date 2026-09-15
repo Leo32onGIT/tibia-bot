@@ -368,6 +368,27 @@ object TibiaDataClient {
     host.isEmpty || host.equalsIgnoreCase(PublicHost)
   }
 
+  /** Whether `configuredHost` is an instance of our own rather than the public
+   *  API under another name.
+   *
+   *  `TIBIADATA_HOST` is required, so it always holds something — and for an
+   *  install with no instance of its own it holds the public API, which is what
+   *  `.env.example` ships. That makes "is it set?" the wrong question and "is it
+   *  somewhere else?" the right one.
+   *
+   *  What it decides is whether the vocation filter can be used at all: the
+   *  public API refuses any vocation but `all` with HTTP 400 / error 9002, so an
+   *  install without its own instance must not ask for a filtered list. See
+   *  [[com.tibiabot.highscores.HighscoreLists.forInstance]].
+   *
+   *  Anything unparseable reads as "not ours", which is the safe way round: the
+   *  worst a false negative costs is an unfiltered magic level list, where a
+   *  false positive costs every magic level page of every sweep. */
+  def isOwnInstance(configuredHost: String): Boolean =
+    scala.util.Try(org.apache.pekko.http.scaladsl.model.Uri(configuredHost.trim))
+      .map(uri => uri.authority.host.address().nonEmpty && !isPublicHost(uri))
+      .getOrElse(false)
+
   /** Bucket width, and the age past which buckets stop splitting. 60s against a
    *  300s TTL gives five rows plus an overflow — the shape, without a wall of rows. */
   private[tibiadata] val CacheAgeBucketSeconds = 60L
