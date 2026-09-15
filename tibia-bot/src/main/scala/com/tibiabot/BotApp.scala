@@ -1213,8 +1213,28 @@ object BotApp extends App with StrictLogging {
       window = Config.Highscores.window,
       workers = Config.Highscores.workers,
       minRequestGap = Config.Highscores.minRequestGap
-    )
+    ),
+    lists = highscoreCatalogue
   )(ex)
+
+  /** The highscore lists this install can actually read.
+   *
+   *  A bot pointed at the public API for everything cannot use the vocation
+   *  filter at all, so the five magic-level lists are not a richer option there
+   *  — they are 100 pages per world per snapshot that can only be refused. It
+   *  reads magic level unfiltered instead, which costs knights, paladins and
+   *  monks their magic-level advances; see [[highscores.HighscoreLists]].
+   *
+   *  Logged once at startup because the difference is otherwise only visible as
+   *  advances that never arrive. */
+  private lazy val highscoreCatalogue: List[tibiadata.HighscoreList] = {
+    val own = tibiadata.TibiaDataClient.isOwnInstance(Config.tibiadataApi)
+    if (!own)
+      logger.info(
+        "Highscores: no TibiaData instance of our own is configured, so magic level is read unfiltered — " +
+          "knights, paladins and monks will not have magic level advances announced")
+    highscores.HighscoreLists.forInstance(own)
+  }
 
   /** Posts what the sweep filed, for this bot's own guilds. Runs everywhere the
    *  feature is on, unlike the sweep. */

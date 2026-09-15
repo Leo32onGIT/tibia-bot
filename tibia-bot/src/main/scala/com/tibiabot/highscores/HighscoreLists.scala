@@ -37,6 +37,21 @@ object HighscoreLists {
   val magicLevel: List[HighscoreList] =
     HighscoreVocation.vocations.map(HighscoreList(HighscoreCategory.MagicLevel, _))
 
+  /** Magic level as an install with no instance of its own can read it.
+   *
+   *  The public API refuses every vocation but `all`, so the five lists above
+   *  are not a degraded option there — they are 100 pages per world per
+   *  snapshot that can only answer HTTP 400, walked in full because a failed
+   *  page tells [[HighscoreSweep]] nothing about where the list ends.
+   *
+   *  What the unfiltered list costs is stated rather than hidden: by the Antica
+   *  sampling above it is about 53% druid and 47% sorcerer, so those two keep
+   *  their magic level advances and knights, paladins and monks lose theirs
+   *  entirely — they are shut out of the unfiltered list, not merely ranked
+   *  below it. That is the whole of what the filter was buying. */
+  val magicLevelUnfiltered: HighscoreList =
+    HighscoreList(HighscoreCategory.MagicLevel, HighscoreVocation.All)
+
   /** Categories whose unfiltered list is already the vocation that matters, or
    *  which we have chosen to take unfiltered. Weapon skills first, then
    *  shielding. */
@@ -57,6 +72,25 @@ object HighscoreLists {
     HighscoreList(HighscoreCategory.Experience, HighscoreVocation.All)
 
   val all: List[HighscoreList] = skills :+ experience
+
+  /** The catalogue for an install with no TibiaData instance of its own: the
+   *  same lists, with magic level taken unfiltered instead of five ways.
+   *
+   *  Eight lists and 160 pages per world per snapshot, all of them public. */
+  val withoutOwnInstance: List[HighscoreList] =
+    (magicLevelUnfiltered :: unfilteredSkills) :+ experience
+
+  /** Which catalogue this install can actually read.
+   *
+   *  Derived from the configured host rather than from a setting of its own —
+   *  see [[com.tibiabot.tibiadata.TibiaDataClient.isOwnInstance]] — so a
+   *  self-hosted bot needs nothing switched on to stop asking for lists it will
+   *  only ever be refused, and nobody can configure the two into disagreeing.
+   *
+   *  Taken as a parameter rather than read here so this object stays free of
+   *  Config and both answers stay testable; the caller does the reading. */
+  def forInstance(hasOwnInstance: Boolean): List[HighscoreList] =
+    if (hasOwnInstance) all else withoutOwnInstance
 
   /** Lists served by our own instance. The number to watch: these are the only
    *  ones that put tibia.com traffic on the VPS IP. */
