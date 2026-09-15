@@ -40,7 +40,7 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     lines(0) shouldBe "**415 Cult Orcs**"
     lines(1) should include("<t:")
     lines(1) should include("Bobinho")
-    lines(1) should include("bob")
+    lines(1) should include("<@123456789012345678>")
     lines(1) should include("ran its full time")
   }
 
@@ -53,11 +53,12 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     lines.tail.foreach(line => line should not include "415 Cult Orcs")
   }
 
-  test("the person is named in plain text, not as a mention") {
-    // A mention would need a REST lookup per entry to say anything a stored
-    // row does not already, and renders as a pill rather than a name.
-    row(claim()) should include("**Bobinho (bob)**")
-    row(claim()) should not include "<@"
+  test("the account beside the character is a mention, not the stored name") {
+    // The id is stamped on the row already, so the pill costs no lookup, and
+    // the client resolves it to whatever they are called now rather than to
+    // whatever they were called the day they claimed.
+    row(claim()) should include("**Bobinho (<@123456789012345678>)**")
+    row(claim()) should not include "(bob)"
   }
 
   test("a hunt's line is indented with something Discord won't collapse") {
@@ -69,23 +70,29 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
     row(claim()).head should not be ' '
   }
 
-  test("someone with no character name is named by their username alone") {
-    row(claim(character = "")) should include("bob")
+  test("someone with no character name is named by their mention alone") {
+    row(claim(character = "")) should include("<@123456789012345678>")
     row(claim(character = "")) should not include "()"
   }
 
-  test("a row too old to carry a username says so rather than showing a raw id") {
-    // user_name arrived with a DEFAULT '', so the earliest rows have none. This
-    // used to fall back to a mention; nothing in the log is a mention any more,
-    // and an id on its own tells a reader nothing, so the line owns up instead.
+  test("a row too old to carry a username is still named, by its mention") {
+    // user_name arrived with a DEFAULT '', so the earliest rows have none. The
+    // id was always beside it and the client resolves that, so the rows that
+    // used to read "someone" now name the person like every other row does.
     val line = row(claim(character = "").copy(userName = ""))
-    line should include("someone")
-    line should not include "123456789012345678"
-    line should not include "<@"
+    line should include("<@123456789012345678>")
+    line should not include "someone"
   }
 
-  test("a character name survives a row with no username") {
-    val line = row(claim().copy(userName = ""))
+  test("a row with neither an id nor a username owns up rather than naming nobody") {
+    // Belt and braces: user_id is NOT NULL, so this is unreachable from the
+    // database. It is the branch that stops a nameless row rendering as an
+    // empty bold run, "**** · 2h · ran its full time".
+    row(claim(character = "").copy(userId = "", userName = "")) should include("someone")
+  }
+
+  test("a character name stands alone on a row with no id to mention") {
+    val line = row(claim().copy(userId = "", userName = ""))
     line should include("Bobinho")
     line should not include "("
   }
@@ -166,7 +173,7 @@ class RespawnLogEmbedSpec extends AnyFunSuite with Matchers {
 
   test("the person is bold on every line, so a scan lands on the name") {
     val lines = RespawnEmbeds.logGroup("415 Cult Orcs", List(onSpawn(1L, now))).split("\n")
-    lines(1) should include("**Bobinho (bob)**")
+    lines(1) should include("**Bobinho (<@123456789012345678>)**")
     // The duration and outcome after it stay plain — bolding those would leave
     // nothing for the eye to catch on.
     lines(1) should include("· 2h · ran its full time")

@@ -284,29 +284,46 @@ object RespawnButtons extends StrictLogging {
     // group headers are written from — a spawn's log included, where the one name
     // it needs is the one the heading used to be built from.
     val allNames = catalogue.map(r => r.id -> r.displayName).toMap
-    val scoped: Either[String, (Option[String], Map[Long, String])] = scope match {
-      case LogScope.Everything => Right((None, allNames))
-      // No heading: this log is a single group and that group is already headed
-      // with the spawn's name. In the title as well it would be the same name
-      // twice on a card that says nothing else.
+    val scoped: Either[String, Map[Long, String]] = scope match {
+      case LogScope.Everything => Right(allNames)
+      // A spawn's log is a single group, already headed with the spawn's name,
+      // so it takes no title beyond "Claim log" — in both places it would be
+      // the same name twice on a card that says nothing else.
       case LogScope.Spawn(id) =>
         catalogue.find(_.id == id)
           .toRight(s"${Config.noEmoji} That respawn is no longer in the catalogue.")
-          .map(respawn => (None, Map(respawn.id -> respawn.displayName)))
-      // Cache-only, and deliberately not fetched: a name is all this is for, and
-      // a REST call per page turn to decorate a title is not worth it. Somebody
-      // who has left the server falls back to the plain id, which is still the
-      // right log. This one keeps its heading, since the spawns on its group
-      // headers are not what it is scoped to.
-      case LogScope.Member(userId) =>
-        Right((Some(Option(guild.getMemberById(userId)).map(_.getEffectiveName).getOrElse(userId)),
-          allNames))
+          .map(respawn => Map(respawn.id -> respawn.displayName))
+      case LogScope.Member(_) => Right(allNames)
     }
-    scoped.map { case (what, names) =>
+    scoped.map { names =>
       val logPage = service.claimLog(guildId, scope, page)
-      (RespawnEmbeds.claimLog(what, logPage, names, service.LogMaxPages),
+      (RespawnEmbeds.claimLog(logHeading(guild, scope, logPage), logPage, names, service.LogMaxPages),
         RespawnThreads.logButtons(scope, logPage))
     }
+  }
+
+  /** What a log is scoped to, for its title — only a member's, since a spawn's
+   *  log names the spawn on its own group header and the guild's is scoped to
+   *  nothing.
+   *
+   *  Read off the page's own rows, which stamp what somebody was called when
+   *  they claimed. The member cache cannot answer this: the bot runs without the
+   *  GUILD_MEMBERS intent, so `getMemberById` is null for nearly everybody and
+   *  the title fell back to the raw snowflake for almost every search. It is
+   *  kept anyway, below the row, for the one case a row cannot cover — a member
+   *  with nothing in the log yet, whose page has no name on it to read.
+   *
+   *  A plain name rather than the mention the rows use: Discord does not parse
+   *  a mention in an embed title, and would print the `<@123…>` as written. */
+  private def logHeading(guild: Guild, scope: LogScope,
+                         page: com.tibiabot.respawn.LogPage): Option[String] = scope match {
+    case LogScope.Member(userId) =>
+      Some(page.entries.headOption
+        .map(claim => Names.calledPlain(claim.nickname, claim.userName))
+        .filter(_.nonEmpty)
+        .orElse(Option(guild.getMemberById(userId)).map(_.getEffectiveName))
+        .getOrElse(userId))
+    case _ => None
   }
 
   private def handleBoardButton(event: ButtonInteractionEvent, respond: Responder, what: String): Unit = {

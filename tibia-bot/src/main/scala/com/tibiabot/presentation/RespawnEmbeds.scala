@@ -684,21 +684,35 @@ object RespawnEmbeds {
   private def logTime(claim: RespawnClaim): String =
     claim.endedAt.map(t => s"<t:${t.toInstant.getEpochSecond}:$LogTimeStyle>").getOrElse("*unknown time*")
 
-  /** Who held it.
+  /** Who held it: the character they hunted on, and their Discord account
+   *  beside it as a mention.
    *
-   *  The stored username rather than a mention. It is stamped on the row at
-   *  claim time from the same getName a lookup would return, so showing it costs
-   *  nothing where retrieving each entry's user would be a REST call per person
-   *  per render. The trade is that it does not follow a later rename and cannot
-   *  be clicked. An old row that predates the column has no name to show at all,
-   *  and says so rather than falling back to a raw id nobody can read. */
-  private def logName(claim: RespawnClaim): String =
-    (claim.characterName.nonEmpty, claim.userName.nonEmpty) match {
-      case (true, true)   => s"${claim.characterName} (${claim.userName})"
+   *  A mention rather than the stored username because the client resolves it
+   *  at render time — it follows a rename, shows the guild's nickname where
+   *  there is one, and names even a row written before usernames were kept.
+   *  None of that costs a lookup: the id is stamped on the row like the name
+   *  was, and the pill is a string.
+   *
+   *  Nothing is notified by it. Discord never pings from inside an embed, and
+   *  this log is ephemeral to the moderator who opened it either way.
+   *
+   *  Only the row is a mention. Discord does not parse one in an embed's
+   *  *title*, where it would print as a raw `<@123…>`, so the heading above
+   *  this is still written as a plain name — see `RespawnButtons.logHeading`.
+   *
+   *  The stored username is the fallback for a row with no id, and "someone"
+   *  for a row with neither. */
+  private def logName(claim: RespawnClaim): String = {
+    val who =
+      if (claim.userId.nonEmpty) s"<@${claim.userId}>"
+      else claim.userName
+    (claim.characterName.nonEmpty, who.nonEmpty) match {
+      case (true, true)   => s"${claim.characterName} ($who)"
       case (true, false)  => claim.characterName
-      case (false, true)  => claim.userName
+      case (false, true)  => who
       case (false, false) => "someone"
     }
+  }
 
   /** Who held it and how it went — the part that reads the same wherever an
    *  entry is rendered. The name is bold: it is what the eye is looking for
