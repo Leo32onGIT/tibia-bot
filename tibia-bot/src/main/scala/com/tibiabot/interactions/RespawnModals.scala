@@ -101,7 +101,7 @@ object RespawnModals extends StrictLogging {
     Modal.create(RespawnButtonId.modalConfig, "Your respawn settings")
       .addComponents(
         label("Default claim length",
-          s"How long your claims run when you don't say. Max ${RespawnEmbeds.humanDuration(maxDuration)}.",
+          s"How long your claims run when you don't say. ${claimRange(maxDuration)}.",
           durationInput(DurationField, currentDuration)),
         label("Remind me this many minutes before the end",
           "0 turns reminders off. Up to 720 (12 hours).",
@@ -128,7 +128,7 @@ object RespawnModals extends StrictLogging {
         // caller with no claim here has nothing to pre-fill with, and setting
         // the box to nothing is a refused modal rather than an empty box.
         label("How long for, in total?",
-          s"${respawn.displayName} — max ${RespawnEmbeds.humanDuration(maxDuration)}. " +
+          s"${respawn.displayName} — ${claimRange(maxDuration)}. " +
             "Counts from when the hunt started.",
           durationInput(DurationField, current))
       )
@@ -157,8 +157,7 @@ object RespawnModals extends StrictLogging {
         // that claim between the panel opening and the button being pressed — and
         // then this was an exception rather than an empty box.
         label("Total hunt length",
-          s"${respawn.displayName}, choose a new duration. " +
-            s"Max ${RespawnEmbeds.humanDuration(maxDuration)}",
+          s"${respawn.displayName}, choose a new duration. ${claimRange(maxDuration)}",
           durationInput(DurationField, holder.map(_.durationMinutes))),
         label("Give the hunt to somebody else",
           "Leave empty to keep whoever is on it now.",
@@ -202,7 +201,7 @@ object RespawnModals extends StrictLogging {
             s"(${RespawnEmbeds.humanDuration(serverMax)}). " +
             // The limit the setter actually enforces, not the flat ceiling — a form
             // offering a number that comes back refused is worse than a lower one.
-            s"Max ${RespawnEmbeds.humanDuration(
+            s"${claimRange(
               com.tibiabot.respawn.RespawnService.spawnCeilingLimit(Config.Respawn.scheduleLookAheadMinutes))}.",
           durationInput(DurationField, respawn.maxDurationMinutes, required = false))
       )
@@ -336,6 +335,17 @@ object RespawnModals extends StrictLogging {
     input.build()
   }
 
+  /** The range a claim-length box accepts, in the same shorthand it accepts
+   *  back — `5m to 4h` rather than a bare pair of numbers.
+   *
+   *  Both ends rather than the ceiling alone. The floor is a real refusal, and
+   *  naming only the top of the range turns it into something you find out by
+   *  being told no — which is exactly what the number in the box is there to
+   *  save you. */
+  private def claimRange(maxMinutes: Int): String =
+    s"${RespawnEmbeds.humanDuration(BotApp.respawnService.MinimumClaimMinutes)} to " +
+      s"${RespawnEmbeds.humanDuration(maxMinutes)}"
+
   /** Room for the longest length anybody would actually type — `-90 minutes` is
    *  eleven characters. A cap rather than no cap because the parser refuses a
    *  pasted twenty-digit number anyway, and being stopped at the box is a
@@ -432,7 +442,7 @@ object RespawnModals extends StrictLogging {
       // A typed length, the same as every other duration prompt — there is no
       // reason for this one to work differently from the Config and Hunt
       // duration modals.
-      label("How long is the slot?", s"Max ${RespawnEmbeds.humanDuration(maxDuration)}.",
+      label("How long is the slot?", s"${claimRange(maxDuration)}.",
         durationInput(DurationField, None)),
       // Default on, because a standing booking is what most people are here
       // for. Turning it off books the one slot and nothing after it, which is
