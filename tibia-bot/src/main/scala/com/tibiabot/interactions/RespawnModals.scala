@@ -1,7 +1,7 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.presentation.{AdminLog, Embeds, RespawnEmbeds}
-import com.tibiabot.domain.{Respawn, RespawnSettings}
+import com.tibiabot.domain.{ClaimDuration, Respawn, RespawnSettings}
 import com.tibiabot.commands.Permissions
 import com.tibiabot.respawn.{RespawnButtonId, ScheduleResult}
 import com.tibiabot.{BotApp, Config}
@@ -100,9 +100,9 @@ object RespawnModals extends StrictLogging {
 
     Modal.create(RespawnButtonId.modalConfig, "Your respawn settings")
       .addComponents(
-        label("Default claim length (minutes)",
-          s"How long your claims run when you don't say. 5–$maxDuration.",
-          numberInput(DurationField, currentDuration)),
+        label("Default claim length",
+          s"How long your claims run when you don't say. Max ${RespawnEmbeds.humanDuration(maxDuration)}.",
+          durationInput(DurationField, currentDuration)),
         label("Remind me this many minutes before the end",
           "0 turns reminders off. Up to 720 (12 hours).",
           numberInput(WarnField, currentWarn))
@@ -116,26 +116,21 @@ object RespawnModals extends StrictLogging {
   def durationModal(guildId: String, userId: String, respawn: Respawn): Modal = {
     val current = BotApp.respawnService.openClaimsForUser(guildId, userId)
       .find(_._2.respawnId == respawn.id)
-      .map(_._2.durationMinutes.toString)
+      .map(_._2.durationMinutes)
     // The spawn's ceiling rather than the server's, because that is what a
     // submission here will actually be measured against.
     val maxDuration = BotApp.respawnService.settings(guildId)
       .map(_.maxFor(respawn)).getOrElse(240)
 
-    val duration = TextInput.create(DurationField, TextInputStyle.SHORT)
-      .setRequired(true)
-      .setMaxLength(4)
-    // Only pre-filled when there is something to pre-fill with. Discord rejects
-    // a blank value outright — not as an empty box but as a refused modal — so
-    // a caller with no claim here has to leave the field alone rather than set
-    // it to nothing.
-    current.foreach(duration.setValue)
-
     Modal.create(RespawnButtonId.modalDuration(respawn.id), "Hunt duration")
       .addComponents(
-        label("How long for, in total? (minutes)",
-          s"${respawn.displayName} — 5 to $maxDuration. Counts from when the hunt started.",
-          duration.build())
+        // Through durationInput for the blank-value reason documented there: a
+        // caller with no claim here has nothing to pre-fill with, and setting
+        // the box to nothing is a refused modal rather than an empty box.
+        label("How long for, in total?",
+          s"${respawn.displayName} — max ${RespawnEmbeds.humanDuration(maxDuration)}. " +
+            "Counts from when the hunt started.",
+          durationInput(DurationField, current))
       )
       .build()
   }
@@ -161,9 +156,10 @@ object RespawnModals extends StrictLogging {
         // button is only drawn when somebody holds the spawn, but a sweep can end
         // that claim between the panel opening and the button being pressed — and
         // then this was an exception rather than an empty box.
-        label("Total hunt length (minutes)",
-          s"${respawn.displayName}, choose a new duration. 5 to $maxDuration",
-          numberInput(DurationField, holder.map(_.durationMinutes))),
+        label("Total hunt length",
+          s"${respawn.displayName}, choose a new duration. " +
+            s"Max ${RespawnEmbeds.humanDuration(maxDuration)}",
+          durationInput(DurationField, holder.map(_.durationMinutes))),
         label("Give the hunt to somebody else",
           "Leave empty to keep whoever is on it now.",
           EntitySelectMenu.create(HolderField, EntitySelectMenu.SelectTarget.USER)
@@ -189,29 +185,26 @@ object RespawnModals extends StrictLogging {
     val service = BotApp.respawnService
     val serverMax = service.settings(guildId).map(_.maxDurationMinutes).getOrElse(240)
 
-    val field = TextInput.create(DurationField, TextInputStyle.SHORT)
-      .setRequired(false)
-      .setMaxLength(4)
-    // Set only when there is something to set, exactly as durationModal does and
-    // for the same reason: `setValue("")` throws `Value may not be blank` and the
-    // whole modal fails to open. A spawn following the server has no value, which
-    // is the *common* case here rather than an edge one — so this shipped broken
-    // for every spawn until the first override was set.
-    respawn.maxDurationMinutes.foreach(minutes => field.setValue(minutes.toString))
-
     Modal.create(RespawnButtonId.modalSpawnMax(respawn.id), "Max claim for this spawn")
       .addComponents(
         // The spawn's name goes in the description rather than the label for the
         // same reason as holderDurationModal: a label allows 45 characters in
         // total and a spawn name can eat all of them, which fails the
         // interaction outright rather than merely looking cramped.
-        label("Maximum claim length (minutes)",
-          s"${respawn.displayName}. Empty follows the server ($serverMax). " +
+        // No "(minutes)" on this one, and that is a fix rather than tidying:
+        // this box reads a bare number as *hours* (see ClaimDuration.parse), so
+        // a label promising minutes was telling a moderator the opposite of what
+        // the box would do with `20`. durationInput pre-fills in the shorthand
+        // for the other half of the same bug — a 20-minute override came back
+        // as `20` and re-submitting it made it twenty hours.
+        label("Maximum claim length",
+          s"${respawn.displayName}. Empty follows the server " +
+            s"(${RespawnEmbeds.humanDuration(serverMax)}). " +
             // The limit the setter actually enforces, not the flat ceiling — a form
             // offering a number that comes back refused is worse than a lower one.
-            s"${service.MinimumClaimMinutes} to " +
-            s"${com.tibiabot.respawn.RespawnService.spawnCeilingLimit(Config.Respawn.scheduleLookAheadMinutes)}.",
-          field.build())
+            s"Max ${RespawnEmbeds.humanDuration(
+              com.tibiabot.respawn.RespawnService.spawnCeilingLimit(Config.Respawn.scheduleLookAheadMinutes))}.",
+          durationInput(DurationField, respawn.maxDurationMinutes, required = false))
       )
       .build()
   }
@@ -230,13 +223,13 @@ object RespawnModals extends StrictLogging {
           EntitySelectMenu.create(HolderField, EntitySelectMenu.SelectTarget.USER)
             .setRequiredRange(1, 1)
             .build()),
-        label("How many minutes?",
-          s"Negative takes it back. Nobody can go above the daily $budget.",
-          TextInput.create(MinutesField, TextInputStyle.SHORT)
-            .setPlaceholder("60")
-            .setRequired(true)
-            .setMaxLength(5)
-            .build())
+        // The hint carries the minus sign as well as the shorthand: taking time
+        // back is half of what this form is for, and it is the half nobody
+        // guesses at.
+        label("How much to give?",
+          s"Negative takes it back. Nobody can go above the daily " +
+            s"${RespawnEmbeds.humanDuration(budget)}.",
+          durationInput(MinutesField, None, hint = "1h, or -30m"))
       )
       .build()
   }
@@ -251,18 +244,20 @@ object RespawnModals extends StrictLogging {
     val settings = BotApp.respawnService.settings(guildId)
     Modal.create(RespawnButtonId.modalClaimRules, "Server claim rules")
       .addComponents(
-        label("Default claim length (minutes)", "Used when a member has not set their own.",
-          numberInput("default", settings.map(_.defaultDurationMinutes))),
-        label("Maximum claim length (minutes)", "The longest any single claim may run.",
-          numberInput("max", settings.map(_.maxDurationMinutes))),
+        label("Default claim length", "Used when a member has not set their own.",
+          durationInput("default", settings.map(_.defaultDurationMinutes))),
+        label("Maximum claim length", "The longest any single claim may run.",
+          durationInput("max", settings.map(_.maxDurationMinutes))),
+        // The one number in this form that is not a length — people waiting, not
+        // time — so it stays a plain count and keeps numberInput.
         label("Queue limit", "How many people may wait behind a claim.",
           numberInput("queue", settings.map(_.queueLimit))),
-        label("Daily stamina per member (minutes)",
+        label("Daily stamina per member",
           "0 means unlimited. Turning a limit on refills everyone.",
-          numberInput("stamina", settings.map(_.staminaMinutes))),
-        label("Handover window (minutes)",
+          durationInput("stamina", settings.map(_.staminaMinutes))),
+        label("Handover window",
           "How long the next in line has to accept before it passes on.",
-          numberInput("handover", settings.map(_.handoverMinutes)))
+          durationInput("handover", settings.map(_.handoverMinutes)))
       )
       .build()
   }
@@ -315,6 +310,37 @@ object RespawnModals extends StrictLogging {
     current.foreach(value => input.setValue(value.toString))
     input.build()
   }
+
+  /** A length of time, in whatever shorthand somebody types — see
+   *  [[ClaimDuration]], which is the only thing that knows what `1h30` means.
+   *
+   *  Three things it does that [[numberInput]] does not. It is long enough for
+   *  the shorthand it advertises, where four characters fitted `240` but not
+   *  `1h30m`. It says so in the placeholder, since a box that accepts `2h`
+   *  without mentioning it is a box everybody keeps typing minutes into. And it
+   *  pre-fills in that same shorthand rather than as a bare number, which is
+   *  what makes the round trip safe: the ceiling box reads a bare number as
+   *  hours, so pre-filling a 20-minute ceiling as `20` meant opening the form
+   *  and pressing submit turned it into twenty hours.
+   *
+   *  Pre-filled only when there is something to pre-fill with, for numberInput's
+   *  reason above: `setValue("")` is not an empty box but a refused modal. */
+  private def durationInput(id: String, current: Option[Int],
+                            required: Boolean = true,
+                            hint: String = "2h, 1h30 or 90m"): TextInput = {
+    val input = TextInput.create(id, TextInputStyle.SHORT)
+      .setRequired(required)
+      .setPlaceholder(hint)
+      .setMaxLength(DurationMaxLength)
+    current.foreach(minutes => input.setValue(RespawnEmbeds.humanDuration(minutes)))
+    input.build()
+  }
+
+  /** Room for the longest length anybody would actually type — `-90 minutes` is
+   *  eleven characters. A cap rather than no cap because the parser refuses a
+   *  pasted twenty-digit number anyway, and being stopped at the box is a
+   *  better answer than being told afterwards. */
+  private val DurationMaxLength: Int = 16
 
   /** Book a slot, repeating or not.
    *
@@ -406,11 +432,8 @@ object RespawnModals extends StrictLogging {
       // A typed length, the same as every other duration prompt — there is no
       // reason for this one to work differently from the Config and Hunt
       // duration modals.
-      label("How long is the slot? (minutes)", s"5 to $maxDuration.",
-        TextInput.create(DurationField, TextInputStyle.SHORT)
-          .setRequired(true)
-          .setMaxLength(4)
-          .build()),
+      label("How long is the slot?", s"Max ${RespawnEmbeds.humanDuration(maxDuration)}.",
+        durationInput(DurationField, None)),
       // Default on, because a standing booking is what most people are here
       // for. Turning it off books the one slot and nothing after it, which is
       // how you hold a spawn for a particular night.
@@ -488,7 +511,7 @@ object RespawnModals extends StrictLogging {
   private def submitSpawnMax(event: ModalInteractionEvent, respawnId: Long): Unit = {
     // The same reader the dashboard's field uses, so `2h` means two hours in
     // both places and neither has its own idea of what a number is.
-    val parsed = com.tibiabot.domain.ClaimDuration.parse(value(event, DurationField))
+    val parsed = ClaimDuration.parse(value(event, DurationField))
     // Re-checked on submit rather than trusted from when the panel opened: a
     // modal can sit open long after somebody's role was taken away.
     if (!moderates(event.getGuild, event.getMember))
@@ -556,12 +579,17 @@ object RespawnModals extends StrictLogging {
     // put there — an absolute epoch second, not an offset. The length is typed,
     // so it is the one that can arrive as anything.
     val start = selected(event, StartField).headOption.flatMap(epoch => Try(epoch.toLong).toOption)
-    (start, Try(value(event, DurationField).toInt).toOption) match {
+    val length = ClaimDuration.parseMinutes(value(event, DurationField))
+    (start, length) match {
       case (None, _) =>
         reply(event, s"${Config.noEmoji} Pick a start time.")
-      case (_, None) =>
-        reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
-      case (Some(startEpoch), Some(duration)) =>
+      case (_, Left(problem)) =>
+        reply(event, s"${Config.noEmoji} $problem")
+      // Required, so Discord should never send it empty — but a box the parser
+      // reads as "nothing typed" is a question rather than an exception.
+      case (_, Right(None)) =>
+        reply(event, s"${Config.noEmoji} How long is the slot?")
+      case (Some(startEpoch), Right(Some(duration))) =>
         val existing = service.schedulesForUser(guild.getId, event.getUser.getId)
         if (existing.size >= com.tibiabot.Config.Respawn.maxSchedulesPerUser)
           reply(event, s"${Config.noEmoji} You already have " +
@@ -685,16 +713,25 @@ object RespawnModals extends StrictLogging {
       reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
         s"or the **${Permissions.ModeratorRoleName}** role.")
     } else {
-      def field(id: String): Option[Int] = Try(value(event, id).toInt).toOption
-      val ids = List("default", "max", "queue", "stamina", "handover")
-      if (ids.exists(field(_).isEmpty)) {
-        reply(event, s"${Config.noEmoji} Every setting needs to be a whole number.")
+      // Queue limit counts people rather than time, so it stays a plain number;
+      // the other four are lengths and read the same shorthand as every other
+      // duration box.
+      def count(id: String): Option[Int] = Try(value(event, id).toInt).toOption
+      def duration(id: String): Option[Int] =
+        ClaimDuration.parseMinutes(value(event, id)).toOption.flatten
+      val entered = Map(
+        "default" -> duration("default"), "max" -> duration("max"),
+        "queue" -> count("queue"), "stamina" -> duration("stamina"),
+        "handover" -> duration("handover"))
+      if (entered.values.exists(_.isEmpty)) {
+        reply(event, s"${Config.noEmoji} Every setting needs a number — " +
+          "a length can be 2h, 90m or 1h30.")
       } else {
         // Read before the write, because the command log says what moved rather
         // than what it now is — see RespawnEmbeds.settingsChanges.
         val before = BotApp.respawnService.settings(guildId)
-        val result = BotApp.respawnService.updateSettings(guildId, field("default"), field("max"),
-          field("queue"), field("stamina"), field("handover"))
+        val result = BotApp.respawnService.updateSettings(guildId, entered("default"), entered("max"),
+          entered("queue"), entered("stamina"), entered("handover"))
         result match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
           case Right(updated) =>
@@ -706,14 +743,15 @@ object RespawnModals extends StrictLogging {
   }
 
   private def submitDuration(event: ModalInteractionEvent, respawnId: Long, forHolder: Boolean): Unit =
-    Try(value(event, DurationField).toInt).toOption match {
-      case None => reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
-      case Some(minutes) if forHolder && !moderates(event.getGuild, event.getMember) =>
+    ClaimDuration.parseMinutes(value(event, DurationField)) match {
+      case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+      case Right(None) => reply(event, s"${Config.noEmoji} How long should the hunt run?")
+      case Right(Some(minutes)) if forHolder && !moderates(event.getGuild, event.getMember) =>
         // Re-checked on submit rather than trusted from when the panel opened: a
         // modal can sit open long after somebody's role was taken away.
         reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
           s"or the **${Permissions.ModeratorRoleName}** role.")
-      case Some(minutes) =>
+      case Right(Some(minutes)) =>
         val service = BotApp.respawnService
         // A moderator may also be handing the hunt to somebody else. Done first,
         // so the duration below lands on whoever ends up holding it — the other
@@ -790,10 +828,11 @@ object RespawnModals extends StrictLogging {
     else if (!moderates(guild, event.getMember))
       reply(event, s"${Config.noEmoji} That needs the **Manage Server** permission, " +
         s"or the **${Permissions.ModeratorRoleName}** role.")
-    else Try(value(event, MinutesField).toInt).toOption match {
-      case None => reply(event, s"${Config.noEmoji} That needs to be a whole number of minutes.")
-      case Some(0) => reply(event, s"${Config.noEmoji} That would change nothing.")
-      case Some(minutes) =>
+    else ClaimDuration.parseMinutes(value(event, MinutesField)) match {
+      case Left(problem) => reply(event, s"${Config.noEmoji} $problem")
+      case Right(None) => reply(event, s"${Config.noEmoji} How much should they get?")
+      case Right(Some(0)) => reply(event, s"${Config.noEmoji} That would change nothing.")
+      case Right(Some(minutes)) =>
         val who = Option(event.getValue(HolderField))
           .map(_.getAsMentions.getUsers.asScala.toList).getOrElse(Nil).headOption
         (who, BotApp.respawnService.settings(guild.getId)) match {
@@ -826,12 +865,16 @@ object RespawnModals extends StrictLogging {
 
   private def submitConfig(event: ModalInteractionEvent): Unit = {
     val guild = event.getGuild
-    val duration = Try(value(event, DurationField).toInt).toOption
+    val duration = ClaimDuration.parseMinutes(value(event, DurationField)).toOption.flatten
+    // The reminder keeps plain minutes: it is the one field here that is a lead
+    // time rather than a length, with its own 12-hour cap, and it was left out
+    // of the shorthand deliberately.
     val warn = Try(value(event, WarnField).toInt).toOption
 
     (duration, warn) match {
       case (None, _) | (_, None) =>
-        reply(event, s"${Config.noEmoji} Both settings need to be whole numbers of minutes.")
+        reply(event, s"${Config.noEmoji} Claim length can be 2h, 90m or 1h30; " +
+          "the reminder is a number of minutes.")
       case (Some(minutes), Some(lead)) =>
         BotApp.respawnService.saveUserPrefs(guild.getId, event.getUser.getId, Some(minutes), Some(lead)) match {
           case Left(problem) => reply(event, s"${Config.noEmoji} $problem")

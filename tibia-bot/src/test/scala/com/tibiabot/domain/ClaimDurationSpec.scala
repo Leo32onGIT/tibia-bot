@@ -3,15 +3,20 @@ package com.tibiabot.domain
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** What a moderator may type into a claim ceiling.
+/** What somebody may type into a length of time — a claim ceiling through
+ *  `parse`, every box that has always been minutes through `parseMinutes`.
  *
  *  Worth pinning down properly because it is a guess in one place — a bare
  *  number — and a guess that changes silently is worse than no guess at all.
+ *  The two doors differ on exactly that guess and nowhere else, which is a
+ *  property worth a test of its own rather than a comment.
  */
 class ClaimDurationSpec extends AnyWordSpec with Matchers {
 
   private def parsed(text: String) = ClaimDuration.parse(text)
   private def minutes(text: String) = parsed(text).toOption.flatten
+
+  private def asMinutes(text: String) = ClaimDuration.parseMinutes(text).toOption.flatten
 
   "a bare number" should {
 
@@ -88,6 +93,70 @@ class ClaimDurationSpec extends AnyWordSpec with Matchers {
 
     "refuse a number too large to be a duration rather than overflowing" in {
       parsed("99999999999999999999m").isLeft shouldBe true
+    }
+  }
+
+  "the minutes-first door" should {
+
+    // The whole of the difference, and the reason there are two doors: these
+    // boxes have meant minutes for as long as they have existed, and quietly
+    // making an old habit mean something twelve times longer is not an upgrade.
+    "read a bare number as minutes, however small" in {
+      asMinutes("20") shouldBe Some(20)
+      asMinutes("5") shouldBe Some(5)
+      asMinutes("90") shouldBe Some(90)
+      asMinutes("240") shouldBe Some(240)
+    }
+
+    "agree with the ceiling door about everything with a unit on it" in {
+      List("2h", "2 h", "2hrs", "2hours", "90m", "90min", "1h30", "1h30m", "1.5h", "2h05m", "25")
+        .foreach { text =>
+          withClue(s"$text: ")(asMinutes(text) shouldBe minutes(text))
+        }
+    }
+
+    // The only disagreement, written down so it is a decision rather than a
+    // surprise the next person has to rediscover from two call sites.
+    "differ from it on a bare number, and only there" in {
+      (1 to ClaimDuration.HoursCutoff).foreach { n =>
+        withClue(s"$n: ") {
+          asMinutes(n.toString) shouldBe Some(n)
+          minutes(n.toString) shouldBe Some(n * 60)
+        }
+      }
+      // Above the cutoff there is nothing to disagree about.
+      List("25", "60", "120", "1440").foreach { text =>
+        withClue(s"$text: ")(asMinutes(text) shouldBe minutes(text))
+      }
+    }
+
+    // For the one form that hands stamina back rather than spending it. The
+    // ceiling door still refuses these — a negative ceiling is not a thing.
+    "read a negative, which the ceiling door refuses" in {
+      asMinutes("-30") shouldBe Some(-30)
+      asMinutes("-30m") shouldBe Some(-30)
+      asMinutes("-2h") shouldBe Some(-120)
+      asMinutes("-1h30") shouldBe Some(-90)
+      parsed("-30").isLeft shouldBe true
+    }
+
+    // A required box reports an empty one as a question; a lone minus sign is
+    // not empty, so it has to come back as something to fix rather than as
+    // "nothing typed".
+    "refuse a minus sign with nothing after it" in {
+      ClaimDuration.parseMinutes("-").isLeft shouldBe true
+      ClaimDuration.parseMinutes("- ").isLeft shouldBe true
+    }
+
+    "still mean nothing typed when nothing was" in {
+      ClaimDuration.parseMinutes("") shouldBe Right(None)
+      ClaimDuration.parseMinutes("   ") shouldBe Right(None)
+      ClaimDuration.parseMinutes(null) shouldBe Right(None)
+    }
+
+    "refuse the same nonsense" in {
+      List("2 days", "soon", "two hours", "1h30x", "h", "m", "1:30", "--5", "-")
+        .foreach(text => withClue(s"$text: ")(ClaimDuration.parseMinutes(text).isLeft shouldBe true))
     }
   }
 }
