@@ -49,12 +49,18 @@ final case class SweepSummary(
  *  moment. And it never fires the whole snapshot's work at rollover, which is
  *  the behaviour most likely to earn our IP a Cloudflare challenge and take the
  *  boosted feed and a neighbouring droplet with it. */
+/** @param lists which catalogue this install can read. Everything with its own
+ *               TibiaData instance gets [[HighscoreLists.all]]; one without gets
+ *               the public-only catalogue, since the vocation-filtered lists in
+ *               the full one can only be refused there — see
+ *               [[HighscoreLists.forInstance]]. */
 final class HighscoreService(
     api: HighscoresApi,
     sweep: HighscoreSweep,
     pace: HighscoreGap,
     trackedWorlds: () => List[String],
     settings: HighscoreSettings,
+    lists: List[HighscoreList] = HighscoreLists.all,
     now: () => Instant = () => Instant.now()
 )(implicit ec: ExecutionContext) extends StrictLogging {
 
@@ -112,9 +118,9 @@ final class HighscoreService(
   private def runSweep(snapshotAt: Instant): Future[Unit] = {
     val startedAt = now()
     val sweptWorlds = worlds()
-    val items = for { world <- sweptWorlds; list <- HighscoreLists.all } yield (world, list)
+    val items = for { world <- sweptWorlds; list <- lists } yield (world, list)
 
-    val requests = HighscorePace.requestsFor(sweptWorlds.size, HighscoreLists.all.size, Highscores.MaxPages)
+    val requests = HighscorePace.requestsFor(sweptWorlds.size, lists.size, Highscores.MaxPages)
     val gap = HighscorePace.perRequestGap(requests, settings.window, settings.workers, settings.minRequestGap)
     pace.set(gap)
 

@@ -52,4 +52,35 @@ class HighscoreListsSpec extends AnyFunSuite with Matchers {
     HighscoreLists.pagesPerWorld(HighscoreLists.public) shouldBe 140
     Highscores.pages should have size Highscores.MaxPages
   }
+
+  // --- an install with no instance of its own ------------------------------
+
+  test("without our own instance, nothing is asked for that can only be refused") {
+    // The whole point: the public API answers HTTP 400 to every vocation but
+    // `all`, and a refused page does not tell the sweep where the list ends, so
+    // each filtered list would be walked to page 20 every snapshot.
+    HighscoreLists.withoutOwnInstance.foreach(_.source shouldBe HighscoreSource.Public)
+    HighscoreLists.withoutOwnInstance.foreach(_.vocation shouldBe HighscoreVocation.All)
+  }
+
+  test("it keeps every category, trading the vocation split for magic level alone") {
+    // Nothing is dropped — magic level is still read, just unfiltered. A
+    // category going missing here would be a silent loss of a whole feed.
+    HighscoreLists.withoutOwnInstance.map(_.category).distinct should
+      contain theSameElementsAs HighscoreCategory.all
+    HighscoreLists.withoutOwnInstance should have size 8
+    HighscoreLists.withoutOwnInstance.distinct shouldBe HighscoreLists.withoutOwnInstance
+    HighscoreLists.pagesPerWorld(HighscoreLists.withoutOwnInstance) shouldBe 160
+  }
+
+  test("the two catalogues differ in magic level and nothing else") {
+    HighscoreLists.all.filterNot(_.category == HighscoreCategory.MagicLevel) should
+      contain theSameElementsAs
+      HighscoreLists.withoutOwnInstance.filterNot(_.category == HighscoreCategory.MagicLevel)
+  }
+
+  test("forInstance picks the catalogue from whether we have an instance") {
+    HighscoreLists.forInstance(hasOwnInstance = true) shouldBe HighscoreLists.all
+    HighscoreLists.forInstance(hasOwnInstance = false) shouldBe HighscoreLists.withoutOwnInstance
+  }
 }
