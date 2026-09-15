@@ -97,7 +97,7 @@ class DeathEffectSpec extends AnyFunSuite with Matchers {
   }
 
   test("all effect resources share the resource base url") {
-    val base = "https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/"
+    val base = "https://violentbot.xyz/discord/effects/"
     DeathEffect.pvp should startWith (base)
     DeathEffect.suicide should startWith (base)
     Seq("death", "ice", "drowning", "life drain").foreach { k =>

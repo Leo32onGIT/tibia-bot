@@ -354,7 +354,7 @@ final class ChannelService(
     val bountyMention = if (bountyRoleId == null || bountyRoleId == "0") "**Bounty**" else s"<@&$bountyRoleId>"
     new EmbedBuilder()
       .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
-      .setThumbnail("https://raw.githubusercontent.com/Leo32onGIT/tibia-bot-resources/main/Phantasmal_Ooze.gif")
+      .setThumbnail("https://violentbot.xyz/discord/effects/Phantasmal_Ooze.gif")
       .setColor(BrandColor)
       // Not "add or remove yourself from the role": three of the five buttons do
       // that, and the last two open a form that sets up a DM subscription (the
