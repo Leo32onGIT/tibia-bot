@@ -444,11 +444,12 @@ object RespawnModals extends StrictLogging {
       // duration modals.
       label("How long is the slot?", s"${claimRange(maxDuration)}.",
         durationInput(DurationField, None)),
-      // Default on, because a standing booking is what most people are here
-      // for. Turning it off books the one slot and nothing after it, which is
-      // how you hold a spawn for a particular night.
-      label("Repeat this booking", "Turn off to book the one slot only.",
-        Checkbox.of(RepeatField, true)),
+      // Default off. A tick nobody looked at is the easy mistake to make in a
+      // form, and of the two mistakes this box can cause, a standing booking
+      // that was meant to be one night holds the spawn against everybody else
+      // until somebody notices. The other way round costs one more form.
+      label("Repeat this booking", "Turn on to keep this slot on the days below.",
+        Checkbox.of(RepeatField, false)),
       label("Repeat on", "Leave empty for every day. Ignored when repeat is off.", dayMenu)
     )
   }
@@ -577,7 +578,9 @@ object RespawnModals extends StrictLogging {
     val service = BotApp.respawnService
     // Off means one slot and no more; on with nothing picked means every day,
     // matching what a repeating booking was before weekdays were a choice.
-    val repeats = Option(event.getValue(RepeatField)).forall(_.getAsBoolean)
+    // A checkbox Discord leaves out of the submission is one that was never
+    // ticked, so an absent field reads the same as off — the box's own default.
+    val repeats = Option(event.getValue(RepeatField)).exists(_.getAsBoolean)
     val chosenDays = selected(event, DaysField)
       .flatMap(day => Try(java.time.DayOfWeek.of(day.toInt)).toOption)
     val daysOfWeek =
