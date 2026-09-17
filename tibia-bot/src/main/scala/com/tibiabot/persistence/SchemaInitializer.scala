@@ -306,10 +306,32 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE INDEX IF NOT EXISTS highscore_events_world_observed
            |ON highscore_events (world, observed);""".stripMargin
 
-      // Experience history, which the statistics post reads. One row per
-      // character per server-save day. A second table behind it kept every
-      // hourly reading — 1.63M rows a day across 68 worlds — for an intra-day
-      // curve nothing was ever built to draw; it is dropped below.
+      // Experience history, which the statistics post reads. Two tables,
+      // because a reading and a day are different sizes and answer different
+      // questions.
+      //
+      // The rollup below carries one row per character per server-save day, and
+      // can only ever answer "what did this day come to". The readings here are
+      // what a rolling window needs: the statistics post's refresh reports the
+      // last 24 hours, which means each character's score as it stood a day ago,
+      // and no arrangement of daily totals holds that.
+      //
+      // They are expensive and known to be — 1.63M rows a day across 68 worlds,
+      // 30.7 MB per world at the week they are kept for. That week was dropped
+      // in September 2026 for costing more than half this feature's disk while
+      // nothing read it, and is back because something does. The retention is
+      // the same week rather than the day the window strictly needs, which also
+      // leaves the intra-day curve buildable without paying this twice.
+      val createExperienceReadingTable =
+        s"""CREATE TABLE IF NOT EXISTS experience_reading (
+           |world VARCHAR(255) NOT NULL,
+           |name VARCHAR(255) NOT NULL,
+           |observed TIMESTAMP NOT NULL,
+           |char_level INT NOT NULL,
+           |experience BIGINT NOT NULL,
+           |PRIMARY KEY (world, name, observed)
+           |);""".stripMargin
+
       val createExperienceDailyTable =
         s"""CREATE TABLE IF NOT EXISTS experience_daily (
            |world VARCHAR(255) NOT NULL,
@@ -324,6 +346,10 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
 
       // The prunes delete by time across every world, and neither primary key
       // leads with the column they filter on.
+      val createExperienceReadingIndex =
+        s"""CREATE INDEX IF NOT EXISTS experience_reading_observed
+           |ON experience_reading (observed);""".stripMargin
+
       val createExperienceDailyIndex =
         s"""CREATE INDEX IF NOT EXISTS experience_daily_save_day
            |ON experience_daily (save_day);""".stripMargin
@@ -415,14 +441,9 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createHighscoreEventsIndex)
       newStatement.executeUpdate(createHighscoreFeedCursorTable)
 
+      newStatement.executeUpdate(createExperienceReadingTable)
       newStatement.executeUpdate(createExperienceDailyTable)
-
-      // Written every hour for a year and never once read: the only statements
-      // that ever named it were an INSERT and a DELETE. It was banked for an
-      // intra-day experience curve that was never built, and cost more than half
-      // the disk this feature uses. Dropped rather than left to age out, so the
-      // space comes back on the next start rather than a week later.
-      newStatement.executeUpdate("DROP TABLE IF EXISTS experience_reading;")
+      newStatement.executeUpdate(createExperienceReadingIndex)
       newStatement.executeUpdate(createExperienceDailyIndex)
       newStatement.executeUpdate(createExperienceDailyWorldDayIndex)
       newStatement.executeUpdate(createKillStatisticsBossTable)

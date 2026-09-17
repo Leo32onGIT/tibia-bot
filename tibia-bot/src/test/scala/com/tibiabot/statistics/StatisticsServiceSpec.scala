@@ -41,6 +41,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
   ) extends ExperienceRepository {
     val lossCalls = mutable.ListBuffer.empty[(String, Set[String])]
     val moverCalls = mutable.ListBuffer.empty[(String, LocalDate)]
+    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
     def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = {
       moverCalls += ((world, saveDay))
@@ -52,6 +53,7 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
       lossCalls += ((world, names))
       losses
     }
+    def removeExpiredReadings(before: Instant): Unit = ()
     def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 

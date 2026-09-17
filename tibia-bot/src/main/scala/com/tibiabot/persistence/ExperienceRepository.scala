@@ -3,18 +3,34 @@ package com.tibiabot.persistence
 import com.tibiabot.domain.ExperienceDelta
 import com.tibiabot.tibiadata.response.HighscoreEntry
 
-import java.time.LocalDate
+import java.time.{Instant, LocalDate}
 
 /** Persistence port for the experience history the Statistics channel reads.
  *
- *  One table, holding one row per character per server-save day. There used to
- *  be a second one keeping every hourly reading behind it, on the reasoning that
- *  an intra-day curve would want them. Nothing was ever built that read it, and
- *  measured against real Postgres it was 30 MB per world of the 58 this feature
- *  uses — more than half the disk, for a table whose only statements were an
- *  INSERT and a DELETE. If the curve is ever wanted, the readings are fifteen
- *  lines to bring back; the year of them nobody looked at is not. */
+ *  Two tables, because a day and a reading answer different questions. The
+ *  rollup holds one row per character per server-save day and can only say what
+ *  a day came to. The readings hold every hourly snapshot, which is what a
+ *  window ending *now* needs: "the last 24 hours" is this reading minus the one
+ *  from a day ago, and no arrangement of daily totals contains that.
+ *
+ *  They are expensive and the size is the whole argument for keeping them
+ *  apart. A snapshot is a thousand rows per world; at 68 worlds and 24
+ *  snapshots that is 1.63M rows a day, measured at 30.7 MB per world for the
+ *  week they are kept — against a rollup carrying a fortieth of the volume for
+ *  ninety days. That week was dropped in September 2026, correctly, while
+ *  nothing read it; it is back because the statistics post's refresh does.
+ *
+ *  The week is more than the window strictly needs — a day and an hour would
+ *  do — and is kept at a week anyway so the intra-day curve stays buildable
+ *  without paying for this table twice. */
 trait ExperienceRepository {
+
+  /** File one snapshot's readings, keyed by the instant tibia.com built it.
+   *
+   *  Every tracked character every hour, so the largest write this feature
+   *  makes. Re-filing a snapshot already stored is a no-op rather than a
+   *  correction — see the implementation. */
+  def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit
 
   /** Fold the same readings into the day's rollup.
    *
@@ -61,6 +77,8 @@ trait ExperienceRepository {
    *  tracked enemies are ordinary players who are not in it. An enemy with no row
    *  has no figure at all, not a figure of zero. */
   def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta]
+
+  def removeExpiredReadings(before: Instant): Unit
 
   def removeExpiredDaily(before: LocalDate): Unit
 }

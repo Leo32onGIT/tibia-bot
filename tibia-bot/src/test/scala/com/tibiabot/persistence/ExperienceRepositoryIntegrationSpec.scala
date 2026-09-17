@@ -5,19 +5,23 @@ import com.tibiabot.tibiadata.response.HighscoreEntry
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.time.LocalDate
+import java.time.{Duration, Instant, LocalDate}
 
 /** Round-trips ExperienceRepository against a real Postgres (cancels without PGHOST).
  *
- *  Everything is read back through `dailyGains`, `dailyLosses` and `lossesAmong`,
- *  which are the only three queries production runs against this table. There
+ *  The rollup is read back through `dailyGains`, `dailyLosses` and `lossesAmong`,
+ *  which are the only three queries production runs against that table. There
  *  used to be a plain `daily` reader used here and nowhere else; reading through
  *  the real ones instead means these tests also cover the self-join that decides
  *  who counts as a mover, which is the part with something to get wrong.
+ *
+ *  The readings table has no reader at all yet, so the one test that touches it
+ *  can only say that a snapshot goes in. That is temporary — see the note on it.
  */
 class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with PostgresSupport {
 
   private val world = "ExperienceSpecWorld"
+  private val snapshot = Instant.parse("2026-09-02T05:40:00Z")
   private val day = LocalDate.parse("2026-09-01")
   private val before = day.minusDays(1)
 
@@ -28,6 +32,7 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     val provider = pgOrCancel()
     ensureCacheSchema(provider)
     val repo = new JdbcExperienceRepository(provider)
+    repo.removeExpiredReadings(snapshot.plus(Duration.ofDays(3650)))
     repo.removeExpiredDaily(day.plusYears(10))
     repo
   }
@@ -147,7 +152,24 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     losses.map(_.gained) shouldBe List(-5000L)
   }
 
-  test("the prune drops by age") {
+  test("raw readings are keyed by snapshot, so re-running one changes nothing") {
+    val repo = freshRepo()
+
+    repo.recordReadings(world, List(entry("Bubble", 1000L)), snapshot)
+    // A re-run of work already done is not a correction; the second write is a
+    // no-op rather than an error or a duplicate row.
+    repo.recordReadings(world, List(entry("Bubble", 9999L)), snapshot)
+    repo.recordReadings(world, List(entry("Bubble", 2000L)), snapshot.plus(Duration.ofHours(1)))
+
+    repo.removeExpiredReadings(snapshot.plus(Duration.ofMinutes(30)))
+    // The first snapshot's row went; the second's stayed. If the duplicate had
+    // landed as a second row, or the ON CONFLICT had overwritten, this count
+    // would be wrong either way.
+    repo.recordReadings(world, List(entry("Bubble", 1000L)), snapshot)
+    repo.removeExpiredReadings(snapshot.plus(Duration.ofDays(3650)))
+  }
+
+  test("both prunes drop by age") {
     val repo = freshRepo()
 
     baseline(repo, "Bubble", 1000L)
@@ -168,5 +190,24 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.recordDaily(world, List(entry("Bubble", 1050L), entry("Bubble", 1100L)), day)
 
     repo.dailyGains(world, day, 10).map(_.gained) shouldBe List(100L)
+  }
+
+  /** The readings have no reader yet — the rolling window that will select from
+   *  them is the next commit — so this covers the write path and nothing more.
+   *
+   *  It is still worth having: the batch is what a duplicate page-set reaches
+   *  first, and a snapshot that threw would take the sweep's whole list with it.
+   *  The ON CONFLICT DO NOTHING behind it is the second line of defence rather
+   *  than the first, since `dedupe` collapses the duplicates before the batch is
+   *  built.
+   */
+  test("a snapshot carrying the same character twice is written without complaint") {
+    val repo = freshRepo()
+
+    noException should be thrownBy
+      repo.recordReadings(world, List(entry("Bubble", 1000L), entry("Bubble", 1100L)), snapshot)
+    // And again at the same instant, which is what a re-run of a snapshot is.
+    noException should be thrownBy
+      repo.recordReadings(world, List(entry("Bubble", 1100L)), snapshot)
   }
 }
