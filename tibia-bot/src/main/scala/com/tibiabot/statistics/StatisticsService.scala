@@ -6,7 +6,7 @@ import com.tibiabot.persistence.{ExperienceRepository, FragRepository, Highscore
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
-import java.time.{LocalDate, ZonedDateTime}
+import java.time.{Instant, LocalDate, ZonedDateTime}
 import scala.util.control.NonFatal
 
 /** One discord's statistics channel for one world.
@@ -34,6 +34,18 @@ final case class StatisticsTarget(
    *  matches nothing. */
   def owes(day: LocalDate): Boolean = posted != day.toString
 }
+
+/** The experience figures a refreshed embed carries, and the window they are
+ *  measured over.
+ *
+ *  The window travels with the rows because the embed says how long it covers.
+ *  It is usually a day, and the times it is not — a sweep that stopped for a
+ *  few hours — are exactly the times a reader should be told. */
+final case class RefreshedExperience(
+    window: ExperienceWindow,
+    gains: List[ExperienceDelta],
+    losses: List[ExperienceDelta]
+)
 
 /** Posts the daily statistics embed once per world per server-save day.
  *
@@ -105,6 +117,76 @@ final class StatisticsService(
       if (owed.nonEmpty) postAll(owed, day)
     }
   }
+
+  /** One press of a channel's refresh button.
+   *
+   *  Answers with the experience figures over a rolling window, or with why
+   *  there are none to give. Reads nothing else: the rest of the post — the
+   *  war, the creatures, the bosses — is about the save day it was published
+   *  for and does not move, so a refresh leaves those embeds exactly as they
+   *  are. See [[StatisticsRefresh]] for what decides this and why the cooldown
+   *  is the data rather than a timer.
+   *
+   *  Fetches nothing from tibia.com, the same as the daily post. A press costs
+   *  at most three indexed queries against readings the sweep already banked,
+   *  which is what makes a button on a public channel affordable at all.
+   *
+   *  @param shown       the reading this channel's embed was built from, or None
+   *                     where this bot has not refreshed it since booting
+   *  @param lastPressed when this channel last pressed, refusal or not
+   *  @return the figures, or the refusal to tell the reader
+   */
+  def refresh(
+      world: String,
+      shown: Option[Instant],
+      lastPressed: Option[Instant]
+  ): Either[RefreshDecision, RefreshedExperience] = {
+    val at = now().toInstant
+    // Checked before the query rather than inside the decision, so somebody
+    // leaning on the button cannot make us read the table forty times a second.
+    StatisticsRefresh.retryAfter(lastPressed, at) match {
+      case Some(retryAt) => Left(RefreshDecision.TooSoon(retryAt))
+      case None =>
+        readings(world, at) match {
+          case None => Left(RefreshDecision.Unavailable)
+          case Some(times) =>
+            StatisticsRefresh.decide(times, shown, lastPressed, at) match {
+              case RefreshDecision.Rebuild(window) => movers(world, window)
+              case refusal => Left(refusal)
+            }
+        }
+    }
+  }
+
+  /** The window's two ends, or None where the query failed.
+   *
+   *  An empty list and a failure are told apart here rather than being folded
+   *  into each other: the first is a world waiting for its first readings, the
+   *  second is a database that will answer in a minute, and the reader is given
+   *  a different sentence for each. */
+  private def readings(world: String, at: Instant): Option[List[Instant]] =
+    try Some(experience.readingTimes(world, at.minus(StatisticsRefresh.Lookback), at))
+    catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not read the reading times for '$world': ${error.getMessage}")
+        None
+    }
+
+  /** Both ends of the window's ordering.
+   *
+   *  An empty result is a real answer rather than a failure — a world where
+   *  nobody in the top thousand moved in a day is a quiet world, and the embed
+   *  says so in the same words the daily post uses. */
+  private def movers(world: String, window: ExperienceWindow): Either[RefreshDecision, RefreshedExperience] =
+    try Right(RefreshedExperience(
+      window = window,
+      gains = experience.gainsBetween(world, window.from, window.to, DailyStatistics.TopGains),
+      losses = experience.lossesBetween(world, window.from, window.to, DailyStatistics.TopLosses)))
+    catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not read the rolling experience for '$world': ${error.getMessage}")
+        Left(RefreshDecision.Unavailable)
+    }
 
   private def postAll(owed: List[StatisticsTarget], day: LocalDate): Unit = {
     // Built per world rather than per target, and only for the worlds something

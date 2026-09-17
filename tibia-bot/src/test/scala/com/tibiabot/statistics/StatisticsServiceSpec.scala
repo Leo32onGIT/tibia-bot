@@ -418,4 +418,122 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     posts shouldBe List("fine")
     marks should contain theSameElementsAs List("broken", "fine")
   }
+
+  /** The refresh button's half of the service: rolling figures on demand, and
+   *  the refusals that keep a press from costing anything it need not. */
+  private val lastReading = Instant.parse("2026-09-18T18:40:00Z")
+  private val pressedAt = ZonedDateTime.ofInstant(lastReading.plusSeconds(300), Clock.Berlin)
+
+  private class RollingExperience(
+      times: List[Instant] = Nil,
+      gains: List[ExperienceDelta] = Nil,
+      losses: List[ExperienceDelta] = Nil,
+      failTimes: Boolean = false,
+      failMovers: Boolean = false
+  ) extends ExperienceRepository {
+    val asked = mutable.ListBuffer.empty[(Instant, Instant)]
+    val measured = mutable.ListBuffer.empty[(Instant, Instant)]
+    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
+    def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
+    def readingTimes(world: String, from: Instant, to: Instant): List[Instant] = {
+      asked += ((from, to))
+      if (failTimes) throw new RuntimeException("database is away")
+      times
+    }
+    def gainsBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] = {
+      measured += ((from, to))
+      if (failMovers) throw new RuntimeException("database is away")
+      gains
+    }
+    def lossesBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] =
+      if (failMovers) throw new RuntimeException("database is away") else losses
+    def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
+    def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
+    def removeExpiredReadings(before: Instant): Unit = ()
+    def removeExpiredDaily(before: LocalDate): Unit = ()
+  }
+
+  private def refresher(experience: ExperienceRepository,
+                        now: ZonedDateTime = pressedAt): StatisticsService =
+    new StatisticsService(
+      experience = experience,
+      highscores = NoopHighscores,
+      killStatistics = new StubKillStatistics(),
+      frags = new StubFrags(),
+      worldOnline = NoWorldOnline,
+      targets = () => Nil,
+      announce = (_, _, _, _) => (),
+      recordPosted = (_, _) => (),
+      now = () => now
+    )
+
+  private def hourly(count: Int): List[Instant] =
+    List.tabulate(count)(back => lastReading.minus(java.time.Duration.ofHours(back.toLong)))
+
+  test("a refresh measures the rolling window and reports both ends of it") {
+    val experience = new RollingExperience(
+      times = hourly(30), gains = List(delta("Bubble", 900)), losses = List(delta("Waldorf", -400)))
+
+    val refreshed = refresher(experience).refresh("Antica", shown = None, lastPressed = None)
+      .getOrElse(fail("expected figures"))
+
+    refreshed.window shouldBe ExperienceWindow(lastReading.minus(java.time.Duration.ofHours(24)), lastReading)
+    refreshed.window.hours shouldBe 24L
+    refreshed.gains.map(_.name) shouldBe List("bubble")
+    refreshed.losses.map(_.name) shouldBe List("waldorf")
+    // Measured between the window's own ends, never between invented instants.
+    experience.measured.toList shouldBe List((refreshed.window.from, refreshed.window.to))
+  }
+
+  test("a refresh asks for a bounded stretch of readings, not the whole week") {
+    val experience = new RollingExperience(times = hourly(30))
+    refresher(experience).refresh("Antica", shown = None, lastPressed = None)
+
+    val (from, to) = experience.asked.head
+    to shouldBe pressedAt.toInstant
+    java.time.Duration.between(from, to) shouldBe StatisticsRefresh.Lookback
+  }
+
+  test("a post already showing the last reading is refused with it") {
+    val experience = new RollingExperience(times = hourly(30))
+
+    refresher(experience).refresh("Antica", shown = Some(lastReading), lastPressed = None) shouldBe
+      Left(RefreshDecision.NothingNewer(lastReading))
+    // Refused without measuring anything.
+    experience.measured shouldBe empty
+  }
+
+  test("a press inside the floor never reaches the database") {
+    val experience = new RollingExperience(times = hourly(30))
+    val pressed = pressedAt.toInstant.minusSeconds(5)
+
+    refresher(experience).refresh("Antica", shown = None, lastPressed = Some(pressed)) shouldBe
+      Left(RefreshDecision.TooSoon(pressed.plus(StatisticsRefresh.Floor)))
+    experience.asked shouldBe empty
+  }
+
+  test("a world without a day of readings is told to wait, not that it is current") {
+    val experience = new RollingExperience(times = hourly(3))
+
+    refresher(experience).refresh("Antica", shown = None, lastPressed = None) shouldBe
+      Left(RefreshDecision.NotEnoughReadings)
+  }
+
+  test("a database that is away is not reported as a world with nothing to show") {
+    refresher(new RollingExperience(failTimes = true))
+      .refresh("Antica", shown = None, lastPressed = None) shouldBe Left(RefreshDecision.Unavailable)
+
+    refresher(new RollingExperience(times = hourly(30), failMovers = true))
+      .refresh("Antica", shown = None, lastPressed = None) shouldBe Left(RefreshDecision.Unavailable)
+  }
+
+  test("a quiet day is figures of none rather than a refusal") {
+    val refreshed = refresher(new RollingExperience(times = hourly(30)))
+      .refresh("Antica", shown = None, lastPressed = None)
+      .getOrElse(fail("expected figures"))
+
+    refreshed.gains shouldBe empty
+    refreshed.losses shouldBe empty
+  }
 }
