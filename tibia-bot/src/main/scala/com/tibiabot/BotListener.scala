@@ -249,6 +249,18 @@ class BotListener extends ListenerAdapter with StrictLogging {
         }
       })
     }
+    // The refresh button under a statistics post. It rewrites the message it is
+    // on, so it defers an edit here on the event thread and does its database
+    // reads on the interaction pool, the same as the two above.
+    else if (interactions.StatisticsButtons.handles(event.getComponentId)) {
+      event.deferEdit().queue()
+      interactionExecutor.execute(() => {
+        try interactions.StatisticsButtons.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on the statistics refresh button", ex)
+        }
+      })
+    }
     else if (interactions.NotifyButtons.handles(event.getComponentId)) {
       // The notification autoroles and the controls under the DMs they send.
       // Acknowledged here for the same reason as the respawn buttons above,

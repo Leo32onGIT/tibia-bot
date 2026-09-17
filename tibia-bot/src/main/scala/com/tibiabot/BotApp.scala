@@ -1558,10 +1558,24 @@ object BotApp extends App with StrictLogging {
     messages match {
       case Nil => ()
       case first :: rest =>
+        // The button rides the first message, which is where the experience
+        // board is and the only message a refresh ever rewrites. On the day the
+        // post spills, the second message carries the creatures and the bosses,
+        // which a refresh does not touch and which would wear a control that
+        // rewrites somewhere else.
+        val opening =
+          if (Config.Statistics.Refresh.enabled) send(first).setComponents(statisticsRefreshRow)
+          else send(first)
         rest.foldLeft[net.dv8tion.jda.api.requests.RestAction[net.dv8tion.jda.api.entities.Message]](
-          send(first))((sent, next) => sent.flatMap(_ => send(next))).queue(null, null)
+          opening)((sent, next) => sent.flatMap(_ => send(next))).queue(null, null)
     }
   }
+
+  /** The refresh control under a statistics post. */
+  private def statisticsRefreshRow: net.dv8tion.jda.api.components.actionrow.ActionRow =
+    net.dv8tion.jda.api.components.actionrow.ActionRow.of(
+      net.dv8tion.jda.api.components.buttons.Button.secondary(
+        interactions.StatisticsButtons.RefreshId, "⟳"))
 
   /** Store that a world's day has been posted, in the database and in the copy
    *  of the row `statisticsTargets` reads back thirty seconds later. Both, or
@@ -1594,6 +1608,13 @@ object BotApp extends App with StrictLogging {
     targets = () => statisticsTargets(),
     announce = (target, report, frags, enemyLosses) =>
       statisticsChannelFor(target).foreach { channel =>
+        // The day's post puts the save day's figures back on the board, so what
+        // this channel was last refreshed to is no longer what it shows.
+        // Forgetting it here is what lets somebody press at five past ten and
+        // get the rolling day, rather than being told the post already has the
+        // latest reading — which would be true of a window nobody is looking at
+        // any more.
+        statisticsShown.remove(target.channelId)
         // Read before the send is queued rather than inside it: both lookups are
         // database reads, and the queue is paced.
         val sheets = statisticsSheets(target.world)
@@ -1641,6 +1662,82 @@ object BotApp extends App with StrictLogging {
         report, Config.creatureEmoji, Config.goldEmoji, Config.specialKillEmojis.getOrElse(_, ""),
         Config.creatureWiki.titleFor) :::
       presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
+
+  /** The reading each statistics channel's experience embed was built from, and
+   *  when each last had its button pressed.
+   *
+   *  In memory rather than in the guild's database. Losing both in a restart
+   *  costs one rebuild that changes nothing a reader would notice, which is
+   *  cheaper than a column on 122 databases and an ALTER to add it — and the
+   *  figures themselves are never at risk either way, since they come from the
+   *  readings table and not from what is remembered here. Keyed by channel,
+   *  because that is what a press arrives with and what a post belongs to. */
+  private val statisticsShown = scala.collection.concurrent.TrieMap.empty[String, Instant]
+  private val statisticsPressed = scala.collection.concurrent.TrieMap.empty[String, Instant]
+
+  /** One press of a statistics channel's refresh button: the experience board,
+   *  rebuilt over the last 24 hours, or why it was not.
+   *
+   *  Only the board. The war, the creatures and the bosses are about the save
+   *  day the post was published for and do not move, so they are neither
+   *  rebuilt nor re-read — the caller splices these embeds in front of the ones
+   *  the message already carries.
+   *
+   *  The heading keeps the published day and the section headings keep their
+   *  wording, which is why the figures' real span is stated in a line of its
+   *  own underneath them: nothing else in the embed says that the numbers under
+   *  "Top Experience Gained" are now a rolling day rather than that date's.
+   *
+   *  The press is recorded whether or not it produced anything, since the floor
+   *  exists to stop the pressing rather than to stop the answering. */
+  def refreshStatisticsBoard(
+      guildId: String,
+      world: Worlds
+  ): Either[statistics.RefreshDecision, List[net.dv8tion.jda.api.entities.MessageEmbed]] = {
+    val channelId = world.statisticsChannel
+    val pressedAt = Instant.now()
+    val outcome = statisticsService.refresh(
+      world.name, statisticsShown.get(channelId), statisticsPressed.get(channelId))
+    statisticsPressed.put(channelId, pressedAt)
+    outcome.map { refreshed =>
+      statisticsShown.put(channelId, refreshed.window.to)
+      // The day the post was published for, so the heading does not move. A row
+      // with nothing stored has never posted, which a button on a post cannot
+      // really be — fall back to the day that would be posted now rather than
+      // refusing over a field nothing else reads here.
+      val saveDay = scala.util.Try(java.time.LocalDate.parse(world.statisticsPosted))
+        .getOrElse(statistics.DailyStatistics.reportedDay(ZonedDateTime.now(domain.time.Clock.Berlin)))
+      val sheets = statisticsSheets(world.name)
+      val report = statistics.DailyReport(
+        world = world.name,
+        saveDay = saveDay,
+        gains = refreshed.gains,
+        losses = refreshed.losses,
+        // Re-read rather than carried over from the post: it is one indexed
+        // query, and parsing it back out of the embed we are about to replace
+        // would be the same value by a worse route.
+        advance = statisticsTopAdvance(world.name, saveDay))
+      presentation.StatisticsEmbeds.build(
+        report, Config.newsEmoji, statisticsSideIcon(guildId, sheets), presentation.SkillEmojis.icon,
+        Config.levelUpEmoji, Config.levelDownEmoji,
+        freshness = Some(presentation.StatisticsEmbeds.freshnessLine(
+          refreshed.window.hours, refreshed.window.to)))
+    }
+  }
+
+  /** The published day's best skill advance, or None if it cannot be read.
+   *
+   *  A failure costs the section rather than the refresh, the same rule the
+   *  daily post follows for every figure it cannot get. */
+  private def statisticsTopAdvance(world: String, saveDay: java.time.LocalDate): Option[domain.HighscoreEvent] = {
+    val (from, to) = statistics.DailyStatistics.window(saveDay)
+    try highscoreRepository.topAdvance(world, from, to)
+    catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not re-read the top advance for '$world': ${error.getMessage}")
+        None
+    }
+  }
 
   /** The statistics channel for one target, if this bot can write to it. */
   private def statisticsChannelFor(

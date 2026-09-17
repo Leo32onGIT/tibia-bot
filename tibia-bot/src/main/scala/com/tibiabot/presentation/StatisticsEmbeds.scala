@@ -60,7 +60,8 @@ object StatisticsEmbeds {
       sideIcon: String => String,
       skillIcon: HighscoreCategory => String,
       xpUp: String,
-      xpDown: String
+      xpDown: String,
+      freshness: Option[String] = None
   ): List[MessageEmbed] = {
     val sections = List(
       Some(s"## $titleIcon [${report.saveDay.format(dayFormat)}](${Urls.topExperienceUrl(report.world)})"),
@@ -68,11 +69,46 @@ object StatisticsEmbeds {
       Option.when(report.losses.nonEmpty)(
         section("Top Experience Lost", report.losses.map(gainLine(_, sideIcon, xpDown)))),
       report.advance.map(event =>
-        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon))))
+        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon)))),
+      freshness.map(line => s"-# $line")
     ).flatten
 
     EmbedPages.build(WorldColor, sections.mkString("\n"))
   }
+
+  /** The line under a refreshed board saying what it covers and when it was
+   *  taken.
+   *
+   *  It exists because the headings above it do not move. "Top Experience
+   *  Gained" says the same thing whether the figures are the save day's or the
+   *  last day's, and the date at the top is the day the post was published for
+   *  either way — so this line is the only place a reader learns which of the
+   *  two they are looking at, and it is written to be read in that order: the
+   *  span first, then how fresh it is.
+   *
+   *  The span is the window's real length rather than the day it asked for. It
+   *  is 24 nearly always, and the mornings it is not are exactly the mornings
+   *  somebody would otherwise compare a 28-hour figure against yesterday's
+   *  24-hour one and conclude the world had a big night.
+   *
+   *  Discord's relative stamp rather than a clock time, since the reader's
+   *  timezone is not ours and the post is read for hours after it is built. */
+  def freshnessLine(hours: Long, takenAt: java.time.Instant): String =
+    s"Last $hours hours · updated <t:${takenAt.getEpochSecond}:R>"
+
+  /** A refreshed board in place of the one a message already carries.
+   *
+   *  The board is however many embeds it took — a busy day runs past one — and
+   *  they lead the message, so the leading run in this colour is what a refresh
+   *  replaces and everything after it is left exactly as it was. That is the
+   *  whole of "only the experience embed changes": the war, the creatures and
+   *  the bosses are about the save day the post was published for, they do not
+   *  move, and they are not rebuilt or re-read.
+   *
+   *  Matching on the colour rather than on position, because the alternative is
+   *  counting embeds and being wrong on the day the board spills. */
+  def replaceBoard(existing: List[MessageEmbed], board: List[MessageEmbed]): List[MessageEmbed] =
+    board ::: existing.dropWhile(_.getColorRaw == WorldColor)
 
   /** The day's creature figures, as their own embed.
    *

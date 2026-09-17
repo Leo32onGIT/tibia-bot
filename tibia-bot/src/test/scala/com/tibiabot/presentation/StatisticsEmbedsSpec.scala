@@ -314,4 +314,71 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     built.foreach(_.getThumbnail shouldBe null)
     built.foreach(_.getColor.getRGB & 0xFFFFFF shouldBe StatisticsEmbeds.WorldColor)
   }
+
+  // --- the refreshed board -------------------------------------------------
+
+  private val taken = Instant.parse("2026-09-18T18:40:00Z")
+
+  test("the daily post carries no freshness line at all") {
+    // The default, so a post nobody has pressed reads exactly as it always has.
+    build(report(gains = List(delta("Bubble", 900)))).getDescription should not include "-#"
+  }
+
+  test("a refreshed board says what it covers and when it was taken") {
+    val built = StatisticsEmbeds.build(
+      report(gains = List(delta("Bubble", 900))), news, _ => "", _ => "<:mlvl:3>", up, down,
+      freshness = Some(StatisticsEmbeds.freshnessLine(24L, taken)))
+
+    built.head.getDescription should include(s"-# Last 24 hours · updated <t:${taken.getEpochSecond}:R>")
+  }
+
+  test("the headings and the date are untouched by a refresh") {
+    val r = report(gains = List(delta("Bubble", 900)), losses = List(delta("Waldorf", -400)),
+      advance = Some(advance("magiclevel", 131)))
+    val plain = StatisticsEmbeds.build(r, news, _ => "", _ => "<:mlvl:3>", up, down).head
+    val refreshed = StatisticsEmbeds.build(r, news, _ => "", _ => "<:mlvl:3>", up, down,
+      freshness = Some(StatisticsEmbeds.freshnessLine(24L, taken))).head
+
+    // The only difference is the line at the foot: same date heading, same
+    // section headings, same rows, same skill advancement.
+    refreshed.getDescription.split("\n").dropRight(1).toList shouldBe
+      plain.getDescription.split("\n").toList
+  }
+
+  test("a window that is not a day says the length it really is") {
+    StatisticsEmbeds.freshnessLine(28L, taken) should startWith("Last 28 hours")
+  }
+
+  test("a refresh replaces the board and leaves every other embed alone") {
+    val board = pages(report(gains = List(delta("Bubble", 900))))
+    val pvp = new net.dv8tion.jda.api.EmbedBuilder().setColor(PvpEmbeds.PvpColor).setDescription("## PVP").build()
+    val bosses = new net.dv8tion.jda.api.EmbedBuilder()
+      .setColor(BossPredictionEmbeds.PredictionColor).setDescription("## Bosses Due").build()
+    val fresh = pages(report(gains = List(delta("Bubble", 1900))))
+
+    val replaced = StatisticsEmbeds.replaceBoard(board ::: List(pvp, bosses), fresh)
+
+    replaced.size shouldBe fresh.size + 2
+    replaced.take(fresh.size).map(_.getDescription) shouldBe fresh.map(_.getDescription)
+    replaced.drop(fresh.size) shouldBe List(pvp, bosses)
+  }
+
+  test("a board that spilled onto two embeds is replaced whole") {
+    // The leading run in the board's colour goes, however long it is — counting
+    // embeds instead would leave half of yesterday's board above today's.
+    val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
+    val spilled = pages(report(gains = many))
+    val pvp = new net.dv8tion.jda.api.EmbedBuilder().setColor(PvpEmbeds.PvpColor).setDescription("## PVP").build()
+    val fresh = pages(report(gains = List(delta("Bubble", 1900))))
+
+    spilled.size should be > 1
+    StatisticsEmbeds.replaceBoard(spilled ::: List(pvp), fresh) shouldBe fresh ::: List(pvp)
+  }
+
+  test("a message with nothing but a board is replaced by a board") {
+    val board = pages(report(gains = List(delta("Bubble", 900))))
+    val fresh = pages(report(gains = List(delta("Bubble", 1900))))
+
+    StatisticsEmbeds.replaceBoard(board, fresh) shouldBe fresh
+  }
 }

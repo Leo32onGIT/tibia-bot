@@ -144,6 +144,11 @@ object Config {
     val tickInterval: FiniteDuration = statistics.getDuration("tick-interval").toScala
     val fragRetention: FiniteDuration = statistics.getDuration("frag-retention").toScala
 
+    /** The refresh button under the post. */
+    object Refresh {
+      val enabled: Boolean = statistics.getConfig("refresh").getBoolean("enabled")
+    }
+
     /** The daily kill statistics snapshot, which the post above waits on. */
     object KillStatistics {
       private val killStatistics = statistics.getConfig("kill-statistics")
