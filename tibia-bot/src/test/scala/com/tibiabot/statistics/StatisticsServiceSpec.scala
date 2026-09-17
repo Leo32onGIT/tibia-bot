@@ -43,6 +43,9 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     val moverCalls = mutable.ListBuffer.empty[(String, LocalDate)]
     def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
     def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
+    def readingTimes(world: String, from: Instant, to: Instant): List[Instant] = Nil
+    def gainsBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] = Nil
+    def lossesBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] = Nil
     def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = {
       moverCalls += ((world, saveDay))
       if (fail) throw new RuntimeException("database is away")

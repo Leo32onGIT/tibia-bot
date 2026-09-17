@@ -15,13 +15,17 @@ import java.time.{Duration, Instant, LocalDate}
  *  the real ones instead means these tests also cover the self-join that decides
  *  who counts as a mover, which is the part with something to get wrong.
  *
- *  The readings table has no reader at all yet, so the one test that touches it
- *  can only say that a snapshot goes in. That is temporary — see the note on it.
+ *  The readings are read back through `gainsBetween` and `lossesBetween`, which
+ *  are the queries the refreshed experience embed runs, and through
+ *  `readingTimes`, which is how a caller learns the two instants those two will
+ *  accept.
  */
 class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with PostgresSupport {
 
   private val world = "ExperienceSpecWorld"
   private val snapshot = Instant.parse("2026-09-02T05:40:00Z")
+  /** The reading a rolling window would anchor on: the same minute, a day back. */
+  private val dayBefore = snapshot.minus(Duration.ofHours(24))
   private val day = LocalDate.parse("2026-09-01")
   private val before = day.minusDays(1)
 
@@ -192,22 +196,98 @@ class ExperienceRepositoryIntegrationSpec extends AnyFunSuite with Matchers with
     repo.dailyGains(world, day, 10).map(_.gained) shouldBe List(100L)
   }
 
-  /** The readings have no reader yet — the rolling window that will select from
-   *  them is the next commit — so this covers the write path and nothing more.
-   *
-   *  It is still worth having: the batch is what a duplicate page-set reaches
-   *  first, and a snapshot that threw would take the sweep's whole list with it.
-   *  The ON CONFLICT DO NOTHING behind it is the second line of defence rather
-   *  than the first, since `dedupe` collapses the duplicates before the batch is
-   *  built.
-   */
-  test("a snapshot carrying the same character twice is written without complaint") {
+  test("a snapshot carrying the same character twice keeps the last reading") {
     val repo = freshRepo()
+    repo.recordReadings(world, List(entry("Bubble", 1000L)), dayBefore)
 
-    noException should be thrownBy
-      repo.recordReadings(world, List(entry("Bubble", 1000L), entry("Bubble", 1100L)), snapshot)
+    repo.recordReadings(world, List(entry("Bubble", 1400L), entry("Bubble", 1900L)), snapshot)
     // And again at the same instant, which is what a re-run of a snapshot is.
-    noException should be thrownBy
-      repo.recordReadings(world, List(entry("Bubble", 1100L)), snapshot)
+    // ON CONFLICT DO NOTHING, so the stored reading is the first run's.
+    repo.recordReadings(world, List(entry("Bubble", 9999L)), snapshot)
+
+    repo.gainsBetween(world, dayBefore, snapshot, 10).map(_.gained) shouldBe List(900L)
+  }
+
+  test("the readings a world has are its snapshot instants, in order and without repeats") {
+    val repo = freshRepo()
+    repo.recordReadings(world, List(entry("Bubble", 1000L), entry("Statler", 5000L)), dayBefore)
+    repo.recordReadings(world, List(entry("Bubble", 1500L)), snapshot)
+    repo.recordReadings("SomewhereElse", List(entry("Bubble", 1500L)), snapshot.plusSeconds(60))
+
+    // Two rows written at dayBefore come back as one instant, and the other
+    // world's reading is not this world's.
+    repo.readingTimes(world, dayBefore, snapshot) shouldBe List(dayBefore, snapshot)
+    // Both ends are inclusive, and a range that excludes one excludes it.
+    repo.readingTimes(world, dayBefore.plusSeconds(1), snapshot) shouldBe List(snapshot)
+  }
+
+  test("a window measures every character between the same two readings") {
+    val repo = freshRepo()
+    repo.recordReadings(world, List(
+      entry("Bubble", 1000L, level = 400),
+      entry("Statler", 5000L, level = 500),
+      entry("Waldorf", 8000L, level = 600)), dayBefore)
+    repo.recordReadings(world, List(
+      entry("Bubble", 1900L, level = 401),
+      entry("Statler", 5000L, level = 500),
+      entry("Waldorf", 7000L, level = 598),
+      entry("Newcomer", 77L, level = 100)), snapshot)
+
+    val gains = repo.gainsBetween(world, dayBefore, snapshot, 10)
+
+    // Bubble gained. Statler stood still, Waldorf lost, and Newcomer has no
+    // reading at the far end — entering the top thousand is not a day's
+    // experience, so the join drops them rather than crediting them with 77.
+    gains.map(_.name) shouldBe List("bubble")
+    gains.head.gained shouldBe 900L
+    gains.head.experience shouldBe 1900L
+    gains.head.level shouldBe 401
+    gains.head.previousLevel shouldBe 400
+
+    val losses = repo.lossesBetween(world, dayBefore, snapshot, 10)
+    losses.map(_.name) shouldBe List("waldorf")
+    losses.head.gained shouldBe -1000L
+    losses.head.previousLevel shouldBe 600
+  }
+
+  test("a window orders by the size of the move and stops at the limit") {
+    val repo = freshRepo()
+    repo.recordReadings(world, List(
+      entry("Small", 1000L), entry("Large", 1000L), entry("Middle", 1000L)), dayBefore)
+    repo.recordReadings(world, List(
+      entry("Small", 1100L), entry("Large", 9000L), entry("Middle", 3000L)), snapshot)
+
+    repo.gainsBetween(world, dayBefore, snapshot, 10).map(_.name) shouldBe List("large", "middle", "small")
+    repo.gainsBetween(world, dayBefore, snapshot, 2).map(_.name) shouldBe List("large", "middle")
+  }
+
+  test("a window names people from the rollup, and falls back to the key without one") {
+    val repo = freshRepo()
+    repo.recordReadings(world, List(entry("Bubble", 1000L), entry("NoRollup", 1000L)), dayBefore)
+    repo.recordReadings(world, List(entry("Bubble", 1900L), entry("NoRollup", 1900L)), snapshot)
+    // Only one of them has ever been folded into a day, which is the state a
+    // character is in during the first hours of a save day.
+    repo.recordDaily(world, List(entry("Bubble", 1900L)), day)
+
+    val named = repo.gainsBetween(world, dayBefore, snapshot, 10).map(row => row.name -> row.displayName).toMap
+
+    named("bubble") shouldBe "Bubble"
+    named("norollup") shouldBe "norollup"
+    repo.gainsBetween(world, dayBefore, snapshot, 10)
+      .find(_.name == "bubble").map(_.vocation) shouldBe Some("Elite Knight")
+  }
+
+  /** The instants are matched on equality, which is the whole reason
+   *  `readingTimes` exists — a caller that invents its own "24 hours ago" gets
+   *  nothing rather than the nearest reading to it, and would otherwise report
+   *  an empty day as a quiet one.
+   */
+  test("an instant no snapshot was taken at matches nothing") {
+    val repo = freshRepo()
+    repo.recordReadings(world, List(entry("Bubble", 1000L)), dayBefore)
+    repo.recordReadings(world, List(entry("Bubble", 1900L)), snapshot)
+
+    repo.gainsBetween(world, dayBefore.plusSeconds(1), snapshot, 10) shouldBe empty
+    repo.gainsBetween(world, dayBefore, snapshot.minusSeconds(1), 10) shouldBe empty
   }
 }

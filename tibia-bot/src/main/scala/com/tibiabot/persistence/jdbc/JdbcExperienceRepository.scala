@@ -65,6 +65,100 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
       statement.close()
     }
 
+  def readingTimes(world: String, from: Instant, to: Instant): List[Instant] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      // DISTINCT over a thousand rows an hour rather than a table of instants
+      // kept beside this one. A second table would be one more thing the sweep
+      // has to keep true, where this cannot disagree with the readings because
+      // it is the readings.
+      val statement = conn.prepareStatement(
+        """SELECT DISTINCT observed
+          |FROM experience_reading
+          |WHERE world = ? AND observed >= ? AND observed <= ?
+          |ORDER BY observed;""".stripMargin)
+      statement.setString(1, world)
+      statement.setTimestamp(2, Timestamp.from(from))
+      statement.setTimestamp(3, Timestamp.from(to))
+      val result = statement.executeQuery()
+      val times = new ListBuffer[Instant]()
+      while (result.next()) times += result.getTimestamp("observed").toInstant
+      statement.close()
+      times.toList
+    }
+
+  def gainsBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] =
+    between(world, from, to, ">", "DESC", limit)
+
+  def lossesBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] =
+    between(world, from, to, "<", "ASC", limit)
+
+  /** Two readings of the same world joined on the character, which is every
+   *  figure the refreshed experience embed reports.
+   *
+   *  Both ends are an equality on `observed`, so each end is a primary key
+   *  lookup — `(world, name, observed)` leads with exactly what is bound here —
+   *  and every character is measured over the same span rather than over
+   *  whatever reading happened to sit nearest their own.
+   *
+   *  The display name and vocation come from the rollup, because a reading
+   *  carries neither: they are the same for every reading of a character and
+   *  storing them twenty-four times a day was half of what made this table
+   *  expensive. The lateral runs after the limit, so it costs ten lookups and
+   *  not one per mover on the world. Its `ORDER BY save_day DESC` takes the
+   *  most recent spelling rather than a named day's, which is what keeps a name
+   *  from going missing in the first hours of a save day, before any sweep has
+   *  written a rollup row for it.
+   *
+   *  `comparison` and `direction` are literals chosen here, never user input.
+   *  A character who stood still is excluded in the query for the same reason
+   *  [[movers]] excludes them: printed under a heading that says gained or
+   *  lost, a figure of nought is a plain untruth. */
+  private def between(world: String, from: Instant, to: Instant, comparison: String,
+                      direction: String, limit: Int): List[ExperienceDelta] =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement(
+        s"""WITH moved AS (
+           |  SELECT later.name,
+           |         later.char_level,
+           |         later.experience,
+           |         earlier.char_level AS previous_level,
+           |         later.experience - earlier.experience AS gained
+           |  FROM experience_reading later
+           |  JOIN experience_reading earlier
+           |    ON earlier.world = later.world
+           |   AND earlier.name = later.name
+           |   AND earlier.observed = ?
+           |  WHERE later.world = ? AND later.observed = ?
+           |    AND later.experience $comparison earlier.experience
+           |  ORDER BY gained $direction
+           |  LIMIT ?
+           |)
+           |SELECT moved.name,
+           |       COALESCE(named.display_name, moved.name) AS display_name,
+           |       COALESCE(named.vocation, '') AS vocation,
+           |       moved.char_level,
+           |       moved.experience,
+           |       moved.previous_level,
+           |       moved.gained
+           |FROM moved
+           |LEFT JOIN LATERAL (
+           |  SELECT display_name, vocation
+           |  FROM experience_daily
+           |  WHERE world = ? AND name = moved.name
+           |  ORDER BY save_day DESC
+           |  LIMIT 1
+           |) named ON true
+           |ORDER BY moved.gained $direction;""".stripMargin)
+      statement.setTimestamp(1, Timestamp.from(from))
+      statement.setString(2, world)
+      statement.setTimestamp(3, Timestamp.from(to))
+      statement.setInt(4, limit)
+      statement.setString(5, world)
+      val rows = readDeltas(statement)
+      statement.close()
+      rows
+    }
+
   def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] =
     movers(world, saveDay, ">", "DESC", limit)
 

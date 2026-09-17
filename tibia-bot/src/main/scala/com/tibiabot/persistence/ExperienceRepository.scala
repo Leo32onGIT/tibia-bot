@@ -40,6 +40,40 @@ trait ExperienceRepository {
    *  restart — where a single timed write would simply miss the day. */
   def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit
 
+  /** The instants this world has readings at, oldest first, within `from` to
+   *  `to` inclusive.
+   *
+   *  A world's readings land on a handful of instants rather than being spread
+   *  over the hour: one sweep stamps every character it read with the same
+   *  `snapshotAt`, so this comes back as roughly one instant per hour. That is
+   *  what lets a window be pinned to two exact instants and matched on equality
+   *  in [[gainsBetween]], instead of each character being measured over a
+   *  slightly different span.
+   *
+   *  Two callers, and the shape suits both: the refresh picks its window from
+   *  this list, and its cooldown is the last entry — "has anything landed since
+   *  the figures on the post". */
+  def readingTimes(world: String, from: Instant, to: Instant): List[Instant]
+
+  /** The largest experience gains between two readings, largest first.
+   *
+   *  `from` and `to` are snapshot instants [[readingTimes]] returned, not
+   *  arbitrary times: both ends are matched on equality, so anything else finds
+   *  nothing at all rather than the nearest reading. Choosing them is
+   *  [[com.tibiabot.statistics.ExperienceWindow]]'s job, which is where the
+   *  question of what counts as "a day ago" is decided and tested.
+   *
+   *  Same exclusion as [[dailyGains]], for the same reason and by the same
+   *  means: the join drops anybody missing from either end, since entering the
+   *  world's top thousand is not experience gained. Only real gains come back,
+   *  enforced in the query rather than left to the caller. */
+  def gainsBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta]
+
+  /** The largest experience losses between the same two readings, worst first.
+   *  Same join and same exclusions as [[gainsBetween]], read from the other
+   *  end. */
+  def lossesBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta]
+
   /** The day's biggest experience gains on one world, largest first.
    *
    *  A day's gain is the difference between the rollup for `saveDay` and the one
