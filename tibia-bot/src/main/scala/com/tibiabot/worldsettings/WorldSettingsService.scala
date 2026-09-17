@@ -19,10 +19,9 @@ import com.tibiabot.presentation.Names
 
 /**
  * Per-world setting slash commands: auto-hunt detection, deaths/levels
- * visibility, exiva-on-death, minimum level, fullbless level and online-list
- * layout. Extracted from BotApp (detectHunted/deathsLevelsHideShow/exivaList/
- * minLevel/fullblessLevel + the generic updateWorldSetting[T] helper from a
- * prior de-duplication pass).
+ * visibility, minimum level, fullbless level and online-list layout. Extracted
+ * from BotApp (detectHunted/deathsLevelsHideShow/minLevel/fullblessLevel + the
+ * generic updateWorldSetting[T] helper from a prior de-duplication pass).
  *
  * onlineListConfig does its own channel/category mutation through the
  * injected ChannelService rather than the updateWorldSetting[T] helper.
@@ -49,9 +48,6 @@ final class WorldSettingsService(
 
   private def detectHuntedsToDatabase(guild: Guild, world: String, detectSetting: String): Unit =
     worldConfigRepository.updateWorldString(guild.getId, com.tibiabot.domain.WorldName.formal(world), "detect_hunteds", detectSetting)
-
-  private def exivaListToDatabase(guild: Guild, world: String, detectSetting: String): Unit =
-    worldConfigRepository.updateWorldString(guild.getId, com.tibiabot.domain.WorldName.formal(world), "exiva_list", detectSetting)
 
   private def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String): Unit = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
@@ -84,7 +80,7 @@ final class WorldSettingsService(
    *  yields None), alreadySetMessage if the value is unchanged, otherwise
    *  updates the in-memory cache, persists, posts an admin-log entry, and
    *  returns nowSetMessage. Used by the toggle-shaped world settings
-   *  (auto-hunt detection, deaths/levels visibility, exiva list, minimum
+   *  (auto-hunt detection, deaths/levels visibility, minimum
    *  level). */
   private def updateWorldSetting[T](
     guild: Guild,
@@ -190,24 +186,6 @@ final class WorldSettingsService(
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
       adminLogMessage = s"${Names.user(event.getUser.getName)} set the **$channelType** channel to **$setting $playerType** for the world **$worldFormal**.",
       adminLogThumbnail = s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/$thumbnailIcon.gif"
-    )
-  }
-
-  def exivaList(event: GenericInteractionCreateEvent, worldOption: String, settingOption: String): MessageEmbed = {
-    val settingType = if (settingOption == "show") "true" else "false"
-    val worldFormal = com.tibiabot.domain.WorldName.formal(worldOption).trim
-    val guild = event.getGuild
-    val commandUser = event.getUser.getId
-    updateWorldSetting[String](
-      guild, worldOption, settingType,
-      currentValue = w => Some(w.exivaList),
-      applyValue = (w, v) => w.copy(exivaList = v),
-      persist = v => exivaListToDatabase(guild, worldFormal, v),
-      alreadySetMessage = s"${Config.noEmoji} The **exiva list on deaths** is already set to **$settingOption** for the world **$worldFormal**.",
-      nowSetMessage = s":gear: **exiva list on deaths** is now set to **$settingOption** for the world **$worldFormal**.",
-      notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
-      adminLogMessage = s"${Names.user(event.getUser.getName)} set **exiva list on deaths** to **$settingOption** for the world **$worldFormal**.",
-      adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Find_Person.gif"
     )
   }
 

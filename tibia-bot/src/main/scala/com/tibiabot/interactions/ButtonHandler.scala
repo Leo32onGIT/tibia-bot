@@ -272,6 +272,28 @@ object ButtonHandler extends StrictLogging {
           )
         }
       }
+    } else if (button.startsWith("death_exiva_")) {
+      event.deferEdit().queue()
+      // Everything the block needs is in the post already — the killers are the
+      // only names a death description links to a character page — so the press
+      // reads them back out rather than relying on anything the bot still
+      // remembers about a death it may have posted weeks ago.
+      val embeds = event.getMessage.getEmbeds
+      if (!embeds.isEmpty) {
+        val original = embeds.get(0)
+        val description = Option(original.getDescription).getOrElse("")
+        val section = presentation.ExivaList.sectionFor(description)
+        if (section.isEmpty) {
+          // Two people pressed at once, or the post names nobody to chase. The
+          // button has nothing to add either way.
+          event.getHook.editOriginalComponents().queue()
+        } else {
+          val updated = new EmbedBuilder(original).setDescription(description + section).build()
+          // The block stays once written, so the button is done. It is the only
+          // component an ally death carries, hence clearing rather than filtering.
+          event.getHook.editOriginalEmbeds(updated).setComponents().queue()
+        }
+      }
     } else if (button.startsWith("death_screenshot_")) {
       val buttonParts = button.split("_")
       if (buttonParts.length >= 4) {

@@ -61,9 +61,6 @@ object PanelModals extends StrictLogging {
           case PanelIds.Fullbless =>
             number(event, PanelForms.LevelField).map(level => service.fullblessLevel(event, name, level)).toList
 
-          case PanelIds.Exiva =>
-            choice(event, PanelForms.OptionField).map(v => service.exivaList(event, name, v)).toList
-
           case PanelIds.Layout =>
             choice(event, PanelForms.OptionField).map(v => service.onlineListConfig(event, name, v)).toList
 

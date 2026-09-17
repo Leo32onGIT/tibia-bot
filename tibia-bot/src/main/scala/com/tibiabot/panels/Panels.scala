@@ -33,9 +33,9 @@ object Panels {
 
   // --- /settings -----------------------------------------------------------
 
-  /** Two of these come from config rather than being unicode picked here: the
-   *  server's own exiva and blessing icons, so a setting is labelled with the
-   *  same symbol the feature it configures already uses elsewhere.
+  /** One of these comes from config rather than being unicode picked here: the
+   *  server's own blessing icon, so a setting is labelled with the same symbol
+   *  the feature it configures already uses elsewhere.
    *
    *  A `def`, deliberately. As a `val` it read Config while this object was being
    *  initialised, which made merely touching Panels — from any test, for any
@@ -44,7 +44,6 @@ object Panels {
    *  actually being drawn instead. */
   private def settingsLabels: Map[String, (String, String)] = Map(
     PanelIds.Fullbless     -> ("Fullbless" -> Config.inqEmoji),
-    PanelIds.Exiva         -> ("Exiva Lists" -> Config.exivaEmoji),
     PanelIds.ChannelFilter -> ("Channel Filters" -> "📊"),
     PanelIds.Layout        -> ("Online Layout" -> "📈"),
     PanelIds.OnlineFilter  -> ("Online Filters" -> "📋"),

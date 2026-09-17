@@ -6,13 +6,13 @@ import com.tibiabot.panels.PanelIds.Panel
 import net.dv8tion.jda.api.components.label.Label
 import net.dv8tion.jda.api.modals.Modal
 
-/** The six forms behind `/settings`.
+/** The five forms behind `/settings`.
  *
- *  Each was a whole top-level command once — `/fullbless`, `/exiva`, `/online`,
- *  `/neutral` and `/filter` — and between them they cost nine rows of the command
- *  picker. `filter` is two forms rather than one because world plus five level
- *  floors is six components and Discord allows five; splitting it by what the
- *  floor applies to (a channel, or an online list) is the seam that reads.
+ *  Each was a whole top-level command once — `/fullbless`, `/online`, `/neutral`
+ *  and `/filter` — and between them they cost nine rows of the command picker.
+ *  `filter` is two forms rather than one because world plus five level floors is
+ *  six components and Discord allows five; splitting it by what the floor
+ *  applies to (a channel, or an online list) is the seam that reads.
  */
 object SettingsForms {
 
@@ -34,11 +34,6 @@ object SettingsForms {
         Some("Fullbless level", picker :+ number(LevelField, "Fullbless level",
           "Enemy fullblesses at or above this level poke the role.",
           only.map(_.fullblessLevel), "250"))
-
-      case PanelIds.Exiva =>
-        Some("Exiva lists", picker :+ choice(OptionField, "Exiva list on deaths",
-          "Whether a death post lists who can exiva the killer.",
-          ShowHide, only.map(w => showHideOf(w.exivaList))))
 
       case PanelIds.Layout =>
         Some("Online list layout", picker :+ choice(OptionField, "Online list",

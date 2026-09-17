@@ -26,6 +26,10 @@ case class Worlds(name: String,
   detectHunteds: String,
   levelsMin: Int,
   deathsMin: Int,
+  /** Retired. The exiva list was a per-world show/hide setting; it is now a
+   *  button on every ally death, so nothing reads this. Still carried because
+   *  `exiva_list` is NOT NULL on every worlds table already out there, and a
+   *  row has to keep writing a value for it. */
   exivaList: String,
   activityChannel: String,
   onlineCombined: String,

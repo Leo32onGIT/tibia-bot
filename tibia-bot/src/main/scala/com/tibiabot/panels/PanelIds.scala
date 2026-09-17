@@ -62,7 +62,6 @@ object PanelIds {
   // --- settings actions ----------------------------------------------------
 
   val Fullbless = "fullbless"
-  val Exiva = "exiva"
   val Layout = "layout"
   val Neutral = "neutral"
   val ChannelFilter = "chanfilter"
@@ -72,18 +71,20 @@ object PanelIds {
    *  form, and last on the panel. */
   val CommandLog = "cmdlog"
 
-  /** Every button on `/settings`, in the order they are drawn: the two that set a
-   *  level or a toggle for the whole world, then what the channels and the online
-   *  list show, then neutrals — the one that is about players nobody here tracks,
-   *  and so the least often wanted — and the command log after them, which is set
+  /** Every button on `/settings`, in the order they are drawn: the one that sets
+   *  a level for the whole world, then what the channels and the online list
+   *  show, then neutrals — the one that is about players nobody here tracks, and
+   *  so the least often wanted — and the command log after them, which is set
    *  once for the server and then forgotten about.
    *
-   *  Seven, so they no longer fit one row; Panels.rows splits them 5 and 2. The
+   *  Six, so they no longer fit one row; Panels.rows splits them 5 and 1. The
    *  daily statistics post is not among them: its channel is part of a world
    *  like the deaths and levels channels are, made by `/setup` and rebuilt by
-   *  `/repair`, so there is nothing here to turn on. */
+   *  `/repair`, so there is nothing here to turn on. Nor is the exiva list,
+   *  which is no longer a setting at all — an ally death carries a button that
+   *  writes it into the post — see presentation.ExivaList. */
   val settingsActions: List[String] =
-    List(Fullbless, Exiva, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
+    List(Fullbless, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
 
   // --- hunted/allies actions ----------------------------------------------
 

@@ -12,6 +12,7 @@ import com.tibiabot.tibiadata.response.{CharacterResponse, Deaths, OnlinePlayers
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.Guild
+import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel
 import net.dv8tion.jda.api.exceptions.{ErrorHandler, ErrorResponseException}
 import net.dv8tion.jda.api.requests.ErrorResponse
@@ -1066,7 +1067,6 @@ class TibiaBot(
           val nemesisRole = worldData.headOption.map(_.nemesisRole).getOrElse("0")
           val fullblessRole = worldData.headOption.map(_.fullblessRole).getOrElse("0")
           val allyHelpRole = worldData.headOption.map(_.allyPkRole).getOrElse("0")
-          val exivaListCheck = worldData.headOption.map(_.exivaList).getOrElse("true")
           val deathsTextChannel = guild.getTextChannelById(deathsChannel)
           if (deathsTextChannel != null) {
             if (deathsTextChannel.canTalk() || (!Config.prod)) {
@@ -1082,10 +1082,13 @@ class TibiaBot(
                 val exivaBuffer = ListBuffer[(String, Option[Int])]()
                 // Every player killer, for the frag tally. Its own buffer rather
                 // than a reuse of exivaBuffer, which only fills for an ally death
-                // and only when the world has exiva lists on — it would miss every
-                // hunted-player kill and every world with the setting off.
+                // — it would miss every hunted-player kill.
                 val fragBuffer = ListBuffer[String]()
-                var exivaList = ""
+                // How much room the exiva block will want once the button on this
+                // post is pressed. The block is not written now, but its space is
+                // held back from the killer list below, so that later edit fits a
+                // description the killers have already been fitted to.
+                var exivaReserve = 0
                 val killerList = charDeath.death.killers // get all killers
 
                 // guild rank and name
@@ -1174,9 +1177,7 @@ class TibiaBot(
                             killerBuffer += s"$vowel ${Config.summonEmoji} **$creature of [$summoner$summonerLevelText](${charUrl(summoner)})**"
                             fragBuffer += summoner
                             if (embedColor == 13773097) {
-                              if (exivaListCheck == "true") {
-                                exivaBuffer += ((summoner, summonerLevel))
-                              }
+                              exivaBuffer += ((summoner, summonerLevel))
                             }
                           case None => // a player (incl. names with " of " like "Knight of Flame") or an undetected summon
                             val killerLevel = getKillerLevel(k.name, killerLevelsAt)
@@ -1184,9 +1185,7 @@ class TibiaBot(
                             killerBuffer += s"**[${k.name}$levelText](${charUrl(k.name)})**"
                             fragBuffer += k.name
                             if (embedColor == 13773097) {
-                              if (exivaListCheck == "true") {
-                                exivaBuffer += ((k.name, killerLevel))
-                              }
+                              exivaBuffer += ((k.name, killerLevel))
                             }
                         }
                       }
@@ -1207,13 +1206,7 @@ class TibiaBot(
 
                 if (exivaBuffer.nonEmpty) {
                   // Not everyone in the kill: only the few worth chasing, hardest first.
-                  domain.Killers.exivaTargets(exivaBuffer.toSeq).zipWithIndex.foreach { case (exiva, i) =>
-                    if (i == 0) {
-                      exivaList += s"""\n${Config.exivaEmoji} `exiva "$exiva"`""" // add exiva emoji
-                    } else {
-                      exivaList += s"""\n${Config.indentEmoji} `exiva "$exiva"`""" // just use indent emoji for further player names
-                    }
-                  }
+                  exivaReserve = presentation.ExivaList.render(domain.Killers.exivaTargets(exivaBuffer.toSeq)).length
 
                   // see if detectHunted is toggled on or off
                   val detectHunteds = worldData.headOption.map(_.detectHunteds).getOrElse("on")
@@ -1314,15 +1307,16 @@ class TibiaBot(
 
                 // Fit the killer list to the room actually left for it, rather than
                 // letting it overrun and be cut below: it is one line, so the cut can
-                // only drop it whole. The exiva list is a handful of lines and takes
-                // its space first; the half-room floor below only bites if that list
-                // ever grows, and keeps the killers from being squeezed out if it does.
+                // only drop it whole. The exiva block is a handful of lines and takes
+                // its space first even though it is not written until somebody asks
+                // for it; the half-room floor below only bites if that block ever
+                // grows, and keeps the killers from being squeezed out if it does.
                 val room = limit - s"$header\nby .".length
                 // convert formatted killer list to one string ("a, b and c")
-                val killerText = domain.Killers.joinWithin(killerParts, room - math.min(exivaList.length, room / 2))
+                val killerText = domain.Killers.joinWithin(killerParts, room - math.min(exivaReserve, room / 2))
 
                 // this is the actual embed description
-                var embedText = s"$header\nby $killerText.$exivaList"
+                var embedText = s"$header\nby $killerText."
 
                 // if the length is over 4065 truncate it
                 if (embedText.length > limit) {
@@ -1385,6 +1379,14 @@ class TibiaBot(
                   )
                   val actionRow = ActionRow.of(screenshotButton)
 
+                  // An ally death names people worth chasing, but only somebody
+                  // about to chase them wants the list — so it is a press away
+                  // rather than four lines every death carries. Nothing but the
+                  // exiva icon on it: what it does is the icon.
+                  val exivaRow = ActionRow.of(
+                    Button.secondary(s"death_exiva_${embed._3}_${embed._7}", Emoji.fromFormatted(Config.exivaEmoji))
+                  )
+
                   // nemesis and enemy fullbless ignore the level filter
                   if (embed._2 == "nemesis") {
                     val shouldPing = guild.getRoleById(nemesisRole) != null && canPing(deathsTextChannel.getId)
@@ -1403,9 +1405,11 @@ class TibiaBot(
                       if (shouldPing) {
                         deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
                           .setEmbeds(embed._1.build())
+                          .setComponents(exivaRow)
                           .queue(noteDeathMessage)
                       } else {
                         deathsTextChannel.sendMessageEmbeds(embed._1.build())
+                          .setComponents(exivaRow)
                           .queue(noteDeathMessage)
                       }
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
