@@ -45,6 +45,11 @@ object StatisticsEmbeds {
 
   private val dayFormat = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH)
 
+  /** The date on the post is the morning it is published, not the save day it
+   *  reports — see [[DailyReport.postedDay]]. */
+  private def heading(report: DailyReport, titleIcon: String): String =
+    s"## $titleIcon [${report.postedDay.format(dayFormat)}](${Urls.topExperienceUrl(report.world)})"
+
   /** @param titleIcon the icon on the date heading — the animated newspaper,
    *                   which is why this embed carries no thumbnail: the same
    *                   picture twice, once of it moving and once of it still
@@ -64,7 +69,7 @@ object StatisticsEmbeds {
       freshness: Option[String] = None
   ): List[MessageEmbed] = {
     val sections = List(
-      Some(s"## $titleIcon [${report.saveDay.format(dayFormat)}](${Urls.topExperienceUrl(report.world)})"),
+      Some(heading(report, titleIcon)),
       Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
       Option.when(report.losses.nonEmpty)(
         section("Top Experience Lost", report.losses.map(gainLine(_, sideIcon, xpDown)))),
@@ -81,7 +86,7 @@ object StatisticsEmbeds {
    *
    *  It exists because the headings above it do not move. "Top Experience
    *  Gained" says the same thing whether the figures are the save day's or the
-   *  last day's, and the date at the top is the day the post was published for
+   *  last day's, and the date at the top is the morning the post went out
    *  either way — so this line is the only place a reader learns which of the
    *  two they are looking at, and it is written to be read in that order: the
    *  span first, then how fresh it is.

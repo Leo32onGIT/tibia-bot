@@ -75,8 +75,17 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("the date is an h2 and outranks its own sections") {
     val embed = build(report(gains = List(delta("Arieswar", 900))))
-    embed.getDescription should startWith(s"## $news [Thursday 10 September 2026](")
+    embed.getDescription should startWith(s"## $news [Friday 11 September 2026](")
     embed.getDescription should include("### Top Experience Gained")
+  }
+
+  test("the date is the morning the post goes out, not the save day it reports") {
+    // The save day closes at 10:00 the next morning and the post follows it, so
+    // a reader opening the channel sees today's date on today's paper. Everybody
+    // already knows the figures are yesterday's.
+    val embed = build(report(gains = List(delta("Arieswar", 900))))
+    embed.getDescription should include("Friday 11 September 2026")
+    embed.getDescription should not include "10 September 2026"
   }
 
   test("only the title carries an emoji; the section labels are bare") {

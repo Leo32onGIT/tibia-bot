@@ -84,4 +84,13 @@ class DailyStatisticsSpec extends AnyFunSuite with Matchers {
     DailyReport("Antica", day, List(delta("Bubble", 900)), Nil, None).nonEmpty shouldBe true
     DailyReport("Antica", day, Nil, List(delta("Bubble", -900)), None).nonEmpty shouldBe true
   }
+
+  test("a report is news on the morning after the day it reports") {
+    // The 10th's save day closes at 10:00 on the 11th and the post goes out in
+    // that window, so the heading says the 11th: today's paper, yesterday's
+    // figures, which is what every reader already assumes.
+    val now = berlin("2026-09-11T10:15:00+02:00")
+    val report = DailyReport("Antica", DailyStatistics.reportedDay(now), Nil, Nil, None)
+    report.postedDay shouldBe now.toLocalDate
+  }
 }

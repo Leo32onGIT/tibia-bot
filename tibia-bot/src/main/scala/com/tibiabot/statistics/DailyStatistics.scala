@@ -52,6 +52,21 @@ final case class DailyReport(
     averageLevel: Option[Double] = None
 ) {
 
+  /** The day this report is news on: the save day plus one, since a save day
+   *  only finishes at 10:00 the following morning and the post goes out in that
+   *  window.
+   *
+   *  It is what the heading shows. Every player already knows the figures are
+   *  yesterday's — that is what a daily paper is — so dating the post the day it
+   *  is read makes it today's news rather than a day-old file. The save day
+   *  stays the key everything is stored and queried under; this is only how the
+   *  same day is spoken about.
+   *
+   *  A post the bot missed and made a day late would be dated a day early by
+   *  this, which is the same way a late paper carries the date it was printed
+   *  for. */
+  def postedDay: LocalDate = saveDay.plusDays(1)
+
   /** Nothing to say. The ordinary cause is a cold start rather than a quiet day:
    *  a gain needs two consecutive rollups, so a world's very first reportable
    *  day is the second one it was swept. A world where genuinely nobody in the
