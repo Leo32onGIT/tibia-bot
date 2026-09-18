@@ -15,13 +15,20 @@
 	# keyed to requests arriving at its own edge IPs with the right Host header
 	# and TLS SNI — the bare leo32ongit.github.io hostname routes by URL path and
 	# serves nothing at "/". Hence an edge IP (185.199.108-111.153 are
-	# equivalent) with SNI set to whatever Host the visitor requested.
+	# equivalent), with the Host header naming the custom domain.
+	#
+	# SNI, though, must name github.io and not the visitor's host. GitHub renews
+	# its Let's Encrypt cert for violentbot.xyz over a challenge to its own edge,
+	# which this domain's DNS no longer reaches because it points here instead.
+	# That cert therefore expires without ever renewing, and its expiry 502s the
+	# whole landing page — as it did on 18 Sep 2026. The *.github.io cert is
+	# GitHub's own to renew, and Pages still keys the site off the Host header.
 	handle {
 		reverse_proxy 185.199.108.153:443 {
 			header_up Host {http.request.host}
 			transport http {
 				tls
-				tls_server_name {http.request.host}
+				tls_server_name leo32ongit.github.io
 			}
 		}
 	}
