@@ -131,6 +131,16 @@ object RespawnActions {
     case ReleaseOutcome.NothingHeld =>
       ActionResult(ok = false, "You are not holding or queued for that.")
 
+    // Neither is reachable from here: the dashboard leaves a spawn, where these
+    // two are answers to being asked about one claim by id — the shape only the
+    // Leave button on a DM uses. Spelled out because the match must be total,
+    // and worded as they would read if this ever did name a claim.
+    case ReleaseOutcome.HuntOver =>
+      ActionResult(ok = false, "That hunt has already ended.")
+
+    case ReleaseOutcome.NotYours =>
+      ActionResult(ok = false, "That hunt is not yours.")
+
     case ReleaseOutcome.NotConfigured =>
       ActionResult(ok = false, "The respawn system is not set up on this server.")
   }

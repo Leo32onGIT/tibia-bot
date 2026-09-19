@@ -48,5 +48,13 @@ class ReleaseLootSplitSpec extends AnyWordSpec with Matchers {
       RespawnButtons.lootSplitRowFor(ReleaseOutcome.NothingHeld) shouldBe empty
       RespawnButtons.lootSplitRowFor(ReleaseOutcome.NotConfigured) shouldBe empty
     }
+
+    "not offer it to a button pressed long after its hunt" in {
+      // The DM's Leave keeps working for as long as the DM exists, so these two
+      // are the ordinary answers to an old one rather than edge cases. A split
+      // form on them would be offering to divide a hunt that ended days ago.
+      RespawnButtons.lootSplitRowFor(ReleaseOutcome.HuntOver) shouldBe empty
+      RespawnButtons.lootSplitRowFor(ReleaseOutcome.NotYours) shouldBe empty
+    }
   }
 }

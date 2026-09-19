@@ -68,6 +68,20 @@ object ReleaseOutcome {
   final case class AlreadyHandingOver(spawnName: String) extends ReleaseOutcome
   case object NothingHeld extends ReleaseOutcome
   case object NotConfigured extends ReleaseOutcome
+
+  /** The named claim is over, or was never a live hunt.
+   *
+   *  Only [[RespawnService.leaveClaim]] answers this, and only because it is
+   *  asked about one claim by id: a Leave button sits in an inbox long after its
+   *  hunt ended, and "that hunt has already ended" is a different sentence from
+   *  `NothingHeld`'s "you aren't holding that respawn" — which would be a lie
+   *  about somebody who is on it right now under a later claim. */
+  case object HuntOver extends ReleaseOutcome
+
+  /** Somebody else's claim. Reachable only by forging a component id, and
+   *  answered rather than ignored for the same reason every other DM button
+   *  answers it. */
+  case object NotYours extends ReleaseOutcome
 }
 
 /** What booking a slot did. A clash is not always a refusal: a one-off over an
@@ -805,39 +819,75 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
         }
 
         target match {
-          case None => ReleaseOutcome.NothingHeld
-          case Some(claim) =>
-            val respawn = repository.findById(guildId, claim.respawnId)
-            if (claim.isQueued || claim.isOffered) {
-              repository.cancelClaim(guildId, claim.id,
-                if (claim.isOffered) RespawnClaim.Outcome.Declined else RespawnClaim.Outcome.LeftQueue)
-              // Only an *offered* claim leaving means a handover must move on.
-              // Giving up a queue place changes nothing about the spawn, so
-              // advancing here would hand the mid-hunt holder's spawn away.
-              if (claim.leavingAdvancesHandover)
-                respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = handingOverHolder(guildId, r.id)))
-              else
-                respawn.foreach(refreshThread(guild, _, config))
-              respawn.map(ReleaseOutcome.LeftQueue).getOrElse(ReleaseOutcome.NothingHeld)
-            } else if (claim.limboUntil.isDefined) {
-              // Already waiting on a handover. A second release must not refund
-              // again: `ends_at` is left untouched during limbo, so the cap below
-              // would hand back the same minutes twice.
-              ReleaseOutcome.AlreadyHandingOver(respawn.map(_.displayName).getOrElse("that respawn"))
-            } else {
-              val refunded = refundFor(claim, now)
-              if (refunded > 0) repository.refundStamina(guildId, userId, refunded, resetBoundary(now))
-              // NOT finished here: the next person gets their answer window, and
-              // the spawn stays this claimant's until then so a third party can't
-              // snipe it. beginHandover finishes the claim if nobody is waiting.
-              val offered = respawn.flatMap(
-                beginHandover(guild, _, config, now, outgoing = Some(claim), outgoingOutcome = outcome))
-              // Only the branch where a hunt actually ended. Leaving a queue is
-              // not the end of one, and the limbo branch above has already been
-              // through here once.
-              if (notifyHolder) respawn.foreach(notifyClaimEnded(guild, _, claim))
-              respawn.map(ReleaseOutcome.Released(_, refunded, offered)).getOrElse(ReleaseOutcome.NothingHeld)
-            }
+          case None        => ReleaseOutcome.NothingHeld
+          case Some(claim) => releaseClaim(guild, config, claim, now, outcome, notifyHolder)
+        }
+    }
+
+  /** End one claim, whichever way it was reached: by spawn from [[release]], or
+   *  by id from [[leaveClaim]].
+   *
+   *  Split out rather than left inside `release` because a Leave button in a DM
+   *  knows exactly which claim it belongs to and must not go looking for another
+   *  — see [[leaveClaim]]. Everything about *what ending a claim means* lives
+   *  here, so the two entry points cannot drift into refunding differently. */
+  private def releaseClaim(guild: Guild, config: RespawnSettings, claim: RespawnClaim,
+                           now: ZonedDateTime, outcome: String, notifyHolder: Boolean): ReleaseOutcome = {
+    val guildId = guild.getId
+    val respawn = repository.findById(guildId, claim.respawnId)
+    if (claim.isQueued || claim.isOffered) {
+      repository.cancelClaim(guildId, claim.id,
+        if (claim.isOffered) RespawnClaim.Outcome.Declined else RespawnClaim.Outcome.LeftQueue)
+      // Only an *offered* claim leaving means a handover must move on.
+      // Giving up a queue place changes nothing about the spawn, so
+      // advancing here would hand the mid-hunt holder's spawn away.
+      if (claim.leavingAdvancesHandover)
+        respawn.foreach(r => beginHandover(guild, r, config, now, outgoing = handingOverHolder(guildId, r.id)))
+      else
+        respawn.foreach(refreshThread(guild, _, config))
+      respawn.map(ReleaseOutcome.LeftQueue).getOrElse(ReleaseOutcome.NothingHeld)
+    } else if (claim.limboUntil.isDefined) {
+      // Already waiting on a handover. A second release must not refund
+      // again: `ends_at` is left untouched during limbo, so the cap below
+      // would hand back the same minutes twice.
+      ReleaseOutcome.AlreadyHandingOver(respawn.map(_.displayName).getOrElse("that respawn"))
+    } else {
+      val refunded = refundFor(claim, now)
+      if (refunded > 0) repository.refundStamina(guildId, claim.userId, refunded, resetBoundary(now))
+      // NOT finished here: the next person gets their answer window, and
+      // the spawn stays this claimant's until then so a third party can't
+      // snipe it. beginHandover finishes the claim if nobody is waiting.
+      val offered = respawn.flatMap(
+        beginHandover(guild, _, config, now, outgoing = Some(claim), outgoingOutcome = outcome))
+      // Only the branch where a hunt actually ended. Leaving a queue is
+      // not the end of one, and the limbo branch above has already been
+      // through here once.
+      if (notifyHolder) respawn.foreach(notifyClaimEnded(guild, _, claim))
+      respawn.map(ReleaseOutcome.Released(_, refunded, offered)).getOrElse(ReleaseOutcome.NothingHeld)
+    }
+  }
+
+  /** **Leave**, pressed on the DM about one particular hunt.
+   *
+   *  By claim id rather than by spawn, which is the whole difference from
+   *  [[release]]. The DM stays in an inbox forever: by the time it is pressed
+   *  the hunt may be hours over, and the presser may well be on the same spawn
+   *  again under a later claim. Resolving by spawn would end *that* hunt — a
+   *  button doing something real, to the right person, on the right spawn, and
+   *  still not what they meant.
+   *
+   *  So a claim that is not active any more is `HuntOver` and nothing happens.
+   *  A claim in limbo is left to `releaseClaim`, which knows that a handover
+   *  already under way is not a second release. */
+  def leaveClaim(guild: Guild, userId: String, claimId: Long,
+                 now: ZonedDateTime = ZonedDateTime.now()): ReleaseOutcome =
+    settings(guild.getId) match {
+      case None => ReleaseOutcome.NotConfigured
+      case Some(config) =>
+        RespawnService.leaveTarget(repository.findClaimById(guild.getId, claimId), userId) match {
+          case Left(refusal) => refusal
+          case Right(claim)  =>
+            releaseClaim(guild, config, claim, now, RespawnClaim.Outcome.Released, notifyHolder = false)
         }
     }
 
@@ -1738,10 +1788,14 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           repository.cancelClaim(guildId, slot.id, RespawnClaim.Outcome.Merged)
           if (extra > 0) {
             repository.extendClaim(guildId, current.id, bookedEnd, current.durationMinutes + extra)
+            // The booking is gone and the hunt it folded into is what runs now,
+            // so Leave here names `current` — the claim that is actually on the
+            // spawn — and not the slot that was just cancelled into it.
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your booking has started",
                 RespawnEmbeds.slotMerged(respawn, bookedEnd), imageFor(respawn),
-                RespawnEmbeds.FreeColor))
+                RespawnEmbeds.FreeColor),
+              Some(RespawnThreads.leaveHuntButtons(guildId, current.id)))
           }
         }
         refreshThread(guild, respawn, config)
@@ -1789,11 +1843,15 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
           case Some(started) if started.confirmed =>
             // Nothing left to ask: either autoclaim just settled it, or its owner
             // pressed Confirm on the reminder before it started.
+            //
+            // Nothing to ask, but something to offer: the hunt is running from
+            // this moment, so this DM is where its owner can end it early.
             refreshThread(guild, respawn, config)
             RespawnThreads.dm(guild, slot.userId,
               RespawnEmbeds.dmEmbed("Your hunt has started",
                 RespawnEmbeds.slotStarted(respawn, started), imageFor(respawn),
-                RespawnEmbeds.FreeColor))
+                RespawnEmbeds.FreeColor),
+              Some(RespawnThreads.leaveHuntButtons(guildId, started.id)))
           case Some(started) =>
             // Genuinely theirs from now — nobody else can take it — but only
             // until the deadline above, which the sweep enforces.
@@ -2579,6 +2637,25 @@ final class RespawnService(repository: RespawnRepository) extends StrictLogging 
 }
 
 object RespawnService {
+
+  /** Whether a Leave press on a DM still has a hunt to end.
+   *
+   *  Pure, and separate from [[RespawnService.leaveClaim]] that uses it, because
+   *  this is the whole of what makes a claim-scoped button safe and it is worth
+   *  pinning without a database: the press arrives from a message that is never
+   *  edited away, so "no such claim", "somebody else's" and "that one is long
+   *  over" are ordinary daily answers rather than edge cases.
+   *
+   *  A claim in limbo passes as a target. It is still active and still holding
+   *  the spawn; that a handover is already under way is [[releaseClaim]]'s
+   *  answer to give, and it gives a better one than this could. */
+  private[respawn] def leaveTarget(claim: Option[RespawnClaim], userId: String): Either[ReleaseOutcome, RespawnClaim] =
+    claim match {
+      case None                                  => Left(ReleaseOutcome.HuntOver)
+      case Some(found) if found.userId != userId => Left(ReleaseOutcome.NotYours)
+      case Some(found) if !found.isActive        => Left(ReleaseOutcome.HuntOver)
+      case Some(found)                           => Right(found)
+    }
 
   /** The first moment a hunt of `minutes` could have the spawn to itself.
    *

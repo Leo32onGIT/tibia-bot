@@ -105,6 +105,24 @@ object RespawnButtons extends StrictLogging {
             }
         }
 
+      // Leave, on the DM about one running hunt. Claim-scoped, so a press months
+      // later answers for *that* hunt instead of ending whatever its owner
+      // happens to be on now — see RespawnService.leaveClaim.
+      case Some(RespawnButtonId.LeaveClaimButton(guildId, claimId)) =>
+        Option(event.getJDA.getGuildById(guildId)) match {
+          case None =>
+            // Nothing is known about the claim, so the button stays: this is a
+            // fact about us rather than about the hunt, and a guild reachable
+            // again in a minute would leave a live hunt with no DM control at
+            // all. Every other answer below is final and takes the button away.
+            respond.text(s"${Config.noEmoji} That server is no longer reachable.")
+          case Some(leaveGuild) =>
+            val outcome = BotApp.respawnService.leaveClaim(leaveGuild, event.getUser.getId, claimId)
+            respondRelease(respond, outcome)
+            // Spent either way — it ended the hunt, or the hunt was already over.
+            clearOfferButtons(event)
+        }
+
       // The owner of a booked slot answering, from a DM — so the guild travels
       // in the id, as with every other DM button.
       case Some(RespawnButtonId.SlotAnswerButton(keep, guildId, claimId)) =>
@@ -149,9 +167,15 @@ object RespawnButtons extends StrictLogging {
                 respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is settled — nobody can " +
                   "ask you for it now, and it'll start on its own with nothing left to answer.")
                 clearOfferButtons(event)
-              case ConfirmOutcome.Taken(respawn, _) =>
+              case ConfirmOutcome.Taken(respawn, taken) =>
                 respond.text(s"${Config.yesEmoji} ${RespawnEmbeds.spawnLink(respawn)} is yours — enjoy the hunt.")
-                clearOfferButtons(event)
+                // The question this DM asked has been answered, and answering it
+                // is the moment the hunt became unambiguously theirs — so the
+                // button becomes the one thing left to do about it rather than
+                // disappearing. Reached from the started-hunt DM's Take Claim,
+                // and from a reminder's Confirm pressed late enough that the
+                // hunt was already running, which is the same situation.
+                swapButtons(event, RespawnThreads.leaveHuntButtons(guildId, taken.id))
               case ConfirmOutcome.Already(respawn) =>
                 respond.text(s"${Config.yesEmoji} You've already confirmed ${RespawnEmbeds.spawnLink(respawn)}.")
                 clearOfferButtons(event)
@@ -576,6 +600,13 @@ object RespawnButtons extends StrictLogging {
   private def clearOfferButtons(event: ButtonInteractionEvent): Unit =
     scala.util.Try(event.getMessage.editMessageComponents().queue(_ => (), _ => ()))
 
+  /** The same edit, leaving a different button behind rather than nothing.
+   *
+   *  One press, one button: a DM never carries two of these at once, so what a
+   *  press does to the message is always "replace the row" or "take it away". */
+  private def swapButtons(event: ButtonInteractionEvent, row: ActionRow): Unit =
+    scala.util.Try(event.getMessage.editMessageComponents(row).queue(_ => (), _ => ()))
+
   /** Rendering shared with the board's Claim modal, so pressing Claim on a
    *  spawn's post and typing its code on the board give the same answer.
    *
@@ -682,6 +713,13 @@ object RespawnButtons extends StrictLogging {
       s"${Config.noEmoji} **$spawnName** is already being handed over — waiting on the next person to answer."
     case ReleaseOutcome.NothingHeld =>
       s"${Config.noEmoji} You aren't holding or queued for that respawn."
+    case ReleaseOutcome.HuntOver =>
+      // Deliberately not "you aren't holding that respawn": this is a button on
+      // a DM from days ago, and its presser may well be on the same spawn right
+      // now under a claim this one knows nothing about.
+      s"${Config.noEmoji} That hunt has already ended."
+    case ReleaseOutcome.NotYours =>
+      s"${Config.noEmoji} That hunt isn't yours."
     case ReleaseOutcome.NotConfigured =>
       s"${Config.noEmoji} The respawn claim system isn't set up here."
   }

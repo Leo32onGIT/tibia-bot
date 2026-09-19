@@ -68,6 +68,20 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
     RespawnButtonId.opensModal(declineOffer) shouldBe false
     RespawnButtonId.opensModal(RespawnButtonId.keepSlot("1", 2L)) shouldBe false
     RespawnButtonId.opensModal(RespawnButtonId.passSlot("1", 2L)) shouldBe false
+    RespawnButtonId.opensModal(RespawnButtonId.dmLeaveClaim("1", 2L)) shouldBe false
+    RespawnButtonId.ackFor(RespawnButtonId.dmLeaveClaim("1", 2L)) shouldBe RespawnButtonId.Ack.Replies
+  }
+
+  test("a DM's Leave names the claim, where the retired one named the spawn") {
+    // Both ids exist and must stay apart: the old one ends whatever the presser
+    // holds on that spawn today, which is exactly what the claim-scoped one was
+    // added to stop. Sharing a prefix of the same length, they are one parser
+    // case away from each other.
+    RespawnButtonId.parse(RespawnButtonId.dmLeaveClaim("99", 415L)) shouldBe
+      Some(RespawnButtonId.LeaveClaimButton("99", 415L))
+    RespawnButtonId.parse(RespawnButtonId.dmLeave("99", 415L)) shouldBe
+      Some(RespawnButtonId.DmSpawnButton("leave", "99", 415L))
+    RespawnButtonId.dmLeaveClaim("99", 415L) should not be RespawnButtonId.dmLeave("99", 415L)
   }
 
   test("an unparseable id is deferred, so its out-of-date reply goes through the hook") {
@@ -129,7 +143,7 @@ class RespawnButtonAckSpec extends AnyFunSuite with Matchers {
       RespawnButtonId.boardClaim, RespawnButtonId.boardBook, RespawnButtonId.boardConfig,
       RespawnButtonId.claim(1L), RespawnButtonId.leave(1L), RespawnButtonId.next(1L),
       RespawnButtonId.release(1L), RespawnButtonId.spawnConfig(1L), RespawnButtonId.spawnSchedule(1L),
-      acceptOffer, RespawnButtonId.keepSlot("1", 2L))
+      acceptOffer, RespawnButtonId.keepSlot("1", 2L), RespawnButtonId.dmLeaveClaim("1", 2L))
     ids.foreach(id => withClue(s"$id: ")(RespawnButtonId.handles(id) shouldBe true))
   }
 }

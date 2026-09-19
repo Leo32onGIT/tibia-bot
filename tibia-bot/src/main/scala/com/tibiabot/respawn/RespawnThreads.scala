@@ -222,6 +222,19 @@ object RespawnThreads extends StrictLogging {
   def confirmSlotButtons(guildId: String, claimId: Long, label: String): ActionRow =
     ActionRow.of(Button.success(RespawnButtonId.confirmSlot(guildId, claimId), label).withEmoji(claimEmoji))
 
+  /** The one button on the DM about a hunt that is running: end it early.
+   *
+   *  Red and worded exactly as the spawn card's Leave is, because it is the same
+   *  act — the card is simply not where somebody is looking when they finish a
+   *  hunt at 2am, and the DM that told them it started is.
+   *
+   *  Only ever drawn against a live hunt. A booking that has not started has
+   *  nothing to leave, and a started booking nobody has taken the claim on is
+   *  answered by silence — that DM asks one question, and a second button
+   *  beside it would make the answer to it ambiguous. */
+  def leaveHuntButtons(guildId: String, claimId: Long): ActionRow =
+    ActionRow.of(Button.danger(RespawnButtonId.dmLeaveClaim(guildId, claimId), "Leave"))
+
   /** The Claim/Cancel pair on a handover offer DM. Cancel is styled as the
    *  destructive option because it drops them out of the queue entirely —
    *  exactly like leaving it. */
@@ -960,6 +973,15 @@ object RespawnButtonId {
    *  errors months later. */
   def dmLeave(guildId: String, respawnId: Long): String = s"${Prefix}dmleave:$guildId:$respawnId"
 
+  /** Leave, on the DM about one hunt — so it names that hunt, not its spawn.
+   *
+   *  The difference from [[dmLeave]] above is the whole point of it. These DMs
+   *  are never edited away and never expire, so the button outlives the hunt by
+   *  days; naming the spawn would make a press months later end whatever claim
+   *  the presser holds on it now. The claim id makes a stale press answerable
+   *  instead — see [[com.tibiabot.respawn.RespawnService.leaveClaim]]. */
+  def dmLeaveClaim(guildId: String, claimId: Long): String = s"${Prefix}dmleaveclaim:$guildId:$claimId"
+
   def accept(guildId: String, claimId: Long): String = s"${Prefix}accept:$guildId:$claimId"
   def decline(guildId: String, claimId: Long): String = s"${Prefix}decline:$guildId:$claimId"
 
@@ -988,6 +1010,9 @@ object RespawnButtonId {
   /** A booked slot's owner confirming they are there — from the reminder before
    *  it starts, or from the started-hunt DM after. */
   final case class ConfirmSlotButton(guildId: String, claimId: Long) extends Action
+  /** Leave, pressed on the DM about one running hunt. Names the claim rather
+   *  than the spawn — see [[dmLeaveClaim]]. */
+  final case class LeaveClaimButton(guildId: String, claimId: Long) extends Action
   /** A Claim/Cancel button on a handover offer DM. */
   final case class OfferButton(accept: Boolean, guildId: String, claimId: Long) extends Action
   /** A page of the claim log, for whatever it is scoped to. */
@@ -1045,6 +1070,8 @@ object RespawnButtonId {
       case Array("board", what) => Some(BoardButton(what))
       case Array("dmleave", guildId, respawnId) =>
         Try(respawnId.toLong).toOption.map(DmSpawnButton("leave", guildId, _))
+      case Array("dmleaveclaim", guildId, claimId) =>
+        Try(claimId.toLong).toOption.map(LeaveClaimButton(guildId, _))
       case Array("keepslot", guildId, claimId) =>
         Try(claimId.toLong).toOption.map(SlotAnswerButton(keep = true, guildId, _))
       case Array("passslot", guildId, claimId) =>
