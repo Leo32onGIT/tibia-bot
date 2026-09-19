@@ -3,6 +3,8 @@ package com.tibiabot.presentation
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
 
+import java.time.Instant
+
 /** Discord's two size limits, and how a post that outgrows them is split.
  *
  *  A description caps at 4,096 characters and everything on one message caps at
@@ -37,15 +39,29 @@ object EmbedPages {
    *  it when a section runs long. The colour goes on every page, since that is
    *  what says the pages belong together.
    *
+   *  `stamp` rides with the footer and renders after it, which is the online
+   *  list's convention — "Last updated • Today at 02:13" — and the reason a
+   *  time belongs here rather than in the text: Discord prints a footer
+   *  timestamp in the reader's own zone and format, where footer text is left
+   *  exactly as it was written and would have to pick a timezone for everybody.
+   *
    *  An empty body produces no embed at all rather than an empty one.
    */
-  def build(color: Int, body: String, footer: Option[String] = None): List[MessageEmbed] = {
+  def build(
+      color: Int,
+      body: String,
+      footer: Option[String] = None,
+      stamp: Option[Instant] = None
+  ): List[MessageEmbed] = {
     val pages = split(body)
     pages.zipWithIndex.map { case (page, index) =>
       val embed = new EmbedBuilder()
       embed.setColor(color)
       embed.setDescription(page)
-      if (index == pages.size - 1) footer.foreach(embed.setFooter)
+      if (index == pages.size - 1) {
+        footer.foreach(embed.setFooter)
+        stamp.foreach(embed.setTimestamp)
+      }
       embed.build()
     }
   }

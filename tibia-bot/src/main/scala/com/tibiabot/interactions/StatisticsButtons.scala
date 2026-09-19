@@ -21,6 +21,10 @@ import scala.jdk.CollectionConverters._
  *  channel stays a channel of posts. A control that silently does nothing is
  *  read as broken, and the reader presses it again — which is the behaviour the
  *  floor underneath exists to survive rather than to invite.
+ *
+ *  The floor itself is the one silent refusal, for the same reason turned
+ *  around: the press it catches is the second one inside a minute, which is not
+ *  a reader asking a question.
  */
 object StatisticsButtons extends StrictLogging {
 
@@ -46,7 +50,7 @@ object StatisticsButtons extends StrictLogging {
           reply(event, s"${Config.noEmoji} Refreshing the statistics post is switched off.")
         else BotApp.refreshStatisticsBoard(guildId, world) match {
           case Right(board) => rewrite(event, board)
-          case Left(refusal) => reply(event, explain(refusal))
+          case Left(refusal) => explain(refusal).foreach(reply(event, _))
         }
     }
   }
@@ -75,26 +79,32 @@ object StatisticsButtons extends StrictLogging {
       })
   }
 
-  /** What a refusal says.
+  /** What a refusal says, or None where it says nothing.
    *
    *  Each one names the wait behind it rather than saying no twice: a reader
    *  told "nothing newer" when the truth is "no readings yet" waits for the
-   *  wrong thing, and presses again to find out. */
-  private def explain(refusal: RefreshDecision): String = refusal match {
+   *  wrong thing, and presses again to find out.
+   *
+   *  The floor is the exception and is silent, like a rebuild. Nobody meets it
+   *  by reading — the data moves once an hour, so a second press inside a
+   *  minute is a finger resting on the button — and answering it would put a
+   *  message on the screen for the one press that was never a question. The
+   *  interaction is already acknowledged either way, so the button simply
+   *  settles and the post stays as it is. */
+  private def explain(refusal: RefreshDecision): Option[String] = refusal match {
     case RefreshDecision.NothingNewer(shown) =>
-      s"${Config.yesEmoji} These figures are already the latest reading, from <t:${shown.getEpochSecond}:R>. " +
-        "tibia.com rebuilds the highscores about once an hour."
-    case RefreshDecision.TooSoon(retryAt) =>
-      s"${Config.noEmoji} Just a moment — try again <t:${retryAt.getEpochSecond}:R>."
+      Some(s"${Config.yesEmoji} These figures are already the latest reading, from <t:${shown.getEpochSecond}:R>. " +
+        "tibia.com rebuilds the highscores about once an hour.")
+    case RefreshDecision.TooSoon(_) => None
     case RefreshDecision.NotEnoughReadings =>
-      s"${Config.noEmoji} There is not a full day of readings for this world yet. " +
-        "It takes 24 hours of hourly highscore readings before this can report a day."
+      Some(s"${Config.noEmoji} There is not a full day of readings for this world yet. " +
+        "It takes 24 hours of hourly highscore readings before this can report a day.")
     case RefreshDecision.Unavailable =>
-      s"${Config.noEmoji} The figures could not be read just now. Try again in a minute."
+      Some(s"${Config.noEmoji} The figures could not be read just now. Try again in a minute.")
     case RefreshDecision.Rebuild(_) =>
       // Not reachable: a rebuild is the answer rather than a refusal. Spelled
       // out rather than left to a MatchError if that ever stops being true.
-      s"${Config.noEmoji} An unknown error occurred, please try again."
+      Some(s"${Config.noEmoji} An unknown error occurred, please try again.")
   }
 
   /** A refusal, after the edit was deferred. The deferral is already spent, so

@@ -21,7 +21,14 @@ object RefreshDecision {
    *  the press did nothing. */
   final case class NothingNewer(shown: Instant) extends RefreshDecision
 
-  /** Pressed again inside the floor. */
+  /** Pressed again inside the floor.
+   *
+   *  The only refusal nobody is told about — see
+   *  [[com.tibiabot.interactions.StatisticsButtons]] — since the press it
+   *  catches is a finger on the button rather than a question. `retryAt` is
+   *  carried anyway: it is what the decision actually is, and a decision that
+   *  reports less than it knows because today's caller says nothing is a worse
+   *  thing to test against. */
   final case class TooSoon(retryAt: Instant) extends RefreshDecision
 
   /** No window can be measured yet — see [[ExperienceWindow.choose]] for the

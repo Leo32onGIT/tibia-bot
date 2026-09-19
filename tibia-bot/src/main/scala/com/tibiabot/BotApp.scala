@@ -1684,9 +1684,9 @@ object BotApp extends App with StrictLogging {
    *  the message already carries.
    *
    *  The heading keeps the published day and the section headings keep their
-   *  wording, which is why the figures' real span is stated in a line of its
-   *  own underneath them: nothing else in the embed says that the numbers under
-   *  "Top Experience Gained" are now a rolling day rather than that date's.
+   *  wording, which is why the figures' real span is stated in the embed's
+   *  footer: nothing else in it says that the numbers under "Top Experience
+   *  Gained" are now a rolling day rather than that date's.
    *
    *  The press is recorded whether or not it produced anything, since the floor
    *  exists to stop the pressing rather than to stop the answering. */
@@ -1720,7 +1720,7 @@ object BotApp extends App with StrictLogging {
       presentation.StatisticsEmbeds.build(
         report, Config.newsEmoji, statisticsSideIcon(guildId, sheets), presentation.SkillEmojis.icon,
         Config.levelUpEmoji, Config.levelDownEmoji,
-        freshness = Some(presentation.StatisticsEmbeds.freshnessLine(
+        freshness = Some(presentation.StatisticsEmbeds.Freshness(
           refreshed.window.hours, refreshed.window.to)))
     }
   }

@@ -66,7 +66,7 @@ object StatisticsEmbeds {
       skillIcon: HighscoreCategory => String,
       xpUp: String,
       xpDown: String,
-      freshness: Option[String] = None
+      freshness: Option[Freshness] = None
   ): List[MessageEmbed] = {
     val sections = List(
       Some(heading(report, titleIcon)),
@@ -74,32 +74,44 @@ object StatisticsEmbeds {
       Option.when(report.losses.nonEmpty)(
         section("Top Experience Lost", report.losses.map(gainLine(_, sideIcon, xpDown)))),
       report.advance.map(event =>
-        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon)))),
-      freshness.map(line => s"-# $line")
+        section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon))))
     ).flatten
 
-    EmbedPages.build(WorldColor, sections.mkString("\n"))
+    EmbedPages.build(WorldColor, sections.mkString("\n"),
+      footer = freshness.map(_.label), stamp = freshness.map(_.takenAt))
   }
 
-  /** The line under a refreshed board saying what it covers and when it was
-   *  taken.
+  /** What a refreshed board says at its foot: the span its figures cover, and
+   *  the reading they end at.
    *
    *  It exists because the headings above it do not move. "Top Experience
    *  Gained" says the same thing whether the figures are the save day's or the
    *  last day's, and the date at the top is the morning the post went out
-   *  either way — so this line is the only place a reader learns which of the
-   *  two they are looking at, and it is written to be read in that order: the
-   *  span first, then how fresh it is.
+   *  either way — so this is the only place a reader learns which of the two
+   *  they are looking at.
    *
    *  The span is the window's real length rather than the day it asked for. It
    *  is 24 nearly always, and the mornings it is not are exactly the mornings
    *  somebody would otherwise compare a 28-hour figure against yesterday's
    *  24-hour one and conclude the world had a big night.
    *
-   *  Discord's relative stamp rather than a clock time, since the reader's
-   *  timezone is not ours and the post is read for hours after it is built. */
-  def freshnessLine(hours: Long, takenAt: java.time.Instant): String =
-    s"Last $hours hours · updated <t:${takenAt.getEpochSecond}:R>"
+   *  In the embed's footer rather than in its description, which is where the
+   *  online lists already put "how current is this" — "Last updated • Today at
+   *  02:13" — and where a reader of this discord therefore looks for it. The
+   *  time rides as a real footer timestamp rather than as text, so Discord
+   *  prints it in the reader's own zone and format.
+   *
+   *  @param hours   the window's real length, rounded to whole hours
+   *  @param takenAt the reading the figures end at, which is what the stamp
+   *                 shows — not the moment the button was pressed. The two can
+   *                 be an hour apart, and only the reading is a fact about the
+   *                 figures underneath it. */
+  final case class Freshness(hours: Long, takenAt: java.time.Instant) {
+
+    /** The footer's own words. The stamp after them says when, so this does not
+     *  repeat it. */
+    def label: String = s"Last $hours hours"
+  }
 
   /** A refreshed board in place of the one a message already carries.
    *

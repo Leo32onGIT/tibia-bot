@@ -328,34 +328,61 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val taken = Instant.parse("2026-09-18T18:40:00Z")
 
-  test("the daily post carries no freshness line at all") {
+  test("the daily post carries no footer at all") {
     // The default, so a post nobody has pressed reads exactly as it always has.
-    build(report(gains = List(delta("Bubble", 900)))).getDescription should not include "-#"
+    val embed = build(report(gains = List(delta("Bubble", 900))))
+    embed.getFooter shouldBe null
+    embed.getTimestamp shouldBe null
   }
 
-  test("a refreshed board says what it covers and when it was taken") {
+  test("a refreshed board says what it covers in the footer, and stamps the reading") {
     val built = StatisticsEmbeds.build(
       report(gains = List(delta("Bubble", 900))), news, _ => "", _ => "<:mlvl:3>", up, down,
-      freshness = Some(StatisticsEmbeds.freshnessLine(24L, taken)))
+      freshness = Some(StatisticsEmbeds.Freshness(24L, taken)))
 
-    built.head.getDescription should include(s"-# Last 24 hours · updated <t:${taken.getEpochSecond}:R>")
+    built.head.getFooter.getText shouldBe "Last 24 hours"
+    built.head.getTimestamp.toInstant shouldBe taken
   }
 
-  test("the headings and the date are untouched by a refresh") {
+  test("the freshness is not in the description, where it was a subtext line") {
+    // It reads as the online lists' "Last updated" stamp now, which is where
+    // this discord already looks for how current something is.
+    val built = StatisticsEmbeds.build(
+      report(gains = List(delta("Bubble", 900))), news, _ => "", _ => "<:mlvl:3>", up, down,
+      freshness = Some(StatisticsEmbeds.Freshness(24L, taken)))
+
+    built.head.getDescription should not include "-#"
+    built.head.getDescription should not include "Last 24 hours"
+  }
+
+  test("the headings, the rows and the date are untouched by a refresh") {
     val r = report(gains = List(delta("Bubble", 900)), losses = List(delta("Waldorf", -400)),
       advance = Some(advance("magiclevel", 131)))
     val plain = StatisticsEmbeds.build(r, news, _ => "", _ => "<:mlvl:3>", up, down).head
     val refreshed = StatisticsEmbeds.build(r, news, _ => "", _ => "<:mlvl:3>", up, down,
-      freshness = Some(StatisticsEmbeds.freshnessLine(24L, taken))).head
+      freshness = Some(StatisticsEmbeds.Freshness(24L, taken))).head
 
-    // The only difference is the line at the foot: same date heading, same
-    // section headings, same rows, same skill advancement.
-    refreshed.getDescription.split("\n").dropRight(1).toList shouldBe
-      plain.getDescription.split("\n").toList
+    // The whole difference is the footer: same date heading, same section
+    // headings, same rows, same skill advancement, down to the character.
+    refreshed.getDescription shouldBe plain.getDescription
   }
 
   test("a window that is not a day says the length it really is") {
-    StatisticsEmbeds.freshnessLine(28L, taken) should startWith("Last 28 hours")
+    StatisticsEmbeds.Freshness(28L, taken).label shouldBe "Last 28 hours"
+  }
+
+  test("the stamp lands on the last page of a board that spilled") {
+    // Where a reader expects to find it, and once: a footer on every page would
+    // read as three separate boards.
+    val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
+    val built = StatisticsEmbeds.build(
+      report(gains = many), news, _ => "", _ => "<:mlvl:3>", up, down,
+      freshness = Some(StatisticsEmbeds.Freshness(24L, taken)))
+
+    built.size should be > 1
+    built.init.foreach(_.getFooter shouldBe null)
+    built.last.getFooter.getText shouldBe "Last 24 hours"
+    built.last.getTimestamp.toInstant shouldBe taken
   }
 
   test("a refresh replaces the board and leaves every other embed alone") {

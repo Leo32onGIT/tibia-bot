@@ -69,6 +69,18 @@ class EmbedPagesSpec extends AnyFunSuite with Matchers {
     built.head.getFooter.getText shouldBe "a note"
   }
 
+  test("the stamp travels with the footer, onto the last page only") {
+    val at = java.time.Instant.parse("2026-09-18T18:40:00Z")
+    val built = EmbedPages.build(1, lines(200), Some("a note"), Some(at))
+    built.size should be > 1
+    built.init.foreach(_.getTimestamp shouldBe null)
+    built.last.getTimestamp.toInstant shouldBe at
+  }
+
+  test("a page with no stamp asked for carries none") {
+    EmbedPages.build(1, lines(2), Some("a note")).head.getTimestamp shouldBe null
+  }
+
   // --- packing embeds into messages ----------------------------------------
 
   test("embeds that fit travel together, as one entry in the channel") {
