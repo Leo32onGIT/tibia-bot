@@ -906,7 +906,7 @@ object BotApp extends App with StrictLogging {
   )
 
   // Per-world setting commands (auto-hunt detection, deaths/levels visibility,
-  // exiva-on-death, minimum level, fullbless level, leaderboards)
+  // minimum level, fullbless level, leaderboards)
   val worldSettingsService = new worldsettings.WorldSettingsService(
     worldConfigRepository, discordConfigRepository, streamState, channelService, botUser
   )

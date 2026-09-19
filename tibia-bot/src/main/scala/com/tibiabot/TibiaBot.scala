@@ -1416,15 +1416,18 @@ class TibiaBot(
                     }
                   } else if (embed._2 == "fullbless") {
                     if (embed._5 >= minimumLevel) {
-                      // send adjusted embed for fullblesses
-                      val adjustedMessage = embed._4 + s"""\n${Config.exivaEmoji} `exiva "${embed._3}"`"""
-                      val adjustedEmbed = embed._1.setDescription(adjustedMessage)
+                      // No exiva line. This post used to append one for the
+                      // enemy who had just died, on the reasoning that an
+                      // unblessed enemy is worth chasing — but the exiva
+                      // belongs to one control now, the button an ally death
+                      // carries, rather than being a line here and a button
+                      // there. The name is in the title to copy either way.
                       if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
                         deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
-                          .setEmbeds(adjustedEmbed.build())
+                          .setEmbeds(embed._1.build())
                           .queue(noteDeathMessage)
                       } else {
-                        deathsTextChannel.sendMessageEmbeds(adjustedEmbed.build())
+                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
                           .queue(noteDeathMessage)
                       }
                       recordDeath(embed._3, embed._5, embed._8, embed._9)

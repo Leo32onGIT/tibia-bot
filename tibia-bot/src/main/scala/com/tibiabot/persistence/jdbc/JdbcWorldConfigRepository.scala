@@ -19,6 +19,10 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     val columnExists = columnExistsQuery.next()
     columnExistsQuery.close()
 
+    // Nothing reads exiva_list any more — the exiva list is a button on an ally
+    // death rather than a per-world setting — but the column is NOT NULL on
+    // every table that has it, and createWorld still has to insert something.
+    // So the migration stays until the column itself is dropped.
     if (!columnExists) {
       statement.execute("ALTER TABLE worlds ADD COLUMN exiva_list VARCHAR(255) DEFAULT 'false'")
     }
@@ -111,7 +115,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       if (!exists) statement.execute(s"ALTER TABLE worlds ADD COLUMN $column INT DEFAULT 0")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,exiva_list,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -139,7 +143,6 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val detectHunteds = Option(result.getString("detect_hunteds")).getOrElse("on")
       val levelsMin = Option(result.getInt("levels_min")).getOrElse(20)
       val deathsMin = Option(result.getInt("deaths_min")).getOrElse(20)
-      val exivaList = Option(result.getString("exiva_list")).getOrElse("false")
       val activityChannel = Option(result.getString("activity_channel")).getOrElse(null)
       val onlineCombined = Option(result.getString("online_combined")).getOrElse(null)
       val onlineAlliesMin = Option(result.getInt("online_allies_min")).getOrElse(0)
@@ -150,7 +153,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, exivaList, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted)
       }
     }
 
@@ -189,6 +192,8 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
     statement.setString(22, "on")
     statement.setInt(23, 8)
     statement.setInt(24, 8)
+    // exiva_list, which is no longer a setting: written because the column
+    // is NOT NULL, read by nothing.
     statement.setString(25, "false")
     statement.setString(26, activityChannel)
     statement.setString(27, "true")
@@ -259,7 +264,6 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       configMap += ("detect_hunteds" -> result.getString("detect_hunteds"))
       configMap += ("levels_min" -> result.getInt("levels_min").toString)
       configMap += ("deaths_min" -> result.getInt("deaths_min").toString)
-      configMap += ("exiva_list" -> result.getString("exiva_list"))
       configMap += ("activity_channel" -> result.getString("activity_channel"))
       // Defensive for the same reason bounty_role above is: this is a `SELECT *`,
       // and listWorlds is what adds the column, so a guild whose database has not
