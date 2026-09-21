@@ -12,7 +12,7 @@ import scala.collection.mutable.ListBuffer
  *  The table is created here on first use rather than in SchemaInitializer's
  *  guild block, so the several hundred guilds that ran `/setup` long before this
  *  existed get it without a migration pass of their own — the same approach
- *  `JdbcActivityRepository` and `JdbcGalthenRepository` take. */
+ *  `JdbcActivityRepository` and `JdbcCooldownRepository` take. */
 final class JdbcFragRepository(connectionProvider: ConnectionProvider) extends FragRepository {
 
   /** Guilds whose table this process has already seen to.

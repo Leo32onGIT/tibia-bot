@@ -26,7 +26,7 @@ object SlashRouting {
     "settings"  -> (PanelCommands.settings _),
     "hunted"    -> (PanelCommands.hunted _),
     "allies"    -> (PanelCommands.allies _),
-    "galthen"   -> (GalthenCommands.handle _),
+    "cooldowns" -> (CooldownCommands.handle _),
     "boosted"   -> (BoostedCommands.handle _),
     "patreon"   -> (PatreonCommands.handle _),
     "stamina"   -> (RespawnCommands.handle _),

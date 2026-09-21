@@ -44,7 +44,7 @@ object BotApp extends App with StrictLogging {
   type LevelsCache = domain.LevelsCache; val LevelsCache = domain.LevelsCache
   type SheetCache = domain.SheetCache; val SheetCache = domain.SheetCache
   type ListCache = domain.ListCache; val ListCache = domain.ListCache
-  type SatchelStamp = domain.SatchelStamp; val SatchelStamp = domain.SatchelStamp
+  type CooldownStamp = domain.CooldownStamp; val CooldownStamp = domain.CooldownStamp
   type BoostedStamp = domain.BoostedStamp; val BoostedStamp = domain.BoostedStamp
   type DeathScreenshot = domain.DeathScreenshot; val DeathScreenshot = domain.DeathScreenshot
   type CustomSort = domain.CustomSort; val CustomSort = domain.CustomSort
@@ -122,8 +122,8 @@ object BotApp extends App with StrictLogging {
   private val boostedRepository: persistence.BoostedRepository =
     new persistence.jdbc.JdbcBoostedRepository(connectionProvider)
   private lazy val wikiClient: wiki.WikiClient = new wiki.FandomWikiClient()
-  private val galthenRepository: persistence.GalthenRepository =
-    new persistence.jdbc.JdbcGalthenRepository(connectionProvider)
+  private val cooldownRepository: persistence.CooldownRepository =
+    new persistence.jdbc.JdbcCooldownRepository(connectionProvider)
   private val deathScreenshotRepository: persistence.DeathScreenshotRepository =
     new persistence.jdbc.JdbcDeathScreenshotRepository(connectionProvider)
   private val cacheRepository: persistence.CacheRepository =
@@ -202,8 +202,8 @@ object BotApp extends App with StrictLogging {
   // per-world stream lifecycle
   private val streamSupervisor = new app.StreamSupervisor
 
-  // Galthen's Satchel cooldown tracking
-  val galthenService = new galthen.GalthenService(galthenRepository, discordGateway, discordGateway.selfUserId)
+  // Galthen's Satchel and Jade Dragon Head cooldown tracking
+  val cooldownService = new cooldowns.CooldownService(cooldownRepository, discordGateway, discordGateway.selfUserId)
 
   /** The guild's "Violent Bot Moderator" role id, or "0" if it has none.
    *
@@ -961,7 +961,7 @@ object BotApp extends App with StrictLogging {
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,
-  // or just the minimal set (setup/remove/repair/galthen/boosted) until then.
+  // or just the minimal set (setup/remove/repair/cooldowns/boosted) until then.
   guilds.foreach{g =>
     // A guild that's never run /setup has no per-guild database yet at all
     // (only created lazily by /setup itself) — checkConfigDatabase must gate
@@ -1752,7 +1752,7 @@ object BotApp extends App with StrictLogging {
   // body makes blocking API calls at server save — can't pile up behind itself.
   actorSystem.scheduler.scheduleWithFixedDelay(60.seconds, 30.seconds)(() => {
     // Rotate the watching-status text and run the periodic cache cleanups
-    // (deaths/levels/hunted-list/galthen/online-list) once every 10 ticks
+    // (deaths/levels/hunted-list/cooldowns/online-list) once every 10 ticks
     // (~5 minutes at the 30s tick interval), not every tick.
     if (updateOnOdd >= 10) {
       try {
@@ -1773,7 +1773,7 @@ object BotApp extends App with StrictLogging {
       removeSheetsCache(ZonedDateTime.now())
       cleanHuntedList()
       reviewQuietListedPlayers()
-      galthenService.cleanExpired()
+      cooldownService.cleanExpired()
       updateOnOdd = 0
     } else {
       updateOnOdd += 1
@@ -2191,7 +2191,7 @@ object BotApp extends App with StrictLogging {
    *  exist yet, if /setup has never run there — see checkConfigDatabase)
    *  leaves once worldless for Config.InactiveGuild.worldlessDays, unless a
    *  command's been run there within Config.InactiveGuild.activityDays
-   *  (personal commands like /galthen or /boosted count — someone's still
+   *  (personal commands like /cooldowns or /boosted count — someone's still
    *  genuinely using the bot, just not for world tracking). The two support
    *  guilds are never auto-left. */
   private def pruneInactiveGuilds(): Unit = {

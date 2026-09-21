@@ -66,13 +66,10 @@ object CommandSchemas {
         new OptionData(OptionType.STRING, "world", "What world are you trying to recreate channels for?").setRequired(true),
       )
 
-  val galthenCommand: SlashCommandData = Commands.slash("galthen", "Use this to set a galthen satchel cooldown timer")
-    .addSubcommands(
-      new SubcommandData("satchel", "Use this to set a galthen satchel cooldown timer")
-      .addOptions(
-        new OptionData(OptionType.STRING, "character", "What character/tag is this for?")
-      )
-    )
+  /** No subcommand and no options: it answers with the cooldown panel, and the
+   *  panel's buttons pick the collectible and carry every action from there. */
+  val cooldownsCommand: SlashCommandData =
+    Commands.slash("cooldowns", "Track your Galthen Satchel and Dragon Head cooldowns")
 
   val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
 
@@ -113,9 +110,9 @@ object CommandSchemas {
 
   /** Visible immediately when the bot joins a guild, before any world's been
    *  set up — /setup itself, /help (how do I use this bot, including how to
-   *  run /setup in the first place), and galthen/boosted/patreon/lootsplit
+   *  run /setup in the first place), and cooldowns/boosted/patreon/lootsplit
    *  (personal, self-service commands unrelated to any specific world). */
-  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, galthenCommand, boostedCommand, patreonCommand, lootSplitCommand)
+  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, cooldownsCommand, boostedCommand, patreonCommand, lootSplitCommand)
 
   /** Only meaningful once at least one world is tracked in the guild — added
    *  on top of initialCommands once /setup first succeeds there. remove/

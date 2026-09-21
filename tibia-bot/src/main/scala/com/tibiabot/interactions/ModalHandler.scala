@@ -1,8 +1,8 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.{BotApp, Config, domain, presentation}
-import com.tibiabot.domain.SatchelStamp
-import net.dv8tion.jda.api.EmbedBuilder
+import com.tibiabot.cooldowns.CooldownIds
+import com.tibiabot.domain.CooldownKind
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -10,9 +10,8 @@ import net.dv8tion.jda.api.components.buttons.Button
 
 import scala.jdk.CollectionConverters._
 import java.time.ZonedDateTime
-import com.tibiabot.presentation.Names
 
-/** Handles modal submissions (boosted boss-name and galthen tag inputs).
+/** Handles modal submissions (boosted boss-name and cooldown tag inputs).
  *  Moved verbatim from BotListener.onModalInteraction. */
 object ModalHandler {
   def handle(event: ModalInteractionEvent): Unit = {
@@ -36,99 +35,32 @@ object ModalHandler {
            Button.danger("boosted remove", "Remove"),
            Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOffEmoji))
          )).queue()
-       } else if (id == "galthen add") {
-
-         val newEmbed = new EmbedBuilder()
-         val tagDisplay = element.getAsString.trim.toLowerCase
-         newEmbed.setColor(presentation.Embeds.BrandColor)
-         if (tagDisplay.toLowerCase == user.getName.toLowerCase) {
-           BotApp.galthenService.add(user.getId, ZonedDateTime.now(), "")
-         } else {
-           BotApp.galthenService.add(user.getId, ZonedDateTime.now(), tagDisplay)
-         }
-         var editedMessage = ""
-         var oneRecord = false
-         val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.galthenService.getStamps(event.getUser.getId)
-         satchelTimeOption match {
-           case Some(satchelTimeList) =>
-             val fullList = satchelTimeList.collect {
-               case satchel =>
-                 val when = domain.time.SatchelCooldown.expiresAtEpoch(satchel.when)
-                 val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
-                 s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
-             }
-             if (fullList.nonEmpty) {
-               newEmbed.setTitle("Existing Cooldowns:")
-               if (fullList.size == 1) {
-                 oneRecord = true
-                 editedMessage = fullList.mkString
-               } else {
-                 editedMessage = presentation.GalthenEmbeds.truncate(fullList)
-               }
-             }
-           case None =>
-
-         }
-         val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **added**."
-         newEmbed.setDescription(editedMessage + replyMessage)
-         if (oneRecord) {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
-               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
-               Button.danger("galthenRemoveAll", "Remove")
-             )).queue()
-         } else {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
-               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
-               Button.danger("galthenButtonRem", "Remove"),
-               Button.secondary("galthenRemoveAll", "Clear All")
-             )).queue()
-         }
-       } else if (id == "galthen rem") {
-         val newEmbed = new EmbedBuilder()
-         val tagDisplay = element.getAsString.trim.toLowerCase
-         newEmbed.setColor(presentation.Embeds.BrandColor)
-         if (tagDisplay.toLowerCase == user.getName.toLowerCase) {
-           BotApp.galthenService.del(user.getId, "")
-         } else {
-           BotApp.galthenService.del(user.getId, tagDisplay)
-         }
-         var editedMessage = ""
-         var oneRecord = false
-         val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.galthenService.getStamps(event.getUser.getId)
-         satchelTimeOption match {
-           case Some(satchelTimeList) =>
-             val fullList = satchelTimeList.collect {
-               case satchel =>
-                 val when = domain.time.SatchelCooldown.expiresAtEpoch(satchel.when)
-                 val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
-                 s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
-             }
-             if (fullList.nonEmpty) {
-               newEmbed.setTitle("Existing Cooldowns:")
-               if (fullList.size == 1) {
-                 oneRecord = true
-                 editedMessage = fullList.mkString
-               } else {
-                 editedMessage = presentation.GalthenEmbeds.truncate(fullList)
-               }
-             }
-           case None => ()
-         }
-         val replyMessage = s"\n\n${Config.yesEmoji} cooldown tracker for **`$tagDisplay`** has been **Disabled**."
-         newEmbed.setDescription(editedMessage + replyMessage)
-         if (oneRecord) {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
-               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
-               Button.danger("galthenRemoveAll", "Remove")
-             )).queue()
-         } else {
-           event.getHook().editOriginalEmbeds(newEmbed.build).setComponents(ActionRow.of(
-               Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
-               Button.danger("galthenButtonRem", "Remove"),
-               Button.secondary("galthenRemoveAll", "Clear All")
-             )).queue()
+       } else {
+         CooldownIds.parseField(id).foreach { case (kind, adding) =>
+           cooldown(event, kind, adding, element.getAsString.trim.toLowerCase)
          }
        }
      }
+  }
+
+  /** A cooldown form came back: stamp or clear the tag typed into it, then
+   *  rewrite the list it was opened from so the change is visible without a
+   *  second press.
+   *
+   *  Typing your own Discord name means the untagged stamp — the one the list
+   *  shows under your own name — rather than a tag that happens to match it. */
+  private def cooldown(event: ModalInteractionEvent, kind: CooldownKind, adding: Boolean, typed: String): Unit = {
+    val user = event.getUser
+    val tag = if (typed.equalsIgnoreCase(user.getName)) "" else typed
+
+    if (adding) BotApp.cooldownService.add(user.getId, kind, ZonedDateTime.now(), tag)
+    else BotApp.cooldownService.del(user.getId, kind, tag)
+
+    val tracked = BotApp.cooldownService.getStamps(user.getId, kind).getOrElse(Nil)
+    val verb = if (adding) "added" else "Disabled"
+    val note = s"${Config.yesEmoji} cooldown tracker for **`$typed`** has been **$verb**."
+
+    event.getHook.editOriginalEmbeds(presentation.CooldownEmbeds.list(kind, tracked, user.getName, note))
+      .setComponents(presentation.CooldownEmbeds.controls(kind, tracked.size)).queue()
   }
 }

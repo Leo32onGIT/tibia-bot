@@ -10,7 +10,7 @@ object GuildPruneRule {
    *  least `worldlessThresholdDays`, unless a command's been run there
    *  within `activityThresholdDays` — the wider activity window overrides
    *  the shorter worldless one, since someone using personal commands
-   *  (galthen/boosted) is still genuinely using the bot, just not for world
+   *  (cooldowns/boosted) is still genuinely using the bot, just not for world
    *  tracking. */
   def shouldLeave(
     worldlessSince: ZonedDateTime,

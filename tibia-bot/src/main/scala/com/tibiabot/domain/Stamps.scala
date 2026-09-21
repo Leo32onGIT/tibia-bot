@@ -2,7 +2,11 @@ package com.tibiabot.domain
 
 import java.time.ZonedDateTime
 
-case class SatchelStamp(user: String, when: ZonedDateTime, tag: String)
+/** One tracked cooldown: whose it is, which collectible, when it was collected
+ *  and the tag naming the character it was collected on (`""` for the user's
+ *  own untagged one). */
+case class CooldownStamp(user: String, kind: CooldownKind, when: ZonedDateTime, tag: String)
+
 /** One boosted notification subscription.
  *
  *  `botId` is which bot identity delivers this user's DM — the one that last

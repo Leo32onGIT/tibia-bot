@@ -1,9 +1,10 @@
 package com.tibiabot.interactions
 
 import com.tibiabot.{BotApp, Config, presentation}
-import com.tibiabot.domain.{PendingScreenshot, SatchelStamp}
+import com.tibiabot.cooldowns.CooldownIds
+import com.tibiabot.domain.{CooldownKind, PendingScreenshot}
+import com.tibiabot.presentation.CooldownEmbeds
 import com.tibiabot.state.StreamState
-import com.tibiabot.domain.time.SatchelCooldown
 import com.typesafe.scalalogging.StrictLogging
 
 import java.time.ZonedDateTime
@@ -21,7 +22,7 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import com.tibiabot.presentation.Names
 
-/** Handles all button-click interactions (galthen, boosted, screenshot nav,
+/** Handles all button-click interactions (cooldowns, boosted, screenshot nav,
  *  role toggles). Moved verbatim from BotListener.onButtonInteraction; the
  *  shared pendingScreenshots map is passed in. */
 object ButtonHandler extends StrictLogging {
@@ -36,67 +37,8 @@ object ButtonHandler extends StrictLogging {
     val footer = if (!embed.isEmpty) Option(embed.get(0).getFooter) else None
     val tagId = footer.map(_.getText.replace("Tag: ", "")).getOrElse("")
 
-    if (button == "galthenSet") {
-      event.deferEdit().queue();
-      val when = SatchelCooldown.expiresAtEpoch(ZonedDateTime.now())
-      BotApp.galthenService.add(user.getId, ZonedDateTime.now(), tagId)
-      val tagDisplay = if (tagId == "") Names.user(event.getUser.getName) else s"**`$tagId`**"
-      responseText = s"${Config.satchelEmoji} can be collected by $tagDisplay <t:$when:R>"
-      val newEmbed = new EmbedBuilder()
-      newEmbed.setDescription(responseText)
-      newEmbed.setColor(178877)
-      event.getHook().editOriginalEmbeds(newEmbed.build()).setComponents().queue();
-    } else if (button == "galthenRemove") {
-      event.deferEdit().queue()
-      BotApp.galthenService.del(user.getId, tagId)
-      val tagDisplay = if (tagId == "") Names.user(event.getUser.getName) else s"**`$tagId`**"
-      responseText = s"${Config.satchelEmoji} cooldown tracker for $tagDisplay has been **Disabled**."
-      event.getHook().editOriginalComponents().queue();
-      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
-      event.getHook().editOriginalEmbeds(newEmbed).queue();
-    } else if (button == "galthenRemoveAll") {
-      event.deferEdit().queue()
-      BotApp.galthenService.delAll(user.getId)
-      responseText = s"${Config.satchelEmoji} cooldown tracker has been **Disabled**."
-      event.getHook().editOriginalComponents().queue();
-      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).build()
-      event.getHook().editOriginalEmbeds(newEmbed).queue();
-    } else if (button == "galthenLock") {
-      event.deferEdit().queue()
-      event.getHook().editOriginalComponents(ActionRow.of(
-        Button.secondary("galthenUnLock", "🔓"),
-        Button.danger("galthenRemoveAll", "Clear All")
-      )).queue();
-    } else if (button == "galthenUnLock") {
-      event.deferEdit().queue()
-      event.getHook().editOriginalComponents(ActionRow.of(
-        Button.secondary("galthenLock", "🔒"),
-        Button.danger("galthenRemoveAll", "Clear All").asDisabled
-      )).queue();
-    } else if (button == "galthenRemind") {
-      event.deferEdit().queue()
-      val when = SatchelCooldown.expiresAtEpoch(ZonedDateTime.now())
-      BotApp.galthenService.add(user.getId, ZonedDateTime.now(), tagId)
-      val tagDisplay = if (tagId == "") Names.user(event.getUser.getName) else s"**`$tagId`**"
-      responseText = s"${Config.satchelEmoji} can be collected by $tagDisplay <t:$when:R>"
-      event.getHook().editOriginalComponents().queue();
-      val newEmbed = new EmbedBuilder().setDescription(responseText).setColor(178877).setFooter("You will be sent a message when the cooldown expires").build()
-      event.getHook().editOriginalEmbeds(newEmbed).queue()
-    } else if (button == "galthenClear") {
-      event.deferEdit().queue()
-      event.getHook().editOriginalComponents().queue()
-    } else if (button == "galthenAdd") {
-      val inputWindow = TextInput.create("galthen add", TextInputStyle.SHORT)
-        .setPlaceholder("Character Name or Tag to Add")
-        .build()
-      val modal = Modal.create("add galthen", "Add a Galthen Satchel cooldown").addComponents(Label.of("Tag/Name for this cooldown", inputWindow)).build()
-      event.replyModal(modal).queue()
-    } else if (button == "galthenButtonRem") {
-      val inputWindow = TextInput.create("galthen rem", TextInputStyle.SHORT)
-        .setPlaceholder("Character Name or Tag to Remove")
-        .build()
-      val modal = Modal.create("rem galthen", "Remove a Galthen Satchel cooldown").addComponents(Label.of("Tag/Name for the cooldown", inputWindow)).build()
-      event.replyModal(modal).queue()
+    if (CooldownIds.handles(button)) {
+      CooldownIds.parse(button).foreach { case (kind, action) => cooldown(event, kind, action, tagId) }
     } else if (button == "boosted add") {
       val inputWindow = TextInput.create("boosted add", TextInputStyle.SHORT)
         .setPlaceholder("Grand Master Oberon")
@@ -144,55 +86,6 @@ object ButtonHandler extends StrictLogging {
           Button.danger("boosted remove", "Remove").asDisabled,
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
         )).queue()
-      }
-    } else if (button == "galthen default") {
-      event.deferReply(true).queue()
-      val embed = new EmbedBuilder()
-
-      val satchelTimeOption: Option[List[SatchelStamp]] = BotApp.galthenService.getStamps(event.getUser.getId)
-      satchelTimeOption match {
-        case Some(satchelTimeList) if satchelTimeList.isEmpty =>
-          embed.setColor(presentation.Embeds.BrandColor)
-          embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you when the 30 day cooldown expires.")
-          event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
-            Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-          )).queue()
-        case Some(satchelTimeList) =>
-          val fullList = satchelTimeList.collect {
-            case satchel =>
-              val when = SatchelCooldown.expiresAtEpoch(satchel.when)
-              val displayTag = if (satchel.tag == "") Names.user(event.getUser.getName) else s"**`${satchel.tag}`**"
-              s"${Config.satchelEmoji} can be collected by $displayTag <t:$when:R>"
-          }
-          if (fullList.nonEmpty) {
-            embed.setTitle("Existing Cooldowns:")
-            embed.setDescription(presentation.GalthenEmbeds.truncate(fullList))
-            embed.setColor(presentation.Embeds.BrandColor)
-            if (fullList.size == 1){
-              event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
-                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
-                Button.danger("galthenRemoveAll", "Remove")
-              )).queue()
-            } else {
-              event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
-                Button.success("galthenAdd", "Add Cooldown").withEmoji(Emoji.fromFormatted(Config.satchelEmoji)),
-                Button.danger("galthenButtonRem", "Remove"),
-                Button.secondary("galthenRemoveAll", "Clear All")
-              )).queue()
-            }
-          } else {
-            embed.setColor(presentation.Embeds.BrandColor)
-            embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you when the 30 day cooldown expires.")
-            event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
-              Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-            )).queue()
-          }
-        case None =>
-          embed.setColor(presentation.Embeds.BrandColor)
-          embed.setDescription(s"Mark the ${Config.satchelEmoji} as **Collected** and I will message you when the 30 day cooldown expires.")
-          event.getHook.sendMessageEmbeds(embed.build()).addComponents(ActionRow.of(
-            Button.success("galthenSet", "Collected").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-          )).queue()
       }
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
@@ -549,5 +442,104 @@ object ButtonHandler extends StrictLogging {
         .build()
       event.getHook.sendMessageEmbeds(replyEmbed).queue()
     }
+  }
+
+  /** Every cooldown button, for either kind.
+   *
+   *  The tag, where one matters, comes from the `Tag:` footer of the embed the
+   *  press landed on — the only place it survives, since the expiry DM's row is
+   *  deleted by the same sweep that sent it. */
+  private def cooldown(
+    event: ButtonInteractionEvent,
+    kind: CooldownKind,
+    action: CooldownIds.Action,
+    tagId: String
+  ): Unit = {
+    import CooldownIds.{Action => A}
+    val user = event.getUser
+    val emoji = CooldownEmbeds.emoji(kind)
+    def tagDisplay: String = if (tagId.isEmpty) Names.user(user.getName) else s"**`$tagId`**"
+    def note(text: String) =
+      new EmbedBuilder().setDescription(text).setColor(presentation.Embeds.BrandColor)
+
+    action match {
+      case A.Set =>
+        event.deferEdit().queue()
+        val now = ZonedDateTime.now()
+        BotApp.cooldownService.add(user.getId, kind, now, tagId)
+        event.getHook.editOriginalEmbeds(
+          note(s"$emoji can be collected by $tagDisplay <t:${kind.expiresAtEpoch(now)}:R>").build()
+        ).setComponents().queue()
+
+      case A.Remind =>
+        event.deferEdit().queue()
+        val now = ZonedDateTime.now()
+        BotApp.cooldownService.add(user.getId, kind, now, tagId)
+        event.getHook.editOriginalComponents().queue()
+        event.getHook.editOriginalEmbeds(
+          note(s"$emoji can be collected by $tagDisplay <t:${kind.expiresAtEpoch(now)}:R>")
+            .setFooter("You will be sent a message when the cooldown expires").build()
+        ).queue()
+
+      case A.Remove =>
+        event.deferEdit().queue()
+        BotApp.cooldownService.del(user.getId, kind, tagId)
+        event.getHook.editOriginalComponents().queue()
+        event.getHook.editOriginalEmbeds(
+          note(s"$emoji cooldown tracker for $tagDisplay has been **Disabled**.").build()).queue()
+
+      case A.RemoveAll =>
+        event.deferEdit().queue()
+        BotApp.cooldownService.delAll(user.getId, kind)
+        event.getHook.editOriginalComponents().queue()
+        event.getHook.editOriginalEmbeds(
+          note(s"$emoji ${kind.label} cooldown tracker has been **Disabled**.").build()).queue()
+
+      case A.Lock =>
+        event.deferEdit().queue()
+        event.getHook.editOriginalComponents(ActionRow.of(
+          Button.secondary(CooldownIds.button(kind, A.Unlock), "🔓"),
+          Button.danger(CooldownIds.button(kind, A.RemoveAll), "Clear All")
+        )).queue()
+
+      case A.Unlock =>
+        event.deferEdit().queue()
+        event.getHook.editOriginalComponents(ActionRow.of(
+          Button.secondary(CooldownIds.button(kind, A.Lock), "🔒"),
+          Button.danger(CooldownIds.button(kind, A.RemoveAll), "Clear All").asDisabled
+        )).queue()
+
+      case A.Dismiss =>
+        event.deferEdit().queue()
+        event.getHook.editOriginalComponents().queue()
+
+      case A.AddForm    => event.replyModal(cooldownForm(kind, adding = true)).queue()
+      case A.RemoveForm => event.replyModal(cooldownForm(kind, adding = false)).queue()
+
+      case A.Panel =>
+        event.deferReply(true).queue()
+        event.getHook.sendMessageEmbeds(CooldownEmbeds.panel())
+          .addComponents(CooldownEmbeds.panelControls()).queue()
+
+      case A.Open =>
+        event.deferReply(true).queue()
+        val tracked = BotApp.cooldownService.getStamps(user.getId, kind).getOrElse(Nil)
+        if (tracked.isEmpty)
+          event.getHook.sendMessageEmbeds(CooldownEmbeds.empty(kind))
+            .addComponents(CooldownEmbeds.collectRow(kind)).queue()
+        else
+          event.getHook.sendMessageEmbeds(CooldownEmbeds.list(kind, tracked, user.getName))
+            .addComponents(CooldownEmbeds.controls(kind, tracked.size)).queue()
+    }
+  }
+
+  private def cooldownForm(kind: CooldownKind, adding: Boolean): Modal = {
+    val verb = if (adding) "Add" else "Remove"
+    val input = TextInput.create(CooldownIds.field(kind, adding), TextInputStyle.SHORT)
+      .setPlaceholder(s"Character Name or Tag to $verb")
+      .build()
+    Modal.create(CooldownIds.modal(kind, adding), s"$verb a ${kind.label} cooldown")
+      .addComponents(Label.of(s"Tag/Name for ${if (adding) "this" else "the"} cooldown", input))
+      .build()
   }
 }

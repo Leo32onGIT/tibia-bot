@@ -1,16 +1,16 @@
 package com.tibiabot.persistence.jdbc
 
-import com.tibiabot.domain.SatchelStamp
-import com.tibiabot.persistence.{ConnectionProvider, GalthenRepository}
+import com.tibiabot.domain.{CooldownKind, CooldownStamp}
+import com.tibiabot.persistence.{ConnectionProvider, CooldownRepository}
 
 import java.sql.Timestamp
 import java.time.{Instant, ZoneOffset, ZonedDateTime}
 import scala.collection.mutable.ListBuffer
 import scala.util.Try
 
-/** JDBC implementation of GalthenRepository, routed through
+/** JDBC implementation of CooldownRepository, routed through
  *  JdbcSupport.withConnection so the connection is always released. */
-final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extends GalthenRepository {
+final class JdbcCooldownRepository(connectionProvider: ConnectionProvider) extends CooldownRepository {
 
   private def ensureTable(statement: java.sql.Statement): Unit = {
     val tableExistsQuery =
@@ -25,7 +25,8 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
            |userid VARCHAR(255) NOT NULL,
            |time VARCHAR(255) NOT NULL,
            |tag VARCHAR(255),
-           |bot_id VARCHAR(255) NOT NULL DEFAULT ''
+           |bot_id VARCHAR(255) NOT NULL DEFAULT '',
+           |kind VARCHAR(32) NOT NULL DEFAULT '${CooldownKind.Satchel.id}'
            |);""".stripMargin
 
       statement.executeUpdate(createListTable)
@@ -43,6 +44,20 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
       statement.execute("ALTER TABLE satchel ADD COLUMN bot_id VARCHAR(255) NOT NULL DEFAULT ''")
     }
 
+    val kindQuery = statement.executeQuery(
+      "SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'satchel' AND COLUMN_NAME = 'kind'")
+    val kindExists = kindQuery.next()
+    kindQuery.close()
+
+    // Which collectible a row is for. Rows predating the column are satchels,
+    // because that was the only thing tracked then — and the default keeps an
+    // older bot sharing this table writing correct satchel rows rather than
+    // failing the insert on a column it doesn't know about.
+    if (!kindExists) {
+      statement.execute(
+        s"ALTER TABLE satchel ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT '${CooldownKind.Satchel.id}'")
+    }
+
     // Undeliverable expiry DMs, counted per user instead of per stamp: the row
     // a DM was sent for is deleted in the same sweep, so a count kept on it
     // would reset to zero every time and never reach the giving-up threshold.
@@ -56,57 +71,66 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
     statement.executeUpdate(createFailuresTable)
   }
 
-  private def readStamp(result: java.sql.ResultSet, userId: String): SatchelStamp = {
+  private def readStamp(result: java.sql.ResultSet, userId: String, kind: CooldownKind): CooldownStamp = {
     val updatedTimeTemporal =
       Try(Option(result.getTimestamp("time").toInstant).getOrElse(Instant.parse("2022-01-01T01:00:00Z")))
         .getOrElse(Instant.parse("2022-01-01T01:00:00Z"))
     val updatedTime = updatedTimeTemporal.atZone(ZoneOffset.UTC)
     val tag = Option(result.getString("tag")).getOrElse("")
 
-    SatchelStamp(userId, updatedTime, tag)
+    CooldownStamp(userId, kind, updatedTime, tag)
   }
 
-  def getStamps(userId: String): Option[List[SatchelStamp]] =
+  def getStamps(userId: String, kind: CooldownKind): Option[List[CooldownStamp]] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.createStatement()
-      ensureTable(statement)
+      val ensure = conn.createStatement(); ensureTable(ensure); ensure.close()
 
-      val result = statement.executeQuery(s"SELECT time,tag FROM satchel WHERE userid = '$userId';")
+      val statement = conn.prepareStatement("SELECT time,tag FROM satchel WHERE userid = ? AND kind = ?;")
+      statement.setString(1, userId)
+      statement.setString(2, kind.id)
+      val result = statement.executeQuery()
 
-      val satchelStampList: ListBuffer[SatchelStamp] = ListBuffer()
+      val stamps: ListBuffer[CooldownStamp] = ListBuffer()
 
       while (result.next()) {
-        satchelStampList += readStamp(result, userId)
+        stamps += readStamp(result, userId, kind)
       }
 
       statement.close()
-      Some(satchelStampList.toList)
+      Some(stamps.toList)
     }
 
-  def del(user: String, tag: String): Unit =
+  def del(user: String, kind: CooldownKind, tag: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND COALESCE(tag, '') = ?;")
+      val deleteStatement =
+        conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND COALESCE(tag, '') = ? AND kind = ?;")
       deleteStatement.setString(1, user)
       deleteStatement.setString(2, tag)
+      deleteStatement.setString(3, kind.id)
       deleteStatement.executeUpdate()
 
       deleteStatement.close()
     }
 
-  def delAll(user: String): Unit =
+  def delAll(user: String, kind: CooldownKind): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ?;")
+      val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND kind = ?;")
       deleteStatement.setString(1, user)
+      deleteStatement.setString(2, kind.id)
       deleteStatement.executeUpdate()
 
       deleteStatement.close()
     }
 
-  def add(user: String, when: ZonedDateTime, tag: String): Unit =
+  def add(user: String, kind: CooldownKind, when: ZonedDateTime, tag: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val selectStatement = conn.prepareStatement("SELECT time FROM satchel WHERE userid = ? AND tag = ?;")
+      val ensure = conn.createStatement(); ensureTable(ensure); ensure.close()
+
+      val selectStatement =
+        conn.prepareStatement("SELECT time FROM satchel WHERE userid = ? AND tag = ? AND kind = ?;")
       selectStatement.setString(1, user)
       selectStatement.setString(2, tag)
+      selectStatement.setString(3, kind.id)
       val resultSet = selectStatement.executeQuery()
 
       if (resultSet.next()) {
@@ -114,24 +138,26 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
           s"""
              |UPDATE satchel
              |SET time = ?
-             |WHERE userid = ? AND tag = ?;
+             |WHERE userid = ? AND tag = ? AND kind = ?;
              |""".stripMargin
         )
         updateStatement.setTimestamp(1, Timestamp.from(when.toInstant))
         updateStatement.setString(2, user)
         updateStatement.setString(3, tag)
+        updateStatement.setString(4, kind.id)
         updateStatement.executeUpdate()
         updateStatement.close()
       } else {
         val insertStatement = conn.prepareStatement(
           s"""
-             |INSERT INTO satchel(userid, time, tag)
-             |VALUES (?,?,?);
+             |INSERT INTO satchel(userid, time, tag, kind)
+             |VALUES (?,?,?,?);
              |""".stripMargin
         )
         insertStatement.setString(1, user)
         insertStatement.setTimestamp(2, Timestamp.from(when.toInstant))
         insertStatement.setString(3, tag)
+        insertStatement.setString(4, kind.id)
         insertStatement.executeUpdate()
         insertStatement.close()
       }
@@ -139,32 +165,35 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
       selectStatement.close()
     }
 
-  def expiredStamps(before: ZonedDateTime, botId: String): List[SatchelStamp] =
+  def expiredStamps(kind: CooldownKind, before: ZonedDateTime, botId: String): List[CooldownStamp] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val ensure = conn.createStatement(); ensureTable(ensure); ensure.close()
 
       val statement = conn.prepareStatement(
-        "SELECT userid,time,tag FROM satchel WHERE time < ? AND (bot_id = ? OR bot_id = '');")
-      statement.setTimestamp(1, Timestamp.from(before.toInstant))
-      statement.setString(2, botId)
+        "SELECT userid,time,tag FROM satchel WHERE kind = ? AND time < ? AND (bot_id = ? OR bot_id = '');")
+      statement.setString(1, kind.id)
+      statement.setTimestamp(2, Timestamp.from(before.toInstant))
+      statement.setString(3, botId)
       val result = statement.executeQuery()
 
-      val satchelStampList: ListBuffer[SatchelStamp] = ListBuffer()
+      val stamps: ListBuffer[CooldownStamp] = ListBuffer()
       while (result.next()) {
-        satchelStampList += readStamp(result, Option(result.getString("userid")).getOrElse(""))
+        stamps += readStamp(result, Option(result.getString("userid")).getOrElse(""), kind)
       }
 
       statement.close()
-      satchelStampList.toList
+      stamps.toList
     }
 
-  def deleteExpired(before: ZonedDateTime, botId: String): Unit =
+  def deleteExpired(kind: CooldownKind, before: ZonedDateTime, botId: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val ensure = conn.createStatement(); ensureTable(ensure); ensure.close()
 
-      val statement = conn.prepareStatement("DELETE FROM satchel WHERE time < ? AND (bot_id = ? OR bot_id = '');")
-      statement.setTimestamp(1, Timestamp.from(before.toInstant))
-      statement.setString(2, botId)
+      val statement = conn.prepareStatement(
+        "DELETE FROM satchel WHERE kind = ? AND time < ? AND (bot_id = ? OR bot_id = '');")
+      statement.setString(1, kind.id)
+      statement.setTimestamp(2, Timestamp.from(before.toInstant))
+      statement.setString(3, botId)
       statement.executeUpdate()
       statement.close()
     }
@@ -175,7 +204,7 @@ final class JdbcGalthenRepository(connectionProvider: ConnectionProvider) extend
 
       // Every stamp for the user, not just the unclaimed ones: ownership follows
       // whichever bot most recently reached them, so someone who moves between
-      // servers starts getting their satchel DMs from the bot that's actually there.
+      // servers starts getting their cooldown DMs from the bot that's actually there.
       val statement = conn.prepareStatement("UPDATE satchel SET bot_id = ? WHERE userid = ?")
       statement.setString(1, botId)
       statement.setString(2, userId)

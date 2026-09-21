@@ -104,7 +104,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
     s"${Config.noEmoji} The bot is still starting up, try running your command later."
 
   /** Feeds BotApp's daily inactive-guild prune sweep — any command counts, not
-   *  just world-related ones (someone using /galthen or /boosted is genuinely
+   *  just world-related ones (someone using /cooldowns or /boosted is genuinely
    *  using the bot). Must never block or break the actual command, so its own
    *  failure is swallowed here rather than left to either caller's catch. */
   private def recordCommandActivity(event: SlashCommandInteractionEvent): Unit =

@@ -25,7 +25,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.Try
-import com.tibiabot.presentation.{AdminLog, Names}
+import com.tibiabot.presentation.{AdminLog, CooldownEmbeds, Names}
 
 /** createChannels' result: an embed always, plus confirm/cancel buttons only
  *  when it's prompting to reassign a paused world's seat (see
@@ -291,17 +291,12 @@ final class ChannelService(
       channel.sendMessageEmbeds(embed.build()).queue()
     }
 
-  /** Post the Galthen's Satchel cooldown-tracker embed + button into a guild's
-   *  notifications channel (done on every /setup and /repair of that channel). */
-  private def postGalthenTracker(channel: TextChannel): Unit = {
-    val galthenEmbed = new EmbedBuilder()
-    galthenEmbed.setColor(BrandColor)
-    galthenEmbed.setDescription("This is a **[Galthen's Satchel](https://www.tibiawiki.com.br/wiki/Galthen's_Satchel)** cooldown tracker.\nManage your cooldowns here:")
-    galthenEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Galthen's_Satchel.gif")
-    channel.sendMessageEmbeds(galthenEmbed.build()).addComponents(ActionRow.of(
-      Button.primary("galthen default", "Cooldowns").withEmoji(Emoji.fromFormatted(Config.satchelEmoji))
-    )).queue()
-  }
+  /** Post the cooldown-tracker embed + one button per tracked collectible into a
+   *  guild's notifications channel (done on every /setup and /repair of that
+   *  channel). The same embed `/cooldowns` answers with, ephemerally. */
+  private def postCooldownTracker(channel: TextChannel): Unit =
+    channel.sendMessageEmbeds(CooldownEmbeds.panel())
+      .addComponents(CooldownEmbeds.panelControls()).queue()
 
   /** Build the boosted boss + creature + server-save embeds and post them to a
    *  guild's notifications channel with the server-save button, storing the
@@ -680,7 +675,7 @@ final class ChannelService(
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
-        postGalthenTracker(boostedChannel)
+        postCooldownTracker(boostedChannel)
 
         postBoostedNotifications(boostedChannel, guild, world)
       } else {
@@ -713,7 +708,7 @@ final class ChannelService(
           boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
-          postGalthenTracker(boostedChannel)
+          postCooldownTracker(boostedChannel)
 
           postBoostedNotifications(boostedChannel, guild, world)
         }
@@ -1200,7 +1195,7 @@ final class ChannelService(
             .deny(Permission.MESSAGE_SEND)
             .complete()
 
-          postGalthenTracker(boostedChannel)
+          postCooldownTracker(boostedChannel)
 
           // Boosted Boss + creature + server-save notifications (use the canonical
           // world name so the Dream Courts lookup resolves)
