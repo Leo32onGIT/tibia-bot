@@ -1,6 +1,7 @@
 package com.tibiabot.observer
 
 import com.tibiabot.Config
+import com.tibiabot.domain.MiniWorldChange
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
@@ -12,8 +13,9 @@ import java.time.Duration
 sealed trait LinkResult
 object LinkResult {
   /** Linked. `credential` is the durable ~90-day JWT bearer to store (renewable via
-   *  the sidecar's /renew before it lapses). */
-  final case class Linked(credential: String, accountLabel: Option[String]) extends LinkResult
+   *  the sidecar's /renew before it lapses); `worlds` are the account's
+   *  character-worlds, which the bot sets MWC rules for. */
+  final case class Linked(credential: String, accountLabel: Option[String], worlds: List[String]) extends LinkResult
   /** The token was wrong/expired/spent — the user must add a fresh one. */
   case object InvalidToken extends LinkResult
   /** The sidecar or upstream failed; not the user's fault. */
@@ -54,6 +56,9 @@ final class ObserverApiClient(
   private def bool(o: JsObject, key: String): Boolean =
     o.fields.get(key).collect { case JsBoolean(b) => b }.getOrElse(false)
 
+  private def strings(o: JsObject, key: String): List[String] =
+    o.fields.get(key).collect { case JsArray(xs) => xs.collect { case JsString(s) => s }.toList }.getOrElse(Nil)
+
   /** Exchange a 5-char access token (case-sensitive, single-use) for a durable link. */
   def link(accessToken: String): LinkResult =
     post("/link", JsObject(
@@ -67,7 +72,7 @@ final class ObserverApiClient(
         if (bool(o, "ok") && status == "success")
           str(o, "credential") match {
             case Some(credential) =>
-              LinkResult.Linked(credential, str(o, "accountLabel"))
+              LinkResult.Linked(credential, str(o, "accountLabel"), strings(o, "worlds"))
             case None =>
               // Linked upstream but the sidecar could not find the credential in the
               // response — a shape change to fix in the sidecar, not here.
@@ -75,5 +80,41 @@ final class ObserverApiClient(
           }
         else if (status == "invalidAccessToken") LinkResult.InvalidToken
         else LinkResult.Failed(if (status.nonEmpty) status else "unknown sidecar response")
+    }
+
+  /** Ensure enabled MWC rules exist for these worlds on the linked account. */
+  def ensureRules(credential: String, worlds: List[String]): Boolean =
+    worlds.nonEmpty && (post("/ensure-rules", JsObject(
+      "credential" -> JsString(credential),
+      "deviceIdentification" -> JsString(deviceIdentification),
+      "worlds" -> JsArray(worlds.map(JsString(_)).toVector)
+    )) match {
+      case Right(o) => bool(o, "ok")
+      case Left(_)  => false
+    })
+
+  /** Remove the bot's MWC rules from the account (on unlink). */
+  def clearRules(credential: String): Boolean =
+    post("/clear-rules", JsObject(
+      "credential" -> JsString(credential),
+      "deviceIdentification" -> JsString(deviceIdentification)
+    )) match {
+      case Right(o) => bool(o, "ok")
+      case Left(_)  => false
+    }
+
+  /** The currently-active mini world changes for this credential's enabled rules. */
+  def mwc(credential: String): List[MiniWorldChange] =
+    post("/mwc", JsObject("bearerToken" -> JsString(credential))) match {
+      case Left(_) => Nil
+      case Right(o) =>
+        o.fields.get("miniWorldChanges").collect { case JsArray(items) =>
+          items.collect { case item: JsObject =>
+            MiniWorldChange(
+              str(item, "world").getOrElse(""),
+              str(item, "title").getOrElse(""),
+              str(item, "body").getOrElse(""))
+          }.toList
+        }.getOrElse(Nil)
     }
 }

@@ -1998,9 +1998,14 @@ object BotApp extends App with StrictLogging {
                           }
                         }
                       )
+                      // A member with a linked Observer token gets a Mini World Changes
+                      // section too. Per-recipient, so it can't be hoisted; the fetch is
+                      // a no-op (empty) when Observer is off or they have no link.
+                      val recipientEmbeds =
+                        (embeds ++ presentation.ObserverEmbeds.mwcEmbed(observerService.activeMwcForUser(recipientId)).toList).asJava
                       user.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
                         val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
+                        privateChannel.sendMessage(messageText).setEmbeds(recipientEmbeds).setComponents(ActionRow.of(
                           Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                         )).queue(
                           (_: Message) => {

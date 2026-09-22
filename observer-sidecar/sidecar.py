@@ -115,6 +115,15 @@ def link():
     status = d.get("status")
     accounts = d.get("accounts") or []
     bearer = d.get("bearerToken")              # the JWT IS the durable credential (~90d)
+    worlds = []
+    if status == "success" and bearer:
+        # The account's distinct character-worlds — what the bot sets MWC rules for.
+        try:
+            cr_resp = _observer("GET", "/Account/characters", bearer=bearer)
+            if cr_resp.status_code == 200:
+                worlds = sorted({c.get("world") for c in cr_resp.json() if c.get("world")})
+        except Exception:  # noqa: BLE001 — worlds are best-effort; link still succeeds
+            worlds = []
     return jsonify({
         "ok": status == "success",
         "status": status,                      # success | invalidAccessToken | ...
@@ -122,6 +131,7 @@ def link():
         "expires": _jwt_exp(bearer) if bearer else None,
         "accountLabel": (accounts[0].get("accountTitle") if accounts else None),
         "accountCount": len(accounts),
+        "worlds": worlds,
         "raw": d,                              # full shape, so the bot can adapt if a field moves
     })
 

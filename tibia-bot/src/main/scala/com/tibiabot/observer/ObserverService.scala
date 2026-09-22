@@ -1,6 +1,6 @@
 package com.tibiabot.observer
 
-import com.tibiabot.domain.{ObserverStatus, ObserverToken}
+import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken}
 import com.tibiabot.persistence.ObserverRepository
 import com.typesafe.scalalogging.StrictLogging
 
@@ -65,14 +65,18 @@ final class ObserverService(
    *  stored (encrypted) — never the code, which is worthless afterwards. */
   def link(guildId: String, userId: String, token: String): LinkOutcome =
     if (!enabled) {
-      val stored = repository.upsert(guildId, userId, crypto.encrypt(token.trim), ObserverStatus.Pending, None)
+      val stored = repository.upsert(guildId, userId, crypto.encrypt(token.trim), ObserverStatus.Pending, None, None)
       tokens.put(keyOf(guildId, userId), stored)
       LinkOutcome.Ok(stored, verified = false)
     } else {
       apiClient.link(token.trim) match {
-        case LinkResult.Linked(credential, accountLabel) =>
-          val stored = repository.upsert(guildId, userId, crypto.encrypt(credential), ObserverStatus.Linked, accountLabel)
+        case LinkResult.Linked(credential, accountLabel, worlds) =>
+          val worldLabel = if (worlds.nonEmpty) Some(worlds.mkString(", ").take(250)) else None
+          val stored = repository.upsert(guildId, userId, crypto.encrypt(credential), ObserverStatus.Linked, accountLabel, worldLabel)
           tokens.put(keyOf(guildId, userId), stored)
+          // Best-effort: set MWC rules for the account's worlds so the feed populates.
+          if (worlds.nonEmpty) try apiClient.ensureRules(credential, worlds)
+            catch { case ex: Throwable => logger.warn(s"Observer ensureRules failed for '$userId'", ex) }
           LinkOutcome.Ok(stored, verified = true)
         case LinkResult.InvalidToken =>
           LinkOutcome.InvalidToken
@@ -82,10 +86,42 @@ final class ObserverService(
       }
     }
 
+  /** MWC for a user by Discord id alone, regardless of guild — the boosted DM is
+   *  per-user, and a token's MWC is account-scoped, so any of the user's linked
+   *  tokens answers the same. Empty when they have none linked. */
+  def activeMwcForUser(userId: String): List[MiniWorldChange] =
+    if (!enabled) Nil
+    else tokens.collectFirst {
+      case ((g, u), t) if u == userId && t.status == ObserverStatus.Linked => g
+    } match {
+      case Some(guildId) => activeMwc(guildId, userId)
+      case None          => Nil
+    }
+
+  /** The currently-active mini world changes for a linked member, via the sidecar.
+   *  Empty for an unlinked member, mode off, or any failure — never throws. */
+  def activeMwc(guildId: String, userId: String): List[MiniWorldChange] =
+    if (!enabled) Nil
+    else statusFor(guildId, userId) match {
+      case Some(t) if t.status == ObserverStatus.Linked =>
+        try repository.tokenEncFor(guildId, userId).map(crypto.decrypt).map(apiClient.mwc).getOrElse(Nil)
+        catch {
+          case ex: Throwable =>
+            logger.warn(s"Observer MWC fetch failed for '$userId' in guild '$guildId'", ex)
+            Nil
+        }
+      case _ => Nil
+    }
+
   /** Remove a member's link. Database first, cache after — a delete that fails
    *  leaves the link in place rather than desynchronising the two. Returns whether
    *  anything was actually removed. */
   def unlink(guildId: String, userId: String): Boolean = {
+    // Best-effort: drop the bot's MWC rules from the account before forgetting it.
+    if (enabled) statusFor(guildId, userId).filter(_.status == ObserverStatus.Linked).foreach { _ =>
+      try repository.tokenEncFor(guildId, userId).map(crypto.decrypt).foreach(apiClient.clearRules)
+      catch { case ex: Throwable => logger.warn(s"Observer clearRules failed for '$userId' in guild '$guildId'", ex) }
+    }
     val removed =
       try repository.delete(guildId, userId)
       catch {

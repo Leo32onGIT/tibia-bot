@@ -184,7 +184,14 @@ observer_tokens
   the user disconnects. `/link`, `/renew`, `/mwc` all validated with a live token.
   *Deferred to a small follow-up:* a periodic renewal job (store `expires`, renew
   before lapse) — not urgent at a 90-day lifetime.
-- **Phase 3 — MWC delivery:** attach the MWC section to the boosted DM.
+- **Phase 3 — MWC delivery: BUILT.** The Observer API is rule-driven, so on link the
+  bot sets enabled MWC rules (via the sidecar) for the account's character-worlds,
+  then reads the active feed (`{world,title,body}`). `ObserverService.activeMwcForUser`
+  fetches it; `ObserverEmbeds.mwcEmbed` renders the section; `BotApp` appends it,
+  per-recipient, to the boosted server-save DM. Unlink clears the bot's rules. Whole
+  data path (`/ensure-rules` → `/mwc` → render) validated live; bot compiles clean.
+  *Deferred:* a periodic credential-renewal job (unhurried at 90 days), and choosing
+  worlds by guild-tracked set rather than the account's own worlds if wanted.
 - **Phase 4 (later):** raids, if wanted.
 
 ## 10. Open decisions (for review)

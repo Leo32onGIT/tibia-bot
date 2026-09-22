@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.Config
-import com.tibiabot.domain.{ObserverStatus, ObserverToken}
+import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
@@ -46,6 +46,24 @@ object ObserverEmbeds {
     case ObserverStatus.Error =>
       s"${Config.noEmoji} Something went wrong with your link — try **Add** again."
   }
+
+  /** The Mini World Changes section appended to the boosted server-save DM, for a
+   *  member with a linked Observer token. `None` when nothing is active, so the DM
+   *  is unchanged for a quiet day. */
+  def mwcEmbed(changes: List[MiniWorldChange]): Option[MessageEmbed] =
+    if (changes.isEmpty) None
+    else {
+      val body = changes
+        .take(12)
+        .map(c => s"### ${c.title} ${Config.indentEmoji}*${c.world}*\n${c.body}")
+        .mkString("\n\n")
+        .take(4000)
+      Some(new EmbedBuilder()
+        .setTitle("Mini World Changes")
+        .setColor(Embeds.BrandColor)
+        .setDescription(body)
+        .build())
+    }
 
   /** Add is offered when there is no token; Remove when there is one. The other is
    *  shown disabled so the panel always reads as a pair (as `/boosted` does). */

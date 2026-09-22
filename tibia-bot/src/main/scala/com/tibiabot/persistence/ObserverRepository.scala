@@ -18,7 +18,7 @@ trait ObserverRepository {
    *  it to the given status and clears the resolved world, since a new credential
    *  must be re-verified before it can claim one. */
   def upsert(guildId: String, userId: String, tokenEnc: String, status: ObserverStatus,
-             accountLabel: Option[String]): ObserverToken
+             accountLabel: Option[String], world: Option[String]): ObserverToken
 
   /** The stored encrypted token blob for a member, for the client to decrypt. */
   def tokenEncFor(guildId: String, userId: String): Option[String]

@@ -45,14 +45,14 @@ final class JdbcObserverRepository(connectionProvider: ConnectionProvider) exten
     }
 
   def upsert(guildId: String, userId: String, tokenEnc: String, status: ObserverStatus,
-             accountLabel: Option[String]): ObserverToken =
+             accountLabel: Option[String], world: Option[String]): ObserverToken =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(
         """INSERT INTO observer_tokens (guildid, userid, token_enc, status, account_label, world, updated_at)
-          |VALUES (?, ?, ?, ?, ?, NULL, NOW())
+          |VALUES (?, ?, ?, ?, ?, ?, NOW())
           |ON CONFLICT (guildid, userid)
           |DO UPDATE SET token_enc = EXCLUDED.token_enc, status = EXCLUDED.status,
-          |              account_label = EXCLUDED.account_label, world = NULL, updated_at = NOW()
+          |              account_label = EXCLUDED.account_label, world = EXCLUDED.world, updated_at = NOW()
           |RETURNING *;""".stripMargin)
       try {
         statement.setString(1, guildId)
@@ -60,6 +60,7 @@ final class JdbcObserverRepository(connectionProvider: ConnectionProvider) exten
         statement.setString(3, tokenEnc)
         statement.setString(4, status.code)
         statement.setString(5, accountLabel.orNull)
+        statement.setString(6, world.orNull)
         val result = statement.executeQuery()
         result.next()
         read(result)
