@@ -47,11 +47,12 @@ object ObserverModals extends StrictLogging {
         }
     }
 
-  /** The website tokens are short alphanumeric codes (e.g. `FNP68`). Kept a little
-   *  loose since the exact length isn't guaranteed; the API is the real check. */
+  /** The website tokens are short alphanumeric codes (e.g. `umzzk`) and are
+   *  CASE-SENSITIVE and single-use — so only trim, never change case. Kept a
+   *  little loose on length since it isn't guaranteed; the API is the real check. */
   private def normalise(raw: String): Option[String] = {
-    val t = raw.trim.toUpperCase
-    if (t.matches("^[A-Z0-9]{4,10}$")) Some(t) else None
+    val t = raw.trim
+    if (t.matches("^[A-Za-z0-9]{4,10}$")) Some(t) else None
   }
 
   private def reply(event: ModalInteractionEvent, message: String): Unit =

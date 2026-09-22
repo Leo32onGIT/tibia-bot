@@ -22,9 +22,17 @@ python observer_probe.py --token ABCDE   # full flow — WARNING: links the acco
 | MWC | `GET /MiniWorldChanges/GetMiniWorldChanges` → `401` without bearer (auth confirmed). |
 | Raids (later) | `GET /Raids`, `GET /Raids/RaidTypeInformation` — same bearer, drop-in for the raids phase. |
 
-**Not yet run:** the token-gated final rung (login → bearer → live MWC). It requires
-a fresh 5-char token from `tibia.com/account/?page=tibiaobserver` and **links the
-account to our device**, which can bump an official-app link (one-device model).
+**Token gotchas (confirmed live):** the 5-char token is **case-sensitive** (must be
+sent exactly as the website shows it — do NOT upper/lower-case it) and **single-use**
+(a successful `LoginWithAccessToken` consumes it; the JWT bearer it returns is what
+you keep). A successful login **links the account to our device**, which can bump an
+official-app link (one-device model).
+
+A correct-case token returns `{"status":"success","bearerToken":"<JWT>", ...}`; a
+wrong-case or spent one returns `{"status":"invalidAccessToken", ...}`.
+
+**Still to capture:** the `GetMiniWorldChanges` response body (needs one fresh
+correct-case token run through login → MWC in a single pass).
 
 ## Architecture consequence
 
