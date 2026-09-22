@@ -87,6 +87,20 @@ object ButtonHandler extends StrictLogging {
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
         )).queue()
       }
+    } else if (button == "observer add") {
+      val inputWindow = TextInput.create(ObserverModals.TokenField, TextInputStyle.SHORT)
+        .setPlaceholder("FNP68")
+        .setRequired(true)
+        .build()
+      val modal = Modal.create(ObserverModals.ModalId, "Link your Tibia Observer token")
+        .addComponents(Label.of("Token from tibia.com", inputWindow)).build()
+      event.replyModal(modal).queue()
+    } else if (button == "observer remove") {
+      event.deferEdit().queue()
+      Option(event.getGuild).foreach(guild => BotApp.observerService.unlink(guild.getId, event.getUser.getId))
+      val token = Option(event.getGuild).flatMap(guild => BotApp.observerService.statusFor(guild.getId, event.getUser.getId))
+      event.getHook.editOriginalEmbeds(presentation.ObserverEmbeds.panel(token))
+        .setComponents(presentation.ObserverEmbeds.controls(token)).queue()
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
         val world = title.replace(":crossed_swords:", "").trim()

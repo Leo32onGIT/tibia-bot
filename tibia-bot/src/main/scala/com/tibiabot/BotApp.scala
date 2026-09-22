@@ -176,6 +176,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcPatreonMemberRepository(connectionProvider)
   private val notifyRepository: persistence.NotifyRepository =
     new persistence.jdbc.JdbcNotifyRepository(connectionProvider)
+  private val observerRepository: persistence.ObserverRepository =
+    new persistence.jdbc.JdbcObserverRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -235,6 +237,14 @@ object BotApp extends App with StrictLogging {
   // autoroles. Its cache is filled after createCacheDatabase() below, which is
   // what creates the two tables — see notify.NotifyService for why it caches.
   val notifyService = new notifications.NotifyService(notifyRepository, discordGateway, outboundSender)
+
+  // Members' Tibia Observer links behind /observer. Cache filled after the cache
+  // database exists (below), like notifyService. Phase 1: stores encrypted tokens,
+  // no live linking (Config.Observer.enabled gates that).
+  val observerService = new observer.ObserverService(
+    observerRepository,
+    observer.TokenCrypto.fromSecret(Config.Observer.encryptionSecret),
+    Config.Observer.enabled)
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -900,6 +910,7 @@ object BotApp extends App with StrictLogging {
       // These live in the shared cache database, so dropping the guild's own
       // one leaves them behind.
       notifyService.forgetGuild(guildId)
+      observerService.forgetGuild(guildId)
     },
     forgetWorldSubscriptions = (guildId, world) => notifyService.forgetWorld(guildId, world),
     sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")
@@ -958,6 +969,7 @@ object BotApp extends App with StrictLogging {
   // Now that the tables exist. Before the world streams start below, so the
   // first online-list sweep already sees whatever is subscribed.
   notifyService.load()
+  observerService.load()
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,

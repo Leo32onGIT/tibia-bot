@@ -252,6 +252,22 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
         s"""CREATE UNIQUE INDEX IF NOT EXISTS unique_bounty_subscription
            |ON bounty_notifications (guildid, world, userid, LOWER(character_name));""".stripMargin
 
+      // A member's Tibia Observer link, one per (guild, user). The 5-char access
+      // token is stored encrypted in token_enc — never in plaintext. `world` is
+      // filled once the link is verified live; `status` tracks its health.
+      val createObserverTokensTable =
+        s"""CREATE TABLE IF NOT EXISTS observer_tokens (
+           |id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           |guildid VARCHAR(255) NOT NULL,
+           |userid VARCHAR(255) NOT NULL,
+           |token_enc TEXT NOT NULL,
+           |world VARCHAR(255),
+           |status VARCHAR(32) NOT NULL DEFAULT 'pending',
+           |created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+           |updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+           |CONSTRAINT unique_observer_token UNIQUE (guildid, userid)
+           |);""".stripMargin
+
       // What each character's standing in each highscore list was at the last
       // snapshot, so the next one can tell an advance from a character simply
       // entering a list only a thousand deep. World-scoped like deaths and
@@ -435,6 +451,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createMasslogNotificationsTable)
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
+      newStatement.executeUpdate(createObserverTokensTable)
 
       newStatement.executeUpdate(createHighscoreValueTable)
       newStatement.executeUpdate(createHighscoreEventsTable)

@@ -73,6 +73,11 @@ object CommandSchemas {
 
   val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
 
+  /** Personal, self-service like `/boosted`: answers with the member's own Tibia
+   *  Observer token panel (Add/Remove buttons), replied ephemerally. No options —
+   *  adding a token opens a form from the button. */
+  val observerCommand: SlashCommandData = Commands.slash("observer", "Link your Tibia Observer token for mini world change alerts")
+
   /** Opens the loot split form. No options: what it wants is a pasted analyser,
    *  which is a paragraph, and a command option is a single line.
    *
@@ -112,7 +117,7 @@ object CommandSchemas {
    *  set up — /setup itself, /help (how do I use this bot, including how to
    *  run /setup in the first place), and cooldowns/boosted/patreon/lootsplit
    *  (personal, self-service commands unrelated to any specific world). */
-  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, cooldownsCommand, boostedCommand, patreonCommand, lootSplitCommand)
+  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, cooldownsCommand, boostedCommand, patreonCommand, lootSplitCommand, observerCommand)
 
   /** Only meaningful once at least one world is tracked in the guild — added
    *  on top of initialCommands once /setup first succeeds there. remove/

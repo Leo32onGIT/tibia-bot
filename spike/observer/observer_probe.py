@@ -84,9 +84,13 @@ def main():
     if not session:
         print("Login failed — see body above.")
         sys.exit(1)
-    bearer = session.get("accessToken") or session.get("AccessToken")
+    # Shape: {status, bearerToken, userSettings, accounts, ...}
+    if session.get("status") and session.get("status") != "ok":
+        print(f"Login rejected: status={session.get('status')} (e.g. invalidAccessToken = bad/expired 5-char token)")
+        sys.exit(1)
+    bearer = session.get("bearerToken")
     if not bearer:
-        print("No bearer in login response; inspect the shape above.")
+        print("No bearerToken in login response; inspect the shape above.")
         sys.exit(1)
     mini_world_changes(bearer)
 
