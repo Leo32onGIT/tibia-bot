@@ -33,13 +33,16 @@ Keep it bound to loopback. The bot points at it via `observer-api.sidecar-url`
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
 | GET | `/health` | — | `{ ok, minimalClientVersion }` |
-| POST | `/link` | `{ accessToken, deviceIdentification, clientVersion? }` | `{ ok, status, bearerToken, refresh, expires, accountLabel, accountCount, raw }` |
-| POST | `/refresh` | `{ refresh, deviceIdentification, clientVersion? }` | `{ ok, bearerToken, refresh, expires, raw }` |
+| POST | `/link` | `{ accessToken, deviceIdentification, clientVersion? }` | `{ ok, status, credential, expires, accountLabel, accountCount, raw }` |
+| POST | `/renew` | `{ credential, deviceIdentification, clientVersion? }` | `{ ok, credential, expires, raw }` |
 | POST | `/mwc` | `{ bearerToken }` | `{ ok, status, miniWorldChanges }` *(Phase 3)* |
 
-Notes:
+The credential model (confirmed live):
 - The `accessToken` (5-char code) is **case-sensitive and single-use** — sent verbatim.
-- `/link`'s `refresh` is the durable credential the bot stores; `raw` is the full
-  upstream response so a shape change is fixed here, in one place.
-- `/refresh` presents the refresh token as the bearer to `Account/login`; the exact
-  mechanism is **to be confirmed** on the first live refresh (see the code comment).
+- `/link` returns a **`credential`** — a ~90-day JWT bearer that *is* the durable
+  credential (there is no separate refresh token). The bot stores this, encrypted.
+  `expires` is its `exp` (epoch seconds); `raw` is the full upstream response.
+- `/renew` presents the current credential to `Account/login` and gets a fresh
+  90-day JWT — so renewing before expiry keeps the link alive until the user
+  disconnects. Confirmed against a live credential.
+- `/mwc` takes the credential as `bearerToken`.

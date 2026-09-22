@@ -70,8 +70,8 @@ final class ObserverService(
       LinkOutcome.Ok(stored, verified = false)
     } else {
       apiClient.link(token.trim) match {
-        case LinkResult.Linked(refresh, _, _, accountLabel) =>
-          val stored = repository.upsert(guildId, userId, crypto.encrypt(refresh), ObserverStatus.Linked, accountLabel)
+        case LinkResult.Linked(credential, accountLabel) =>
+          val stored = repository.upsert(guildId, userId, crypto.encrypt(credential), ObserverStatus.Linked, accountLabel)
           tokens.put(keyOf(guildId, userId), stored)
           LinkOutcome.Ok(stored, verified = true)
         case LinkResult.InvalidToken =>

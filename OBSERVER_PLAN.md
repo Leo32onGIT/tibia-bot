@@ -174,12 +174,16 @@ observer_tokens
   **session** (JWT + refresh), which Phase 2 persists — not the spent code.
 - **Phase 1 — UX + storage, `mode=off`:** `/observer`, panel, add/remove buttons +
   modal, encrypted storage, lifecycle cleanup. No live calls yet (link is stubbed).
-- **Phase 2 — live linking: BUILT.** `observer-sidecar/` (Flask + `curl_cffi`) owns
-  the Cloudflare pass and Observer calls; `ObserverApiClient` (JVM `HttpClient`) calls
-  it; `ObserverService.link` exchanges the code for a durable **refresh** token when
-  `mode=on`, stores that (encrypted, not the spent code), sets `Linked` and shows the
-  account label. Compiles clean. *Remaining:* one live `/link` to confirm the sidecar
-  reads `refresh` from the success response, and the exact `/refresh` mechanism.
+- **Phase 2 — live linking: DONE, validated end to end.** `observer-sidecar/` (Flask
+  + `curl_cffi`) owns the Cloudflare pass and Observer calls; `ObserverApiClient` (JVM
+  `HttpClient`) calls it; `ObserverService.link` exchanges the single-use code for the
+  durable credential when `mode=on`, stores it encrypted, sets `Linked`, shows the
+  account label. **Credential model (confirmed live):** login returns a **~90-day JWT**
+  — that *is* the durable credential (no separate refresh token); `/renew` mints a
+  fresh 90-day JWT from the current one via `Account/login`, so the link lasts until
+  the user disconnects. `/link`, `/renew`, `/mwc` all validated with a live token.
+  *Deferred to a small follow-up:* a periodic renewal job (store `expires`, renew
+  before lapse) — not urgent at a 90-day lifetime.
 - **Phase 3 — MWC delivery:** attach the MWC section to the boosted DM.
 - **Phase 4 (later):** raids, if wanted.
 

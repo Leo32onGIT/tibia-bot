@@ -24,6 +24,7 @@ Env:  OBSERVER_API_BASE_URL (default https://observer.tibia.com/api/v1)
                               it as the X-Sidecar-Token header)
       OBSERVER_SIDECAR_HOST / OBSERVER_SIDECAR_PORT (default 127.0.0.1 / 8787)
 """
+import base64
 import json
 import os
 
@@ -55,6 +56,17 @@ def _observer(method, path, bearer=None, body=None):
 
 def _authorised(req) -> bool:
     return not SHARED_TOKEN or req.headers.get("X-Sidecar-Token") == SHARED_TOKEN
+
+
+def _jwt_exp(token):
+    """The `exp` (epoch seconds) from a JWT bearer, or None. The bearer IS the
+    durable credential (≈90-day lifetime); this is when it needs renewing."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload)).get("exp")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _json_body():
@@ -102,47 +114,46 @@ def link():
         return jsonify({"ok": False, "error": str(exc)}), 502
     status = d.get("status")
     accounts = d.get("accounts") or []
+    bearer = d.get("bearerToken")              # the JWT IS the durable credential (~90d)
     return jsonify({
         "ok": status == "success",
         "status": status,                      # success | invalidAccessToken | ...
-        "bearerToken": d.get("bearerToken"),
-        "refresh": d.get("refresh"),           # durable credential -> bot stores this
-        "expires": d.get("expires"),
+        "credential": bearer,                  # what the bot stores (encrypted)
+        "expires": _jwt_exp(bearer) if bearer else None,
         "accountLabel": (accounts[0].get("accountTitle") if accounts else None),
         "accountCount": len(accounts),
         "raw": d,                              # full shape, so the bot can adapt if a field moves
     })
 
 
-@app.post("/refresh")
-def refresh():
-    """Mint a fresh access token from the durable credential.
+@app.post("/renew")
+def renew():
+    """Renew the credential before its ~90-day expiry.
 
-    Account/login is the app's re-login endpoint; it returns 401 to an
-    unauthenticated call, so it wants the credential presented in the header. This
-    sends the refresh token as the bearer — TO CONFIRM against a live refresh the
-    first time an access token actually expires; adjust here alone if it differs.
+    Confirmed live: `Account/login` with the current JWT in the Authorization header
+    (plus client/device in the body) returns a fresh 90-day JWT. So the durable
+    credential renews itself indefinitely as long as we call this before it lapses.
     """
     b = _json_body()
-    refresh_token = b.get("refresh")
+    credential = b.get("credential")
     device = b.get("deviceIdentification") or "Violent Bot"
     client_version = b.get("clientVersion") or CLIENT_VERSION
-    if not refresh_token:
-        return jsonify({"ok": False, "error": "refresh required"}), 400
+    if not credential:
+        return jsonify({"ok": False, "error": "credential required"}), 400
     try:
-        r = _observer("POST", "/Account/login", bearer=refresh_token, body={
+        r = _observer("POST", "/Account/login", bearer=credential, body={
             "ClientVersion": client_version,
             "DeviceIdentification": device,
         })
         d = r.json() if r.text else {}
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
+    new_bearer = d.get("bearerToken")
     return jsonify({
-        "ok": r.status_code == 200 and bool(d.get("bearerToken")),
+        "ok": r.status_code == 200 and bool(new_bearer),
         "status_code": r.status_code,
-        "bearerToken": d.get("bearerToken"),
-        "refresh": d.get("refresh", refresh_token),
-        "expires": d.get("expires"),
+        "credential": new_bearer,
+        "expires": _jwt_exp(new_bearer) if new_bearer else None,
         "raw": d,
     })
 

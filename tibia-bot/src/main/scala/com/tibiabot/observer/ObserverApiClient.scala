@@ -11,10 +11,9 @@ import java.time.Duration
 /** Outcome of exchanging a 5-char access token for a durable link. */
 sealed trait LinkResult
 object LinkResult {
-  /** Linked. `refresh` is the durable credential to store; `bearer`/`expires` are
-   *  the current access token (cached in memory, not persisted). */
-  final case class Linked(refresh: String, bearer: Option[String], expires: Option[String],
-                          accountLabel: Option[String]) extends LinkResult
+  /** Linked. `credential` is the durable ~90-day JWT bearer to store (renewable via
+   *  the sidecar's /renew before it lapses). */
+  final case class Linked(credential: String, accountLabel: Option[String]) extends LinkResult
   /** The token was wrong/expired/spent — the user must add a fresh one. */
   case object InvalidToken extends LinkResult
   /** The sidecar or upstream failed; not the user's fault. */
@@ -66,13 +65,13 @@ final class ObserverApiClient(
       case Right(o) =>
         val status = str(o, "status").getOrElse("")
         if (bool(o, "ok") && status == "success")
-          str(o, "refresh") match {
-            case Some(refresh) =>
-              LinkResult.Linked(refresh, str(o, "bearerToken"), str(o, "expires"), str(o, "accountLabel"))
+          str(o, "credential") match {
+            case Some(credential) =>
+              LinkResult.Linked(credential, str(o, "accountLabel"))
             case None =>
-              // Linked upstream but the sidecar could not find the durable token in
-              // the response — a shape change to fix in the sidecar, not here.
-              LinkResult.Failed("linked, but no refresh token was returned")
+              // Linked upstream but the sidecar could not find the credential in the
+              // response — a shape change to fix in the sidecar, not here.
+              LinkResult.Failed("linked, but no credential was returned")
           }
         else if (status == "invalidAccessToken") LinkResult.InvalidToken
         else LinkResult.Failed(if (status.nonEmpty) status else "unknown sidecar response")
