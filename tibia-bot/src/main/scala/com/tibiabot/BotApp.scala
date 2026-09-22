@@ -244,6 +244,7 @@ object BotApp extends App with StrictLogging {
   val observerService = new observer.ObserverService(
     observerRepository,
     observer.TokenCrypto.fromSecret(Config.Observer.encryptionSecret),
+    new observer.ObserverApiClient(),
     Config.Observer.enabled)
 
   // Ties bot activity to a Patreon subscription via seats (see

@@ -13,10 +13,12 @@ trait ObserverRepository {
 
   def forUser(guildId: String, userId: String): Option[ObserverToken]
 
-  /** Store (or replace) a member's encrypted token. Re-adding resets it to the
-   *  given status and clears the resolved world, since a new token must be
-   *  re-verified before it can claim one. */
-  def upsert(guildId: String, userId: String, tokenEnc: String, status: ObserverStatus): ObserverToken
+  /** Store (or replace) a member's encrypted credential (the pending 5-char code
+   *  while unverified, or the durable refresh token once linked). Re-adding resets
+   *  it to the given status and clears the resolved world, since a new credential
+   *  must be re-verified before it can claim one. */
+  def upsert(guildId: String, userId: String, tokenEnc: String, status: ObserverStatus,
+             accountLabel: Option[String]): ObserverToken
 
   /** The stored encrypted token blob for a member, for the client to decrypt. */
   def tokenEncFor(guildId: String, userId: String): Option[String]

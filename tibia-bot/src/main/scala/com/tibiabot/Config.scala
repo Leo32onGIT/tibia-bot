@@ -95,6 +95,8 @@ object Config {
     val clientVersion: String = observer.getString("client-version")
     val deviceIdentification: String = observer.getString("device-identification")
     val sidecarUrl: String = observer.getString("sidecar-url").stripSuffix("/")
+    /** Optional shared secret sent to the sidecar as X-Sidecar-Token. */
+    val sidecarToken: String = observer.getString("sidecar-token").trim
     /** Tokens can be stored (encrypted) whenever the secret is present. */
     val storageEnabled: Boolean = encryptionSecret.nonEmpty
     /** Live linking additionally needs mode=on (a later phase). */

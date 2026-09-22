@@ -18,9 +18,22 @@ import scala.collection.concurrent.TrieMap
  *  Observer API (`enabled` is the `observer-api` mode gate, off for now). Live
  *  verification — turning a `Pending` link into `Linked` and resolving its world —
  *  is a later phase and slots in at [[link]] behind the same flag. */
+/** What happened when a member added a token. */
+sealed trait LinkOutcome
+object LinkOutcome {
+  /** Stored. `verified` = live-linked against the Observer API (mode on) versus
+   *  stored pending without contacting it (mode off). */
+  final case class Ok(token: ObserverToken, verified: Boolean) extends LinkOutcome
+  /** The token was rejected — wrong/expired/spent; the user must add a fresh one. */
+  case object InvalidToken extends LinkOutcome
+  /** The sidecar or upstream failed; not the user's fault. */
+  final case class Failed(reason: String) extends LinkOutcome
+}
+
 final class ObserverService(
   repository: ObserverRepository,
   crypto: TokenCrypto,
+  apiClient: ObserverApiClient,
   enabled: Boolean
 ) extends StrictLogging {
 
@@ -44,18 +57,30 @@ final class ObserverService(
   def statusFor(guildId: String, userId: String): Option[ObserverToken] =
     tokens.get(keyOf(guildId, userId))
 
-  /** Store (or replace) a member's token, encrypted at rest.
+  /** Add a member's token.
    *
-   *  While `enabled` is false the link is stored `Pending` and not verified. When
-   *  the live integration lands, this is where the client links the account and
-   *  the resulting status/world are stored instead. */
-  def link(guildId: String, userId: String, token: String): ObserverToken = {
-    val encrypted = crypto.encrypt(token.trim)
-    val status = if (enabled) ObserverStatus.Pending /* live verify: later phase */ else ObserverStatus.Pending
-    val stored = repository.upsert(guildId, userId, encrypted, status)
-    tokens.put(keyOf(guildId, userId), stored)
-    stored
-  }
+   *  With `enabled` off (mode off) the 5-char code is stored `Pending`, unverified.
+   *  With it on, the code is exchanged via the sidecar for a durable link: the
+   *  single-use code is spent and the **refresh token** it returns is what gets
+   *  stored (encrypted) — never the code, which is worthless afterwards. */
+  def link(guildId: String, userId: String, token: String): LinkOutcome =
+    if (!enabled) {
+      val stored = repository.upsert(guildId, userId, crypto.encrypt(token.trim), ObserverStatus.Pending, None)
+      tokens.put(keyOf(guildId, userId), stored)
+      LinkOutcome.Ok(stored, verified = false)
+    } else {
+      apiClient.link(token.trim) match {
+        case LinkResult.Linked(refresh, _, _, accountLabel) =>
+          val stored = repository.upsert(guildId, userId, crypto.encrypt(refresh), ObserverStatus.Linked, accountLabel)
+          tokens.put(keyOf(guildId, userId), stored)
+          LinkOutcome.Ok(stored, verified = true)
+        case LinkResult.InvalidToken =>
+          LinkOutcome.InvalidToken
+        case LinkResult.Failed(reason) =>
+          logger.warn(s"Observer link failed for '$userId' in guild '$guildId': $reason")
+          LinkOutcome.Failed(reason)
+      }
+    }
 
   /** Remove a member's link. Database first, cache after — a delete that fails
    *  leaves the link in place rather than desynchronising the two. Returns whether

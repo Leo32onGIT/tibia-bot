@@ -38,8 +38,9 @@ object ObserverEmbeds {
     case ObserverStatus.Pending =>
       s"${Config.yesEmoji} Token saved — it will be verified once linking is enabled."
     case ObserverStatus.Linked =>
+      val who = t.accountLabel.map(a => s" as **$a**").getOrElse("")
       val where = t.world.map(w => s" on **$w**").getOrElse("")
-      s"${Config.yesEmoji} Linked$where."
+      s"${Config.yesEmoji} Linked$who$where."
     case ObserverStatus.NeedsRelink =>
       s"${Config.noEmoji} Your link needs renewing — press **Add** with a fresh token."
     case ObserverStatus.Error =>

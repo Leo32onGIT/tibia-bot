@@ -1,5 +1,6 @@
 package com.tibiabot.interactions
 
+import com.tibiabot.observer.LinkOutcome
 import com.tibiabot.presentation.{Embeds, ObserverEmbeds}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
@@ -33,12 +34,19 @@ object ObserverModals extends StrictLogging {
               "*Account Management → Tibia Observer → Connect* on tibia.com.")
           case Some(token) =>
             try {
-              val stored = BotApp.observerService.link(guild.getId, event.getUser.getId, token)
-              event.getHook
-                .sendMessageEmbeds(ObserverEmbeds.panel(Some(stored)))
-                .setComponents(ObserverEmbeds.controls(Some(stored)))
-                .setEphemeral(true)
-                .queue(_ => (), _ => ())
+              BotApp.observerService.link(guild.getId, event.getUser.getId, token) match {
+                case LinkOutcome.Ok(stored, _) =>
+                  event.getHook
+                    .sendMessageEmbeds(ObserverEmbeds.panel(Some(stored)))
+                    .setComponents(ObserverEmbeds.controls(Some(stored)))
+                    .setEphemeral(true)
+                    .queue(_ => (), _ => ())
+                case LinkOutcome.InvalidToken =>
+                  reply(event, s"${Config.noEmoji} That token was rejected. It's **case-sensitive** and " +
+                    "**single-use** — generate a fresh one and paste it exactly as shown on tibia.com.")
+                case LinkOutcome.Failed(_) =>
+                  reply(event, s"${Config.noEmoji} Couldn't reach the Observer service just now — please try again shortly.")
+              }
             } catch {
               case ex: Throwable =>
                 logger.error(s"Failed to store Observer token for '${event.getUser.getId}' in guild '${guild.getId}'", ex)

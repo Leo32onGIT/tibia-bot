@@ -262,6 +262,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |userid VARCHAR(255) NOT NULL,
            |token_enc TEXT NOT NULL,
            |world VARCHAR(255),
+           |account_label VARCHAR(255),
            |status VARCHAR(32) NOT NULL DEFAULT 'pending',
            |created_at TIMESTAMP NOT NULL DEFAULT NOW(),
            |updated_at TIMESTAMP NOT NULL DEFAULT NOW(),

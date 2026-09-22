@@ -13,6 +13,7 @@ final case class ObserverToken(
   guildId: String,
   userId: String,
   world: Option[String],
+  accountLabel: Option[String],
   status: ObserverStatus,
   createdAt: Instant,
   updatedAt: Instant
