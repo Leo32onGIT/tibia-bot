@@ -158,15 +158,80 @@ def renew():
     })
 
 
+def _current_settings(credential, device):
+    r = _observer("POST", "/Account/login", bearer=credential,
+                  body={"ClientVersion": CLIENT_VERSION, "DeviceIdentification": device})
+    return r.json().get("userSettings", {}) if r.status_code == 200 else None
+
+
+def _catalog_ids(credential):
+    r = _observer("GET", "/MiniWorldChanges/GetMiniWorldChanges", bearer=credential)
+    return [c["id"] for c in r.json()] if r.status_code == 200 else []
+
+
+@app.post("/ensure-rules")
+def ensure_rules():
+    """Ensure an enabled MWC rule (all types) exists for each requested world.
+
+    The bot 'owns' MWC rules named "Violent Bot": rules for other worlds and every
+    other notification category are preserved untouched. `notifications` is
+    in-app-only (no push), since the bot polls rather than receiving pushes.
+    """
+    b = _json_body()
+    credential = b.get("credential")
+    worlds = b.get("worlds") or []
+    device = b.get("deviceIdentification") or "Violent Bot"
+    if not credential or not worlds:
+        return jsonify({"ok": False, "error": "credential and worlds required"}), 400
+    try:
+        settings = _current_settings(credential, device)
+        if settings is None:
+            return jsonify({"ok": False, "error": "could not read settings"}), 502
+        ids = _catalog_ids(credential)
+        existing = settings.get("miniWorldChangeNotificationRules") or []
+        kept = [r for r in existing if r.get("world") not in worlds]  # leave other worlds alone
+        managed = [{"ruleName": "Violent Bot", "World": w, "miniWorldChanges": ids,
+                    "isEnabled": True, "notifications": "appNotifications"} for w in worlds]
+        settings["miniWorldChangeNotificationRules"] = kept + managed
+        r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
+        return jsonify({"ok": r.status_code == 200, "status_code": r.status_code, "worlds": worlds})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.post("/clear-rules")
+def clear_rules():
+    """Remove the bot's MWC rules (used on unlink). Other categories untouched."""
+    b = _json_body()
+    credential = b.get("credential")
+    device = b.get("deviceIdentification") or "Violent Bot"
+    if not credential:
+        return jsonify({"ok": False, "error": "credential required"}), 400
+    try:
+        settings = _current_settings(credential, device)
+        if settings is None:
+            return jsonify({"ok": False, "error": "could not read settings"}), 502
+        existing = settings.get("miniWorldChangeNotificationRules") or []
+        settings["miniWorldChangeNotificationRules"] = [r for r in existing if r.get("ruleName") != "Violent Bot"]
+        r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
+        return jsonify({"ok": r.status_code == 200, "status_code": r.status_code})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
 @app.post("/mwc")
 def mwc():
-    """Phase 3 will use this. Returns the MWC payload for a valid bearer."""
+    """Currently-active MWC for the credential's enabled rules.
+
+    `GET /MiniWorldChanges` (base) is the live feed — `[{notificationId, world,
+    title, body, ruleIds}]` — not `/GetMiniWorldChanges`, which is the static catalog.
+    """
     b = _json_body()
     bearer = b.get("bearerToken")
     if not bearer:
         return jsonify({"ok": False, "error": "bearerToken required"}), 400
     try:
-        r = _observer("GET", "/MiniWorldChanges/GetMiniWorldChanges", bearer=bearer)
+        r = _observer("GET", "/MiniWorldChanges", bearer=bearer)
         if r.status_code == 401:
             return jsonify({"ok": False, "status": "unauthorised"}), 401
         return jsonify({"ok": r.status_code == 200, "status_code": r.status_code,

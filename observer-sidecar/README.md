@@ -35,7 +35,9 @@ Keep it bound to loopback. The bot points at it via `observer-api.sidecar-url`
 | GET | `/health` | — | `{ ok, minimalClientVersion }` |
 | POST | `/link` | `{ accessToken, deviceIdentification, clientVersion? }` | `{ ok, status, credential, expires, accountLabel, accountCount, raw }` |
 | POST | `/renew` | `{ credential, deviceIdentification, clientVersion? }` | `{ ok, credential, expires, raw }` |
-| POST | `/mwc` | `{ bearerToken }` | `{ ok, status, miniWorldChanges }` *(Phase 3)* |
+| POST | `/ensure-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds }` |
+| POST | `/clear-rules` | `{ credential, deviceIdentification? }` | `{ ok }` |
+| POST | `/mwc` | `{ bearerToken }` | `{ ok, miniWorldChanges: [{world,title,body,…}] }` |
 
 The credential model (confirmed live):
 - The `accessToken` (5-char code) is **case-sensitive and single-use** — sent verbatim.
@@ -45,4 +47,9 @@ The credential model (confirmed live):
 - `/renew` presents the current credential to `Account/login` and gets a fresh
   90-day JWT — so renewing before expiry keeps the link alive until the user
   disconnects. Confirmed against a live credential.
-- `/mwc` takes the credential as `bearerToken`.
+- `/mwc` takes the credential as `bearerToken` and returns the **currently-active**
+  MWC (`GET /MiniWorldChanges`), not the catalog.
+- The Observer API is rule-driven: MWC only comes back for worlds the account has an
+  **enabled** rule for. `/ensure-rules` sets enabled all-types rules (named
+  "Violent Bot", in-app notifications only) for the given worlds, preserving every
+  other world and category; `/clear-rules` removes just those on unlink.
