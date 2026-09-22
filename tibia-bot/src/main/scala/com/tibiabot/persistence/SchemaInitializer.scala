@@ -269,14 +269,15 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |CONSTRAINT unique_observer_token UNIQUE (guildid, userid)
            |);""".stripMargin
 
-      // One raids channel per guild; it receives pooled raids for the worlds the
-      // guild tracks. Kept apart from the /setup channels so the feature is
-      // self-contained.
+      // The per-world raids channel: one per (guild, world), living in that world's
+      // category like its deaths/levels channels, and removed with the world.
       val createObserverRaidChannelsTable =
         s"""CREATE TABLE IF NOT EXISTS observer_raid_channels (
-           |guildid VARCHAR(255) PRIMARY KEY,
+           |guildid VARCHAR(255) NOT NULL,
+           |world VARCHAR(255) NOT NULL,
            |channelid VARCHAR(255) NOT NULL,
-           |created_at TIMESTAMP NOT NULL DEFAULT NOW()
+           |created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+           |PRIMARY KEY (guildid, world)
            |);""".stripMargin
 
       // Dedup for the raids poller: one row per raid stage already posted to a

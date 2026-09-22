@@ -90,37 +90,33 @@ final class ChannelService(
   private def worldRemoveConfig(guild: Guild, query: String): Unit =
     worldConfigRepository.removeWorld(guild.getId, query)
 
-  /** Create the guild's raids channel if it has none and is set up. Called when a
-   *  member first links an Observer token. It sits in the admin category beside the
-   *  notifications channel, is visible to members (they read raids) but bot-only to
-   *  post. It persists when tokens are removed — only /remove of the last world and
-   *  a guild leave take it, like the other guild-level channels. Returns true when a
-   *  channel was actually created. */
-  def ensureRaidsChannel(guild: Guild): Boolean =
+  /** Create a world's raids channel if it has none and the guild tracks that world.
+   *  Called when a member runs `/observer <world>`. It sits in that world's category
+   *  beside its deaths/levels channels (members read, bot posts), and is removed with
+   *  the world in `/remove`. Returns true when a channel was actually created. */
+  def ensureRaidsChannel(guild: Guild, world: String): Boolean =
     try {
-      val existing = observerRaidRepository.channelFor(guild.getId).flatMap(id => Option(guild.getTextChannelById(id)))
+      val existing = observerRaidRepository.channelFor(guild.getId, world).flatMap(id => Option(guild.getTextChannelById(id)))
       if (existing.nonEmpty) false
-      else Option(guild.getCategoryById(discordRetrieveConfig(guild).getOrElse("admin_category", "0"))) match {
-        case None => false // guild not set up yet; the channel appears once it is
-        case Some(adminCategory) =>
-          val botRole = guild.getBotRole
-          val channel = guild.createTextChannel("📢・ʀᴀɪᴅs", adminCategory).complete()
-          channel.upsertPermissionOverride(botRole)
-            .grant(Permission.MESSAGE_SEND, Permission.VIEW_CHANNEL, Permission.MESSAGE_EMBED_LINKS).complete()
-          channel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.MESSAGE_SEND).queue()
-          observerRaidRepository.setChannel(guild.getId, channel.getId)
+      else worldRetrieveConfig(guild, world).get("category").map(guild.getCategoryById) match {
+        case Some(category) if category != null =>
+          val channel = guild.createTextChannel("📢・ʀᴀɪᴅs", category).complete()
+          grantWorldPerms(channel, guild.getBotRole, guild.getPublicRole)
+          observerRaidRepository.setChannel(guild.getId, world, channel.getId)
           true
+        case _ => false // the guild does not track this world
       }
     } catch {
-      case ex: Throwable => logger.warn(s"Could not create raids channel in guild '${guild.getId}'", ex); false
+      case ex: Throwable =>
+        logger.warn(s"Could not create raids channel for '$world' in guild '${guild.getId}'", ex); false
     }
 
-  /** Delete the guild's raids channel and forget it — used in the last-world cleanup
-   *  below, alongside the other guild-level channels. */
-  private def removeRaidsChannel(guild: Guild): Unit =
-    observerRaidRepository.channelFor(guild.getId).foreach { channelId =>
+  /** Delete a world's raids channel and forget it — used in the `/remove <world>`
+   *  cleanup, alongside that world's other channels. */
+  private def removeRaidsChannel(guild: Guild, world: String): Unit =
+    observerRaidRepository.channelFor(guild.getId, world).foreach { channelId =>
       Option(guild.getTextChannelById(channelId)).foreach(_.delete().complete())
-      observerRaidRepository.clearChannel(guild.getId)
+      observerRaidRepository.clearChannel(guild.getId, world)
     }
 
   private def updateAdminChannel(inputId: String, channelId: String): Unit = {
@@ -1456,6 +1452,9 @@ final class ChannelService(
             channel.delete().complete()
           }
         }
+        // The raids channel (if this world has one) lives in this category too —
+        // take it before the category so it isn't orphaned to the top of the server.
+        removeRaidsChannel(guild, world)
 
         val category = guild.getCategoryById(categoryId)
         if (category != null) {
@@ -1491,9 +1490,6 @@ final class ChannelService(
           if (boostedChannel != null) boostedChannel.delete().complete()
           val adminChannel = guild.getTextChannelById(discordConfig.getOrElse("admin_channel", "0"))
           if (adminChannel != null) adminChannel.delete().complete()
-          // The raids channel (if any) lives in this category too — take it before
-          // the category so it isn't orphaned to the top of the server.
-          removeRaidsChannel(guild)
           // Before the category: deleting a category doesn't delete what is in
           // it, it orphans those channels to the top of the server.
           deleteSpawnsForum(guild)

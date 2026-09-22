@@ -73,10 +73,14 @@ object CommandSchemas {
 
   val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
 
-  /** Personal, self-service like `/boosted`: answers with the member's own Tibia
-   *  Observer token panel (Add/Remove buttons), replied ephemerally. No options —
-   *  adding a token opens a form from the button. */
-  val observerCommand: SlashCommandData = Commands.slash("observer", "Link your Tibia Observer token for mini world change alerts")
+  /** Personal, self-service: answers with the member's own Tibia Observer token panel
+   *  (Add/Remove buttons), replied ephemerally. Takes the world so raid alerts have a
+   *  channel context — the world's raids channel is ensured when a linked member runs
+   *  it. Adding a token opens a form from the button. */
+  val observerCommand: SlashCommandData = Commands.slash("observer", "Link your Tibia Observer token for raid & mini world change alerts")
+    .addOptions(
+      new OptionData(OptionType.STRING, "world", "The world to receive raid alerts for").setRequired(true)
+    )
 
   /** Opens the loot split form. No options: what it wants is a pasted analyser,
    *  which is a paragraph, and a command option is a single line.
@@ -117,13 +121,13 @@ object CommandSchemas {
    *  set up — /setup itself, /help (how do I use this bot, including how to
    *  run /setup in the first place), and cooldowns/boosted/patreon/lootsplit
    *  (personal, self-service commands unrelated to any specific world). */
-  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, cooldownsCommand, boostedCommand, patreonCommand, lootSplitCommand, observerCommand)
+  val initialCommands: List[SlashCommandData] = List(setupCommand, helpCommand, cooldownsCommand, boostedCommand, patreonCommand, lootSplitCommand)
 
   /** Only meaningful once at least one world is tracked in the guild — added
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand, observerCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands

@@ -18,9 +18,10 @@ object ObserverModals extends StrictLogging {
   val ModalId = "observer add modal"
   val TokenField = "observer add"
 
-  def handles(modalId: String): Boolean = modalId == ModalId
+  def handles(modalId: String): Boolean = modalId.startsWith(ModalId)
 
-  def handle(event: ModalInteractionEvent): Unit =
+  def handle(event: ModalInteractionEvent): Unit = {
+    val world = event.getModalId.stripPrefix(ModalId).trim
     Option(event.getGuild) match {
       case None =>
         reply(event, s"${Config.noEmoji} That form only works inside a server.")
@@ -37,15 +38,14 @@ object ObserverModals extends StrictLogging {
               BotApp.observerService.link(guild.getId, event.getUser.getId, token) match {
                 case LinkOutcome.Ok(stored, _) =>
                   event.getHook
-                    .sendMessageEmbeds(ObserverEmbeds.panel(Some(stored)))
-                    .setComponents(ObserverEmbeds.controls(Some(stored)))
+                    .sendMessageEmbeds(ObserverEmbeds.panel(Some(stored), world))
+                    .setComponents(ObserverEmbeds.controls(Some(stored), world))
                     .setEphemeral(true)
                     .queue(_ => (), _ => ())
-                  // The raids channel appears the first time a token is set here. Seed
-                  // its dedup on creation so it starts with raids going forward, not a
-                  // dump of everything currently live across the guild's worlds.
-                  if (BotApp.channelService.ensureRaidsChannel(guild))
-                    BotApp.observerRaidPoller.seedPosted(guild.getId, BotApp.worldsTrackedBy(guild.getId))
+                  // Ensure this world's raids channel now that they're linked, seeding
+                  // its dedup on first creation so it starts with raids going forward.
+                  if (world.nonEmpty && BotApp.channelService.ensureRaidsChannel(guild, world))
+                    BotApp.observerRaidPoller.seedPosted(guild.getId, world)
                 case LinkOutcome.InvalidToken =>
                   reply(event, s"${Config.noEmoji} That token was rejected. It's **case-sensitive** and " +
                     "**single-use** — generate a fresh one and paste it exactly as shown on tibia.com.")
@@ -59,6 +59,7 @@ object ObserverModals extends StrictLogging {
             }
         }
     }
+  }
 
   /** The website tokens are short alphanumeric codes (e.g. `umzzk`) and are
    *  CASE-SENSITIVE and single-use — so only trim, never change case. Kept a

@@ -2,16 +2,19 @@ package com.tibiabot.persistence
 
 import java.time.Instant
 
-/** Persistence for the raids-channel delivery: each guild's raids channel, and the
- *  dedup of raid stages already posted to a guild. Both live in `bot_cache`. */
+/** Persistence for the raids-channel delivery: each (guild, world) raids channel,
+ *  and the dedup of raid stages already posted to a guild. Both live in `bot_cache`. */
 trait ObserverRaidRepository {
-  /** Set (or replace) a guild's raids channel. */
-  def setChannel(guildId: String, channelId: String): Unit
-  /** Remove a guild's raids channel. */
-  def clearChannel(guildId: String): Unit
-  def channelFor(guildId: String): Option[String]
-  /** Every guild's raids channel, as (guildId, channelId). */
-  def allChannels(): List[(String, String)]
+  /** Set (or replace) a guild's raids channel for one world. */
+  def setChannel(guildId: String, world: String, channelId: String): Unit
+  /** Remove a guild's raids channel for one world (on `/remove <world>`). */
+  def clearChannel(guildId: String, world: String): Unit
+  /** Remove all of a guild's raids channels (on guild leave). */
+  def clearGuild(guildId: String): Unit
+  def channelFor(guildId: String, world: String): Option[String]
+  /** Every guild's raids channel for a world, as (guildId, channelId) — the poller's
+   *  fan-out set for that world. */
+  def channelsForWorld(world: String): List[(String, String)]
 
   /** Record that this raid stage has been posted to this guild; returns true only
    *  the first time, so the caller posts once. */

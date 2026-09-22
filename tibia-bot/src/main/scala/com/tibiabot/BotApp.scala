@@ -250,12 +250,10 @@ object BotApp extends App with StrictLogging {
     Config.Observer.enabled)
 
   // Pools raids across every linked account and fans each new one out — rank-ordered
-  // — to the raids channel of every guild tracking its world. The lambdas are
-  // evaluated per poll, so they see the live world→discord map and channel config.
+  // — to the per-world raids channel of every guild that has one for that world.
   val observerRaidPoller = new observer.ObserverRaidPoller(
     observerService,
     observerRaidRepository,
-    guildsTrackingWorld = world => discordsData.getOrElse(world, Nil).map(_.id),
     post = (guildId, channelId, embed) => outboundSender.enqueue("observer-raid") { () =>
       Option(discordGateway.guildById(guildId))
         .flatMap(g => Option(g.getTextChannelById(channelId)))
@@ -933,7 +931,7 @@ object BotApp extends App with StrictLogging {
       // one leaves them behind.
       notifyService.forgetGuild(guildId)
       observerService.forgetGuild(guildId)
-      observerRaidRepository.clearChannel(guildId)
+      observerRaidRepository.clearGuild(guildId)
     },
     forgetWorldSubscriptions = (guildId, world) => notifyService.forgetWorld(guildId, world),
     sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")

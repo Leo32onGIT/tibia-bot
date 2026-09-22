@@ -14,18 +14,19 @@ object ObserverEmbeds {
 
   private val tokenPage = "https://www.tibia.com/account/?subtopic=accountmanagement&page=tibiaobserver"
 
-  def panel(token: Option[ObserverToken]): MessageEmbed = {
+  def panel(token: Option[ObserverToken], world: String): MessageEmbed = {
     val body = token match {
       case None =>
         s"""${Config.noEmoji} You have no **Tibia Observer** token configured.
            |
            |Press **Add** and paste the token from your [Tibia account]($tokenPage)
-           |(*Account Management → Tibia Observer → Connect*) to receive mini world
-           |change notifications.""".stripMargin
+           |(*Account Management → Tibia Observer → Connect*). You'll get mini world
+           |change alerts, and this server's **$world** raids channel will appear.""".stripMargin
       case Some(t) =>
         s"""${statusLine(t)}
            |
-           |Press **Remove** to unlink, or **Add** to replace it with a new token.""".stripMargin
+           |Raids for **$world** are posted to this server's raids channel, pooled from
+           |every linked member. Press **Remove** to unlink, or **Add** to replace your token.""".stripMargin
     }
     new EmbedBuilder()
       .setTitle("Tibia Observer")
@@ -84,14 +85,15 @@ object ObserverEmbeds {
   }
 
   /** Add is offered when there is no token; Remove when there is one. The other is
-   *  shown disabled so the panel always reads as a pair (as `/boosted` does). */
-  def controls(token: Option[ObserverToken]): ActionRow =
+   *  shown disabled so the panel always reads as a pair (as `/boosted` does). The Add
+   *  button carries the world, so the modal can create that world's raids channel. */
+  def controls(token: Option[ObserverToken], world: String): ActionRow =
     if (token.isDefined)
       ActionRow.of(
-        Button.success("observer add", "Add").asDisabled,
-        Button.danger("observer remove", "Remove"))
+        Button.success(s"observer add $world", "Add").asDisabled,
+        Button.danger(s"observer remove $world", "Remove"))
     else
       ActionRow.of(
-        Button.success("observer add", "Add"),
-        Button.danger("observer remove", "Remove").asDisabled)
+        Button.success(s"observer add $world", "Add"),
+        Button.danger(s"observer remove $world", "Remove").asDisabled)
 }

@@ -7,28 +7,27 @@ import net.dv8tion.jda.api.entities.MessageEmbed
 
 import java.time.{Duration, Instant}
 
-/** Drives the raids channels: pools raids across every linked account, and posts
- *  each new one — rank-ordered — to the raids channel of every guild that tracks its
- *  world. So Discords tracking the same world share coverage: one member's
- *  exploration, anywhere, feeds them all.
+/** Drives the per-world raids channels: pools raids across every linked account, and
+ *  posts each new one — rank-ordered — to the raids channel of every guild that has
+ *  one for that world. So Discords with a raids channel for the same world share
+ *  coverage: one member's exploration, anywhere, feeds them all.
  *
- *  `guildsTrackingWorld` maps a world to the guild ids following it (the bot's
- *  existing world→discord map); `post` sends one embed to one channel through the
- *  bot's rate-limited lane. Dedup on (guild, raidId, category) keeps the three
- *  stages of a raid, and repeated polls, from repeating. */
+ *  `post` sends one embed to one channel (by guild + channel id) through the bot's
+ *  rate-limited lane. Dedup on (guild, raidId, category) keeps the three stages of a
+ *  raid, and repeated polls, from repeating. */
 final class ObserverRaidPoller(
   observerService: ObserverService,
   raidRepository: ObserverRaidRepository,
-  guildsTrackingWorld: String => List[String],
   post: (String, String, MessageEmbed) => Unit
 ) extends StrictLogging {
 
   def poll(): Unit =
     try {
       observerService.pooledRaidsByWorld().foreach { case (world, raids) =>
-        val ordered = RaidRanking.order(raids)
-        guildsTrackingWorld(world).distinct.foreach { guildId =>
-          raidRepository.channelFor(guildId).foreach { channelId =>
+        val channels = raidRepository.channelsForWorld(world)
+        if (channels.nonEmpty) {
+          val ordered = RaidRanking.order(raids)
+          channels.foreach { case (guildId, channelId) =>
             ordered.foreach { raid =>
               if (raidRepository.markPostedIfNew(guildId, raid.raidId, raid.category))
                 post(guildId, channelId, ObserverEmbeds.raidEmbed(raid))
@@ -42,16 +41,13 @@ final class ObserverRaidPoller(
       case ex: Throwable => logger.warn("Observer raid poll failed", ex)
     }
 
-  /** Mark every currently-active raid for this guild's worlds as already posted,
-   *  without sending — used when a guild first sets its channel, so it starts with
-   *  raids going forward rather than a dump of everything live right now. */
-  def seedPosted(guildId: String, worlds: Set[String]): Unit =
-    try {
-      val byWorld = observerService.pooledRaidsByWorld()
-      worlds.foreach { world =>
-        byWorld.getOrElse(world, Nil).foreach(r => raidRepository.markPostedIfNew(guildId, r.raidId, r.category))
-      }
-    } catch {
-      case ex: Throwable => logger.warn(s"Observer raid seed failed for guild '$guildId'", ex)
+  /** Mark the currently-active raids on `world` as already posted for this guild,
+   *  without sending — used when a guild's raids channel for that world is first
+   *  created, so it starts with raids going forward rather than a dump of what's live. */
+  def seedPosted(guildId: String, world: String): Unit =
+    try observerService.pooledRaidsByWorld().getOrElse(world, Nil)
+      .foreach(r => raidRepository.markPostedIfNew(guildId, r.raidId, r.category))
+    catch {
+      case ex: Throwable => logger.warn(s"Observer raid seed failed for guild '$guildId', world '$world'", ex)
     }
 }

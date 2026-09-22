@@ -10,38 +10,47 @@ import scala.collection.mutable.ListBuffer
  *  created by SchemaInitializer.initCache. */
 final class JdbcObserverRaidRepository(connectionProvider: ConnectionProvider) extends ObserverRaidRepository {
 
-  def setChannel(guildId: String, channelId: String): Unit =
+  def setChannel(guildId: String, world: String, channelId: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement(
-        """INSERT INTO observer_raid_channels (guildid, channelid)
-          |VALUES (?, ?)
-          |ON CONFLICT (guildid) DO UPDATE SET channelid = EXCLUDED.channelid;""".stripMargin)
-      try { statement.setString(1, guildId); statement.setString(2, channelId); statement.executeUpdate() }
+        """INSERT INTO observer_raid_channels (guildid, world, channelid)
+          |VALUES (?, ?, ?)
+          |ON CONFLICT (guildid, world) DO UPDATE SET channelid = EXCLUDED.channelid;""".stripMargin)
+      try { statement.setString(1, guildId); statement.setString(2, world); statement.setString(3, channelId); statement.executeUpdate() }
       finally statement.close()
     }
 
-  def clearChannel(guildId: String): Unit =
+  def clearChannel(guildId: String, world: String): Unit =
+    JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val statement = conn.prepareStatement("DELETE FROM observer_raid_channels WHERE guildid = ? AND world = ?")
+      try { statement.setString(1, guildId); statement.setString(2, world); statement.executeUpdate() }
+      finally statement.close()
+    }
+
+  def clearGuild(guildId: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
       val statement = conn.prepareStatement("DELETE FROM observer_raid_channels WHERE guildid = ?")
       try { statement.setString(1, guildId); statement.executeUpdate() }
       finally statement.close()
     }
 
-  def channelFor(guildId: String): Option[String] =
+  def channelFor(guildId: String, world: String): Option[String] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.prepareStatement("SELECT channelid FROM observer_raid_channels WHERE guildid = ?")
+      val statement = conn.prepareStatement("SELECT channelid FROM observer_raid_channels WHERE guildid = ? AND world = ?")
       try {
         statement.setString(1, guildId)
+        statement.setString(2, world)
         val result = statement.executeQuery()
         if (result.next()) Option(result.getString("channelid")) else None
       } finally statement.close()
     }
 
-  def allChannels(): List[(String, String)] =
+  def channelsForWorld(world: String): List[(String, String)] =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
-      val statement = conn.createStatement()
+      val statement = conn.prepareStatement("SELECT guildid, channelid FROM observer_raid_channels WHERE world = ?")
       try {
-        val result = statement.executeQuery("SELECT guildid, channelid FROM observer_raid_channels")
+        statement.setString(1, world)
+        val result = statement.executeQuery()
         val rows = new ListBuffer[(String, String)]
         while (result.next()) rows += ((result.getString("guildid"), result.getString("channelid")))
         rows.toList
