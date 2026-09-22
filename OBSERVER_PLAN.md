@@ -165,12 +165,13 @@ observer_tokens
 
 ## 9. Phased rollout
 
-- **Phase 0 — spike (no bot code):** **mostly validated** — see `spike/observer/`.
-  Confirmed from a server context: Cloudflare passes via browser-TLS impersonation,
-  `/api/v1` reachable, `Status` (unauth) gives the client version, the
-  `LoginWithAccessToken` contract, and MWC is bearer-gated (401). *Remaining:* the
-  token-gated rung (login → live MWC), which links an account (one-device) and needs
-  a fresh 5-char token. Gate is effectively cleared. *(gate)*
+- **Phase 0 — spike (no bot code): DONE, gate cleared** — see `spike/observer/`.
+  Validated end to end from a server context: Cloudflare passes via browser-TLS
+  impersonation → `LoginWithAccessToken` (case-sensitive, single-use 5-char token) →
+  JWT bearer → `GetMiniWorldChanges` `200`. Captured the login and MWC response
+  shapes. Two findings folded into the design: tokens are **case-sensitive** (fixed
+  in `ObserverModals`) and **single-use**, so the durable credential is the
+  **session** (JWT + refresh), which Phase 2 persists — not the spent code.
 - **Phase 1 — UX + storage, `mode=off`:** `/observer`, panel, add/remove buttons +
   modal, encrypted storage, lifecycle cleanup. No live calls yet (link is stubbed).
 - **Phase 2 — live linking:** wire `ObserverApiClient` login/link/refresh behind the

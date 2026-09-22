@@ -31,8 +31,20 @@ official-app link (one-device model).
 A correct-case token returns `{"status":"success","bearerToken":"<JWT>", ...}`; a
 wrong-case or spent one returns `{"status":"invalidAccessToken", ...}`.
 
-**Still to capture:** the `GetMiniWorldChanges` response body (needs one fresh
-correct-case token run through login → MWC in a single pass).
+**Full flow validated (live):** login (correct-case token) → JWT bearer →
+`GET /MiniWorldChanges/GetMiniWorldChanges` → `200`.
+
+- Login `success` returns: `bearerToken` (JWT), `accounts` (`[{loginDisplayValue,
+  accountTitle, numCharacters, creationDate}]`) and `userSettings`
+  (`appSetupCompleted`, `favouriteCharacters`, `newsNotificationRule{…}`).
+- `GetMiniWorldChanges` returns the **MWC type catalog**: `[{id, name}]`, ids 0–30
+  (Fury Gates, Chakoya Iceberg, … Spirit Gate Vengoth). This is the catalog that
+  notification rules are built from — the *currently-active* MWC on a given world is
+  a separate call, to be pinned down in the MWC-delivery phase.
+
+**Session model:** because the 5-char token is single-use, the durable credential is
+the session (JWT + a refresh via `Account/login`), which the sidecar must persist and
+refresh. A user only re-adds a token if that session is lost.
 
 ## Architecture consequence
 
