@@ -269,6 +269,28 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |CONSTRAINT unique_observer_token UNIQUE (guildid, userid)
            |);""".stripMargin
 
+      // One raids channel per guild; it receives pooled raids for the worlds the
+      // guild tracks. Kept apart from the /setup channels so the feature is
+      // self-contained.
+      val createObserverRaidChannelsTable =
+        s"""CREATE TABLE IF NOT EXISTS observer_raid_channels (
+           |guildid VARCHAR(255) PRIMARY KEY,
+           |channelid VARCHAR(255) NOT NULL,
+           |created_at TIMESTAMP NOT NULL DEFAULT NOW()
+           |);""".stripMargin
+
+      // Dedup for the raids poller: one row per raid stage already posted to a
+      // guild, so repeated polls and the three stages of a raid don't repeat. Pruned
+      // by the poller once entries age out (raids are short-lived).
+      val createObserverPostedRaidsTable =
+        s"""CREATE TABLE IF NOT EXISTS observer_posted_raids (
+           |guildid VARCHAR(255) NOT NULL,
+           |raid_id VARCHAR(255) NOT NULL,
+           |category VARCHAR(32) NOT NULL,
+           |posted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+           |PRIMARY KEY (guildid, raid_id, category)
+           |);""".stripMargin
+
       // What each character's standing in each highscore list was at the last
       // snapshot, so the next one can tell an advance from a character simply
       // entering a list only a thousand deep. World-scoped like deaths and
@@ -453,6 +475,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createBountyNotificationsTable)
       newStatement.executeUpdate(createBountyUniqueIndex)
       newStatement.executeUpdate(createObserverTokensTable)
+      newStatement.executeUpdate(createObserverRaidChannelsTable)
+      newStatement.executeUpdate(createObserverPostedRaidsTable)
 
       newStatement.executeUpdate(createHighscoreValueTable)
       newStatement.executeUpdate(createHighscoreEventsTable)

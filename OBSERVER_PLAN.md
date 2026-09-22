@@ -199,9 +199,19 @@ observer_tokens
   Sidecar `/ensure-raid-rules` (auto-derives regions) + `/raids` validated; bot has
   `RaidAnnouncement`, client `raids`/`ensureRaidRules`/`renew`, service
   `activeRaids`/`renewAll`, and `ObserverEmbeds.raidEmbed`. **Renewal job** wired: a
-  daily `renewAll` sweep keeps credentials fresh. *Remaining:* the raids-channel
-  delivery — a per-guild channel + poll loop + raidId dedup + source-account choice
-  (see below).
+  daily `renewAll` sweep keeps credentials fresh.
+  - **Raids-channel delivery: BUILT.** Pooled **per world**: `pooledRaidsByWorld`
+    unions raids across every linked account (deduped by raidId+category), and
+    `ObserverRaidPoller` (5-min sweep) fans each new one — `RaidRanking`-ordered
+    (type priority hook → stage → soonest start) — to the raids channel of every
+    guild tracking that world. So Discords tracking the same world share coverage.
+    `/raids` (Manage-Server) sets/clears a guild's channel and seeds dedup so it
+    starts clean; `observer_raid_channels` + `observer_posted_raids` back it; the
+    channel is dropped on guild-leave. Compiles + command specs green.
+  - *Deferred:* raid-type **priority** values (the `RaidTypeInformation` API returns
+    `[]` so far; `RaidRanking`'s `typePriority` hook is ready to populate from a
+    config map or once that endpoint's input is cracked). Raid embeds show the area
+    (how Tibia raids are identified) rather than a per-type name for the same reason.
 
 ## 10. Open decisions (for review)
 

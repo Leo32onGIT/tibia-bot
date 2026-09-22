@@ -178,6 +178,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcNotifyRepository(connectionProvider)
   private val observerRepository: persistence.ObserverRepository =
     new persistence.jdbc.JdbcObserverRepository(connectionProvider)
+  val observerRaidRepository: persistence.ObserverRaidRepository =
+    new persistence.jdbc.JdbcObserverRaidRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -246,6 +248,19 @@ object BotApp extends App with StrictLogging {
     observer.TokenCrypto.fromSecret(Config.Observer.encryptionSecret),
     new observer.ObserverApiClient(),
     Config.Observer.enabled)
+
+  // Pools raids across every linked account and fans each new one out — rank-ordered
+  // — to the raids channel of every guild tracking its world. The lambdas are
+  // evaluated per poll, so they see the live world→discord map and channel config.
+  val observerRaidPoller = new observer.ObserverRaidPoller(
+    observerService,
+    observerRaidRepository,
+    guildsTrackingWorld = world => discordsData.getOrElse(world, Nil).map(_.id),
+    post = (guildId, channelId, embed) => outboundSender.enqueue("observer-raid") { () =>
+      Option(discordGateway.guildById(guildId))
+        .flatMap(g => Option(g.getTextChannelById(channelId)))
+        .foreach(_.sendMessageEmbeds(embed).queue(_ => (), _ => ()))
+    })
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -790,6 +805,11 @@ object BotApp extends App with StrictLogging {
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
 
+  /** The worlds a guild currently tracks — the raids poller uses this to know which
+   *  worlds' pooled raids belong in a guild's raids channel. */
+  def worldsTrackedBy(guildId: String): Set[String] =
+    discordsData.collect { case (world, discords) if discords.exists(_.id == guildId) => world }.toSet
+
   /** Where a guild's command log currently goes, if that channel is still there.
    *
    *  Off the in-memory Discords record rather than `discordRetrieveConfig`, which
@@ -912,6 +932,7 @@ object BotApp extends App with StrictLogging {
       // one leaves them behind.
       notifyService.forgetGuild(guildId)
       observerService.forgetGuild(guildId)
+      observerRaidRepository.clearChannel(guildId)
     },
     forgetWorldSubscriptions = (guildId, world) => notifyService.forgetWorld(guildId, world),
     sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")
@@ -974,8 +995,11 @@ object BotApp extends App with StrictLogging {
   // Keep Observer credentials fresh: the JWT lasts ~90 days and /renew mints a new
   // one from it, so a daily sweep means a link never lapses while it is in use. The
   // sweep is a no-op when Observer is off or nothing is linked.
-  if (Config.Observer.enabled)
+  if (Config.Observer.enabled) {
     actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
+    // Poll the pooled raid feeds and post new raids to the guild raids channels.
+    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 5.minutes)(() => observerRaidPoller.poll())(ex)
+  }
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,

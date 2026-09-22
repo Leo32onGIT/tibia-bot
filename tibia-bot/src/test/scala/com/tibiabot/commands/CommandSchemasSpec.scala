@@ -13,7 +13,7 @@ class CommandSchemasSpec extends AnyFunSuite with Matchers {
   test("registered commands have the expected names") {
     CommandSchemas.commands.map(_.getName) should contain theSameElementsAs List(
       "setup", "remove", "repair", "help", "hunted", "allies", "settings",
-      "boosted", "cooldowns", "patreon", "stamina", "bookings", "lootsplit", "observer")
+      "boosted", "cooldowns", "patreon", "stamina", "bookings", "lootsplit", "observer", "raids")
   }
 
   test("admin command list adds /admin to the normal set") {

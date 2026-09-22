@@ -131,6 +131,23 @@ final class ObserverService(
       case _ => Nil
     }
 
+  /** All currently-announced raids pooled across **every** linked account, deduped by
+   *  (raidId, category) and grouped by world. This is the shared coverage: any guild
+   *  tracking a world benefits from every member's exploration, in any Discord. */
+  def pooledRaidsByWorld(): Map[String, List[RaidAnnouncement]] =
+    if (!enabled) Map.empty
+    else {
+      val all = tokens.values.toList.filter(_.status == ObserverStatus.Linked).flatMap { t =>
+        try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).map(apiClient.raids).getOrElse(Nil)
+        catch {
+          case ex: Throwable =>
+            logger.warn(s"Observer raids poll failed for '${t.userId}' in guild '${t.guildId}'", ex)
+            Nil
+        }
+      }
+      all.groupBy(r => (r.raidId, r.category)).values.map(_.head).toList.groupBy(_.world)
+    }
+
   /** Renew every linked credential. The JWT lasts ~90 days and `/renew` mints a fresh
    *  one from it, so a periodic sweep keeps links from ever lapsing while in use.
    *  Best-effort per token; a renew that fails leaves the old credential in place

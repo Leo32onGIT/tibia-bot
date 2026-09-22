@@ -30,6 +30,7 @@ object SlashRouting {
     "boosted"   -> (BoostedCommands.handle _),
     "patreon"   -> (PatreonCommands.handle _),
     "observer"  -> (ObserverCommands.handle _),
+    "raids"     -> (RaidChannelCommands.handle _),
     "stamina"   -> (RespawnCommands.handle _),
     "bookings"  -> (RespawnCommands.bookings _),
     "lootsplit" -> (LootSplitCommands.handle _),
