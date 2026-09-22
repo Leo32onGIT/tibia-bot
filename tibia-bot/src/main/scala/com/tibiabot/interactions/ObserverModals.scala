@@ -41,6 +41,11 @@ object ObserverModals extends StrictLogging {
                     .setComponents(ObserverEmbeds.controls(Some(stored)))
                     .setEphemeral(true)
                     .queue(_ => (), _ => ())
+                  // The raids channel appears the first time a token is set here. Seed
+                  // its dedup on creation so it starts with raids going forward, not a
+                  // dump of everything currently live across the guild's worlds.
+                  if (BotApp.channelService.ensureRaidsChannel(guild))
+                    BotApp.observerRaidPoller.seedPosted(guild.getId, BotApp.worldsTrackedBy(guild.getId))
                 case LinkOutcome.InvalidToken =>
                   reply(event, s"${Config.noEmoji} That token was rejected. It's **case-sensitive** and " +
                     "**single-use** — generate a fresh one and paste it exactly as shown on tibia.com.")

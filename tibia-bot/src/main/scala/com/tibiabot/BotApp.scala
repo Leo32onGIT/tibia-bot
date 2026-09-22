@@ -913,6 +913,7 @@ object BotApp extends App with StrictLogging {
     schemaInitializer,
     worldConfigRepository,
     discordConfigRepository,
+    observerRaidRepository,
     streamState,
     boostedService,
     paywallService,

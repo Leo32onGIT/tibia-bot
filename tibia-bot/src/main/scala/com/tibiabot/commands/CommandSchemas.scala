@@ -104,19 +104,6 @@ object CommandSchemas {
    *  card for the spawn being acted on. Stamina is the exception: it belongs to
    *  the member rather than to any one spawn, so there is no card for it to live
    *  on. */
-  /** Sets (or clears) the guild's Tibia raids channel — where pooled raids for the
-   *  worlds this guild tracks are posted. Manage-Server gated, and only meaningful
-   *  once a world is configured, so it sits with the world-config commands. */
-  val raidsCommand: SlashCommandData = Commands.slash("raids", "Set or clear this server's Tibia raids channel")
-    .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
-    .addOptions(
-      new OptionData(OptionType.STRING, "action", "Set this channel as the raids channel, or clear it")
-        .addChoices(
-          new Choice("set", "set"),
-          new Choice("clear", "clear")
-        )
-    )
-
   val staminaCommand: SlashCommandData =
     Commands.slash("stamina", "Show your claim stamina and what's using it")
 
@@ -136,7 +123,7 @@ object CommandSchemas {
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand, raidsCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands

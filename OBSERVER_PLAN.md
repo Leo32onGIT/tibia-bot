@@ -205,9 +205,12 @@ observer_tokens
     `ObserverRaidPoller` (5-min sweep) fans each new one — `RaidRanking`-ordered
     (type priority hook → stage → soonest start) — to the raids channel of every
     guild tracking that world. So Discords tracking the same world share coverage.
-    `/raids` (Manage-Server) sets/clears a guild's channel and seeds dedup so it
-    starts clean; `observer_raid_channels` + `observer_posted_raids` back it; the
-    channel is dropped on guild-leave. Compiles + command specs green.
+    The **`📢・ʀᴀɪᴅs` channel** is auto-created (in the admin category, member-visible,
+    bot-only to post) the first time a member sets an Observer token in the guild —
+    no command. It **persists when tokens are removed** (chat history stays), and is
+    cleaned up only on `/remove` of the last world and on guild-leave, like the other
+    guild-level channels. `observer_raid_channels` + `observer_posted_raids` back it;
+    creation seeds dedup so it starts clean. Compiles + command specs green.
   - *Deferred:* raid-type **priority** values (the `RaidTypeInformation` API returns
     `[]` so far; `RaidRanking`'s `typePriority` hook is ready to populate from a
     config map or once that endpoint's input is cracked). Raid embeds show the area
