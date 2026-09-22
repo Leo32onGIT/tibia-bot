@@ -1,6 +1,6 @@
 package com.tibiabot.observer
 
-import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken}
+import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
 import com.tibiabot.persistence.ObserverRepository
 import com.typesafe.scalalogging.StrictLogging
 
@@ -74,9 +74,12 @@ final class ObserverService(
           val worldLabel = if (worlds.nonEmpty) Some(worlds.mkString(", ").take(250)) else None
           val stored = repository.upsert(guildId, userId, crypto.encrypt(credential), ObserverStatus.Linked, accountLabel, worldLabel)
           tokens.put(keyOf(guildId, userId), stored)
-          // Best-effort: set MWC rules for the account's worlds so the feed populates.
+          // Best-effort: set MWC rules for the account's worlds, and raid rules for
+          // its explored areas (regions derived server-side), so the feeds populate.
           if (worlds.nonEmpty) try apiClient.ensureRules(credential, worlds)
             catch { case ex: Throwable => logger.warn(s"Observer ensureRules failed for '$userId'", ex) }
+          try apiClient.ensureRaidRules(credential)
+          catch { case ex: Throwable => logger.warn(s"Observer ensureRaidRules failed for '$userId'", ex) }
           LinkOutcome.Ok(stored, verified = true)
         case LinkResult.InvalidToken =>
           LinkOutcome.InvalidToken
@@ -112,6 +115,43 @@ final class ObserverService(
         }
       case _ => Nil
     }
+
+  /** The currently-announced/active raids for a linked member, via the sidecar.
+   *  Exploration-gated to that account's areas. Empty on any failure. */
+  def activeRaids(guildId: String, userId: String): List[RaidAnnouncement] =
+    if (!enabled) Nil
+    else statusFor(guildId, userId) match {
+      case Some(t) if t.status == ObserverStatus.Linked =>
+        try repository.tokenEncFor(guildId, userId).map(crypto.decrypt).map(apiClient.raids).getOrElse(Nil)
+        catch {
+          case ex: Throwable =>
+            logger.warn(s"Observer raids fetch failed for '$userId' in guild '$guildId'", ex)
+            Nil
+        }
+      case _ => Nil
+    }
+
+  /** Renew every linked credential. The JWT lasts ~90 days and `/renew` mints a fresh
+   *  one from it, so a periodic sweep keeps links from ever lapsing while in use.
+   *  Best-effort per token; a renew that fails leaves the old credential in place
+   *  (still valid until its own expiry) to try again next sweep. */
+  def renewAll(): Unit = if (enabled) {
+    val linked = tokens.values.filter(_.status == ObserverStatus.Linked).toList
+    var renewed = 0
+    linked.foreach { t =>
+      try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).foreach { credential =>
+        apiClient.renew(credential).foreach { fresh =>
+          val stored = repository.upsert(t.guildId, t.userId, crypto.encrypt(fresh),
+            ObserverStatus.Linked, t.accountLabel, t.world)
+          tokens.put(keyOf(t.guildId, t.userId), stored)
+          renewed += 1
+        }
+      } catch {
+        case ex: Throwable => logger.warn(s"Observer renew failed for '${t.userId}' in guild '${t.guildId}'", ex)
+      }
+    }
+    if (linked.nonEmpty) logger.info(s"Observer credential renewal: $renewed/${linked.size} renewed")
+  }
 
   /** Remove a member's link. Database first, cache after — a delete that fails
    *  leaves the link in place rather than desynchronising the two. Returns whether

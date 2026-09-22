@@ -1,13 +1,13 @@
 package com.tibiabot.observer
 
 import com.tibiabot.Config
-import com.tibiabot.domain.MiniWorldChange
+import com.tibiabot.domain.{MiniWorldChange, RaidAnnouncement}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
-import java.time.Duration
+import java.time.{Duration, Instant, OffsetDateTime}
 
 /** Outcome of exchanging a 5-char access token for a durable link. */
 sealed trait LinkResult
@@ -114,6 +114,52 @@ final class ObserverApiClient(
               str(item, "world").getOrElse(""),
               str(item, "title").getOrElse(""),
               str(item, "body").getOrElse(""))
+          }.toList
+        }.getOrElse(Nil)
+    }
+
+  private def intOf(o: JsObject, key: String): Int =
+    o.fields.get(key).collect { case JsNumber(n) => n.toInt }.getOrElse(0)
+
+  private def parseInstant(s: String): Option[Instant] =
+    try Some(OffsetDateTime.parse(s).toInstant) catch { case _: Throwable => None }
+
+  /** Renew the durable credential (mint a fresh ~90-day JWT). `None` on failure. */
+  def renew(credential: String): Option[String] =
+    post("/renew", JsObject(
+      "credential" -> JsString(credential),
+      "deviceIdentification" -> JsString(deviceIdentification)
+    )) match {
+      case Right(o) if bool(o, "ok") => str(o, "credential")
+      case _                         => None
+    }
+
+  /** Ensure enabled raid rules for every world the account has explored (regions
+   *  derived from ExploredAreas by the sidecar). */
+  def ensureRaidRules(credential: String): Boolean =
+    post("/ensure-raid-rules", JsObject(
+      "credential" -> JsString(credential),
+      "deviceIdentification" -> JsString(deviceIdentification)
+    )) match {
+      case Right(o) => bool(o, "ok")
+      case Left(_)  => false
+    }
+
+  /** The currently-announced/active raids for this credential's enabled rules. */
+  def raids(credential: String): List[RaidAnnouncement] =
+    post("/raids", JsObject("bearerToken" -> JsString(credential))) match {
+      case Left(_) => Nil
+      case Right(o) =>
+        o.fields.get("raids").collect { case JsArray(items) =>
+          items.collect { case item: JsObject =>
+            RaidAnnouncement(
+              str(item, "raidId").getOrElse(""),
+              str(item, "worldName").getOrElse(""),
+              str(item, "areaName").getOrElse(""),
+              str(item, "subareaName"),
+              str(item, "category").getOrElse(""),
+              str(item, "startDate").flatMap(parseInstant),
+              intOf(item, "raidTypeId"))
           }.toList
         }.getOrElse(Nil)
     }

@@ -971,6 +971,11 @@ object BotApp extends App with StrictLogging {
   // first online-list sweep already sees whatever is subscribed.
   notifyService.load()
   observerService.load()
+  // Keep Observer credentials fresh: the JWT lasts ~90 days and /renew mints a new
+  // one from it, so a daily sweep means a link never lapses while it is in use. The
+  // sweep is a no-op when Observer is off or nothing is linked.
+  if (Config.Observer.enabled)
+    actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,

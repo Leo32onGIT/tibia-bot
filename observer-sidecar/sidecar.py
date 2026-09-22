@@ -209,9 +209,15 @@ def ensure_rules():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
-@app.post("/clear-rules")
-def clear_rules():
-    """Remove the bot's MWC rules (used on unlink). Other categories untouched."""
+@app.post("/ensure-raid-rules")
+def ensure_raid_rules():
+    """Ensure enabled raid rules for every world the account has explored areas on.
+
+    Raids are exploration-gated: a rule's RegionIds must be areas the account has
+    unlocked, so the regions are derived from /Area/ExploredAreas rather than passed
+    in. All three modes (area/subarea revealed, raid started) are on, so the /Raids
+    feed carries every stage; the bot filters by `category`.
+    """
     b = _json_body()
     credential = b.get("credential")
     device = b.get("deviceIdentification") or "Violent Bot"
@@ -221,8 +227,55 @@ def clear_rules():
         settings = _current_settings(credential, device)
         if settings is None:
             return jsonify({"ok": False, "error": "could not read settings"}), 502
-        existing = settings.get("miniWorldChangeNotificationRules") or []
-        settings["miniWorldChangeNotificationRules"] = [r for r in existing if r.get("ruleName") != "Violent Bot"]
+        explored = _observer("GET", "/Area/ExploredAreas", bearer=credential)
+        areas = explored.json() if explored.status_code == 200 else []
+        managed_worlds = {e["world"] for e in areas if e.get("exploredAreas")}
+        existing = settings.get("raidNotificationRules") or []
+        kept = [r for r in existing if r.get("world") not in managed_worlds]
+        managed = [{
+            "ruleName": "Violent Bot", "World": e["world"],
+            "RegionIds": [a["areaId"] for a in e["exploredAreas"]],
+            "isEnabled": True, "areaRevealed": "appNotifications",
+            "subareaRevealed": "appNotifications", "raidStarted": "appNotifications",
+        } for e in areas if e.get("exploredAreas")]
+        settings["raidNotificationRules"] = kept + managed
+        r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
+        return jsonify({"ok": r.status_code == 200, "status_code": r.status_code, "worlds": sorted(managed_worlds)})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.post("/raids")
+def raids():
+    """Currently-announced/active raids for the credential's enabled raid rules."""
+    b = _json_body()
+    bearer = b.get("bearerToken")
+    if not bearer:
+        return jsonify({"ok": False, "error": "bearerToken required"}), 400
+    try:
+        r = _observer("GET", "/Raids", bearer=bearer)
+        if r.status_code == 401:
+            return jsonify({"ok": False, "status": "unauthorised"}), 401
+        return jsonify({"ok": r.status_code == 200, "status_code": r.status_code,
+                        "raids": r.json() if r.status_code == 200 else None})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.post("/clear-rules")
+def clear_rules():
+    """Remove the bot's rules (MWC and raids) on unlink. Other rules untouched."""
+    b = _json_body()
+    credential = b.get("credential")
+    device = b.get("deviceIdentification") or "Violent Bot"
+    if not credential:
+        return jsonify({"ok": False, "error": "credential required"}), 400
+    try:
+        settings = _current_settings(credential, device)
+        if settings is None:
+            return jsonify({"ok": False, "error": "could not read settings"}), 502
+        for key in ("miniWorldChangeNotificationRules", "raidNotificationRules"):
+            settings[key] = [r for r in (settings.get(key) or []) if r.get("ruleName") != "Violent Bot"]
         r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
         return jsonify({"ok": r.status_code == 200, "status_code": r.status_code})
     except Exception as exc:  # noqa: BLE001

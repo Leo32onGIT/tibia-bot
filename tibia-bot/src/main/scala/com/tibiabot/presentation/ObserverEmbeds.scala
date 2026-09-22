@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.Config
-import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken}
+import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
@@ -64,6 +64,24 @@ object ObserverEmbeds {
         .setDescription(body)
         .build())
     }
+
+  /** One raid announcement for the raids channel. `category` is the stage the feed
+   *  reported it at; `startDate` renders as a live relative timestamp. */
+  def raidEmbed(raid: RaidAnnouncement): MessageEmbed = {
+    val stage = raid.category match {
+      case "areaRevealed"    => "Area revealed"
+      case "subareaRevealed" => "Subarea revealed"
+      case "raidStarted"     => "Raid started"
+      case other             => other
+    }
+    val where = raid.subarea.filter(_.nonEmpty).map(s => s"${raid.area} · $s").getOrElse(raid.area)
+    val starts = raid.startDate.map(d => s" — starts <t:${d.getEpochSecond}:R>").getOrElse("")
+    new EmbedBuilder()
+      .setColor(Embeds.AutomaticColor)
+      .setTitle(s"$where — ${raid.world}")
+      .setDescription(s"$stage$starts")
+      .build()
+  }
 
   /** Add is offered when there is no token; Remove when there is one. The other is
    *  shown disabled so the panel always reads as a pair (as `/boosted` does). */

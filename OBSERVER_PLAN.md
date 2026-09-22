@@ -192,7 +192,16 @@ observer_tokens
   data path (`/ensure-rules` → `/mwc` → render) validated live; bot compiles clean.
   *Deferred:* a periodic credential-renewal job (unhurried at 90 days), and choosing
   worlds by guild-tracked set rather than the account's own worlds if wanted.
-- **Phase 4 (later):** raids, if wanted.
+- **Phase 4 — raids: data layer + renewal DONE.** Confirmed live: raid rules are
+  exploration-gated (`RegionIds` from `/Area/ExploredAreas`, three modes
+  area/subarea-revealed + raid-started); enabling them makes `GET /Raids` return
+  `{raidId, worldName, areaName, subareaName, category, startDate, raidTypeId}`.
+  Sidecar `/ensure-raid-rules` (auto-derives regions) + `/raids` validated; bot has
+  `RaidAnnouncement`, client `raids`/`ensureRaidRules`/`renew`, service
+  `activeRaids`/`renewAll`, and `ObserverEmbeds.raidEmbed`. **Renewal job** wired: a
+  daily `renewAll` sweep keeps credentials fresh. *Remaining:* the raids-channel
+  delivery — a per-guild channel + poll loop + raidId dedup + source-account choice
+  (see below).
 
 ## 10. Open decisions (for review)
 
