@@ -41,8 +41,10 @@ disables the whole path) so it can ship dark and be pulled instantly.
 
 **Known constraints (must shape the design):**
 - **Unsupported / undocumented / may vanish** — see §2.
-- **Cloudflare** — server-side requests may hit a challenge; needs the right
-  headers/UA and graceful failure. Validate early (see Phase 0).
+- **Cloudflare** — *resolved in Phase 0.* A managed challenge keyed on **TLS
+  fingerprint**, not IP: a browser-grade TLS client (`curl_cffi` impersonate) passes
+  clean from a datacenter IP, while a plain JVM/curl client is challenged. → the
+  Observer client needs TLS impersonation; see §6 and `spike/observer/`.
 - **Per-account** — a linked account only sees data its own play unlocks
   (Cyclopedia exploration gating). One member's token ≠ global coverage.
 - **One-device model** — CipSoft binds an account to a single device/session. If a
@@ -110,9 +112,14 @@ observer_tokens
   `BoostedCommands`).
 - `observer/ObserverService.scala` — cached token store + orchestration
   (template: `notifications/NotifyService`, write-through cache, `TrieMap`).
-- `observer/ObserverApiClient.scala` (+ `observer/response/*`) — the Observer HTTP
-  client: login, link, refresh, GetMiniWorldChanges (templates: `fansiteapi/`,
-  `tibiadata/`). Own circuit breaker / pacing like `FansiteCircuitBreaker`.
+- **Observer client with browser-TLS impersonation.** Phase 0 proved the JVM's own
+  TLS is Cloudflare-challenged, so the client cannot be plain pekko-http.
+  **Recommended: a small local sidecar** (the `spike/observer/` script grown into a
+  localhost service, `curl_cffi`/utls) that owns the Cloudflare pass, the bearer
+  lifecycle (`LoginWithAccessToken` → refresh), and the undocumented endpoints. The
+  Scala side is then a thin `observer/ObserverApiClient.scala` calling localhost
+  (circuit breaker / pacing like `FansiteCircuitBreaker`). Serves MWC now, raids
+  later. (Alternative: JVM-native JA3 impersonation — less mature, higher risk.)
 - `persistence/ObserverRepository.scala` (port) + JDBC impl (template:
   `NotifyRepository`).
 - `presentation/ObserverEmbeds.scala` — the panel embed and the MWC section
@@ -150,7 +157,7 @@ observer_tokens
 | Risk | Mitigation |
 |---|---|
 | Endpoint changes/vanishes (unsupported) | `mode=off` kills the path; circuit breaker; all failures are silent no-ops |
-| Cloudflare blocks server IP | Validate in Phase 0 before building; correct UA/headers; back off on challenge |
+| Cloudflare challenge | *Resolved:* browser-TLS impersonation passes from a datacenter IP. Risk shifts to Cloudflare tightening later → isolate in the sidecar, alert + `mode=off` on repeated challenge |
 | Per-account gating → thin coverage | Set expectations in the panel; MWC is best-effort per member's world |
 | One-device contention with official app | Warn at add-time; treat re-link as normal |
 | Token/bearer leakage | Encrypt at rest; never log; ephemeral replies only |
@@ -158,9 +165,12 @@ observer_tokens
 
 ## 9. Phased rollout
 
-- **Phase 0 — spike (no bot code):** confirm from a server-like context that we can
-  login → link a test token → GetMiniWorldChanges through Cloudflare. If this fails,
-  stop — the feature isn't viable as-is. *(gate)*
+- **Phase 0 — spike (no bot code):** **mostly validated** — see `spike/observer/`.
+  Confirmed from a server context: Cloudflare passes via browser-TLS impersonation,
+  `/api/v1` reachable, `Status` (unauth) gives the client version, the
+  `LoginWithAccessToken` contract, and MWC is bearer-gated (401). *Remaining:* the
+  token-gated rung (login → live MWC), which links an account (one-device) and needs
+  a fresh 5-char token. Gate is effectively cleared. *(gate)*
 - **Phase 1 — UX + storage, `mode=off`:** `/observer`, panel, add/remove buttons +
   modal, encrypted storage, lifecycle cleanup. No live calls yet (link is stubbed).
 - **Phase 2 — live linking:** wire `ObserverApiClient` login/link/refresh behind the
