@@ -74,13 +74,10 @@ object CommandSchemas {
   val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
 
   /** Personal, self-service: answers with the member's own Tibia Observer token panel
-   *  (Add/Remove buttons), replied ephemerally. Takes the world so raid alerts have a
-   *  channel context — the world's raids channel is ensured when a linked member runs
-   *  it. Adding a token opens a form from the button. */
+   *  (Add/Remove buttons), replied ephemerally. The Add form asks for the world (so
+   *  its raids channel can be created) and the token together. Kept with the
+   *  world-config commands since it's only useful once a world is set up. */
   val observerCommand: SlashCommandData = Commands.slash("observer", "Link your Tibia Observer token for raid & mini world change alerts")
-    .addOptions(
-      new OptionData(OptionType.STRING, "world", "The world to receive raid alerts for").setRequired(true)
-    )
 
   /** Opens the loot split form. No options: what it wants is a pasted analyser,
    *  which is a paragraph, and a command option is a single line.

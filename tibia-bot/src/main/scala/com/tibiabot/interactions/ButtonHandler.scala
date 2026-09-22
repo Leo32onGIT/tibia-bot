@@ -87,23 +87,24 @@ object ButtonHandler extends StrictLogging {
           Button.secondary("boosted toggle", " ").withEmoji(Emoji.fromFormatted(Config.torchOnEmoji))
         )).queue()
       }
-    } else if (button.startsWith("observer add ")) {
-      val world = button.stripPrefix("observer add ")
-      val inputWindow = TextInput.create(ObserverModals.TokenField, TextInputStyle.SHORT)
+    } else if (button == "observer add") {
+      val worldInput = TextInput.create(ObserverModals.WorldField, TextInputStyle.SHORT)
+        .setPlaceholder("Antica")
+        .setRequired(true)
+        .build()
+      val tokenInput = TextInput.create(ObserverModals.TokenField, TextInputStyle.SHORT)
         .setPlaceholder("FNP68")
         .setRequired(true)
         .build()
-      // The world rides in the modal id so the submit can create its raids channel.
-      val modal = Modal.create(s"${ObserverModals.ModalId} $world", "Link your Tibia Observer token")
-        .addComponents(Label.of("Token from tibia.com", inputWindow)).build()
+      val modal = Modal.create(ObserverModals.ModalId, "Link your Tibia Observer token")
+        .addComponents(Label.of("World", worldInput), Label.of("Token from tibia.com", tokenInput)).build()
       event.replyModal(modal).queue()
-    } else if (button.startsWith("observer remove ")) {
-      val world = button.stripPrefix("observer remove ")
+    } else if (button == "observer remove") {
       event.deferEdit().queue()
       Option(event.getGuild).foreach(guild => BotApp.observerService.unlink(guild.getId, event.getUser.getId))
       val token = Option(event.getGuild).flatMap(guild => BotApp.observerService.statusFor(guild.getId, event.getUser.getId))
-      event.getHook.editOriginalEmbeds(presentation.ObserverEmbeds.panel(token, world))
-        .setComponents(presentation.ObserverEmbeds.controls(token, world)).queue()
+      event.getHook.editOriginalEmbeds(presentation.ObserverEmbeds.panel(token))
+        .setComponents(presentation.ObserverEmbeds.controls(token)).queue()
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
         val world = title.replace(":crossed_swords:", "").trim()
