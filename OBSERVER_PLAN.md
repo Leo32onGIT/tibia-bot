@@ -217,20 +217,25 @@ observer_tokens
     an area and a stage (no name, no text, no timing). A bundled catalogue
     (`resources/raidtypes.json`), `RaidTypeCatalog` keyed by that id, supplies the
     raid's name, location, creatures, wiki link and its full **timed broadcast
-    script**. Because that script is deterministic, delivery is two passes
+    script**. Because that script is deterministic, delivery works in two stages
     (`ObserverRaidPoller`):
-      - *Detection* (5-min, the only API call): on a raid's **first sighting** — at
-        whichever stage a member's exploration reveals it, area *or* subarea; deduped
-        on `raidId` — posts one **imminent-raid** embed and registers the raid. The
+      - *Detection* (15-min sweep, the only API call): on a raid's **first sighting** —
+        at whichever stage a member's exploration reveals it, area *or* subarea; deduped
+        on `raidId` — posts one **imminent-raid** embed and registers the raid. (Raids
+        are announced well ahead of starting, so 15 min catches them in good time.) The
         embed: title = `:raid:` emoji + raid name, linked to its wiki page; yellow
         (`14397256`); thumbnail of its boss (via `BossCatalogue`) or lead creature
         (TibiaWiki image); description = subarea, `Starts <t:…:R>`, then the creatures
         as wiki-linked bullets. No footer.
-      - *Drip* (20-s tick, API-free): replays each broadcast line at `startDate +
-        millis` from the catalogue — short embeds, in-world text in **bold**, in the
-        guilded-neutral-death grey (`4540237`), no footer, one message per line.
-        Dedup is durable in `observer_posted_raids` (`key` = `imminent` / `line:i`),
-        so a restart re-hydrates from the next poll without re-posting.
+      - *Broadcast lines* (no polling): once the start is known, each broadcast is
+        **scheduled as a one-shot timer** at its exact moment (`startDate + millis`),
+        so it lands to the second with the scheduler idle in between — no fast drip
+        loop. Each is a short embed, in-world text in **bold**, in the
+        guilded-neutral-death grey (`4540237`), no footer, one message per line. A line
+        whose moment has already passed (a raid caught late) fires immediately. Dedup
+        is durable in `observer_posted_raids` (`key` = `imminent` / `line:i`), so a
+        restart re-hydrates from the next poll (which re-schedules the remaining lines)
+        without re-posting.
     Unknown ids fall back to area + stage; a missing/bad catalogue degrades to that
     too (graceful, as `BossCatalogue`). Layout was designed against an interactive
     Discord mockup and signed off; compiles green; both embeds verified live against

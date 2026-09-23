@@ -258,7 +258,10 @@ object BotApp extends App with StrictLogging {
       Option(discordGateway.guildById(guildId))
         .flatMap(g => Option(g.getTextChannelById(channelId)))
         .foreach(_.sendMessageEmbeds(embed).queue(_ => (), _ => ()))
-    })
+    },
+    // Fire a raid's broadcast lines at their exact moment — the scheduler sleeps until
+    // each is due, so there is no polling and the line lands to the second.
+    schedule = (delay, task) => { actorSystem.scheduler.scheduleOnce(delay)(task())(ex); () })
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -996,11 +999,11 @@ object BotApp extends App with StrictLogging {
   // sweep is a no-op when Observer is off or nothing is linked.
   if (Config.Observer.enabled) {
     actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
-    // Detect new raids from the pooled feeds and post each one's imminent heads-up.
-    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 5.minutes)(() => observerRaidPoller.poll())(ex)
-    // Drip each detected raid's broadcast lines at their real timing — API-free, off
-    // the catalogue, so it ticks often without adding feed load.
-    actorSystem.scheduler.scheduleWithFixedDelay(3.minutes, 20.seconds)(() => observerRaidPoller.drip())(ex)
+    // Detect new raids from the pooled feeds and post each one's imminent heads-up,
+    // then schedule its broadcast lines. Raids are announced well ahead of starting,
+    // so a 15-minute sweep catches them in good time; the lines self-schedule to the
+    // second off the catalogue, so there is no fast drip loop.
+    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 15.minutes)(() => observerRaidPoller.poll())(ex)
   }
 
   // Register slash commands per guild: support servers get the admin set,

@@ -8,40 +8,43 @@ import net.dv8tion.jda.api.entities.MessageEmbed
 
 import java.time.{Duration, Instant}
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration._
 
 /** A raid we are unfurling. `anchor` is the raid's start instant (the feed's
  *  startDate, or when we first saw it started); broadcast timings are measured from
- *  it. `None` until a start is known — the imminent post still goes out, the drip
- *  waits. */
+ *  it. `None` until a start is known — the imminent post still goes out, and the
+ *  broadcasts are scheduled once a start is known. */
 private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Option[Instant], firstSeen: Instant)
 
-/** Drives the per-world raids channels in two passes.
+/** Drives the per-world raids channels.
  *
  *  [[poll]] is the detection pass and the only one that touches the API: it pools
  *  raids across every linked account and, on a raid's first sighting (at whichever
  *  stage a member's exploration reveals it — area or subarea), posts one
- *  imminent-raid heads-up to every guild's raids channel for that world, and
- *  registers the raid for the drip.
- *
- *  [[drip]] is a fast, API-free pass: a raid's broadcast script is deterministic, so
- *  once its start is known the whole sequence is timed from the catalogue and each
- *  line is posted when its moment arrives — no further feed calls. So Discords with a
- *  raids channel for the same world share coverage, and the raid unfolds live in each.
+ *  imminent-raid heads-up to every guild's raids channel for that world. Then, once
+ *  the raid's start is known, it **schedules each broadcast line as a one-shot timer**
+ *  at its exact moment (`startDate + millis`, from the deterministic catalogue). No
+ *  further feed calls, and no polling for the drip — a line fires at its instant and
+ *  is posted to every guild's raids channel for that world, so Discords sharing a
+ *  world share the coverage and the raid unfolds live in each.
  *
  *  Dedup is durable (in the database), keyed on `(guild, raidId, key)` where `key` is
- *  `"imminent"` or `"line:i"`; the in-memory registry is only a schedule and a
- *  shortcut, so a restart re-hydrates from the next detection poll without re-posting.
- *  `post` sends one embed to one channel through the bot's rate-limited lane. */
+ *  `"imminent"` or `"line:i"`; the in-memory registry is only bookkeeping, so a
+ *  restart re-hydrates from the next detection poll (which re-schedules the remaining
+ *  lines) without re-posting. `post` sends one embed to one channel through the bot's
+ *  rate-limited lane; `schedule` runs a task once after a delay (the actor scheduler). */
 final class ObserverRaidPoller(
   observerService: ObserverService,
   raidRepository: ObserverRaidRepository,
-  post: (String, String, MessageEmbed) => Unit
+  post: (String, String, MessageEmbed) => Unit,
+  schedule: (FiniteDuration, () => Unit) => Unit
 ) extends StrictLogging {
 
   private val tracked = TrieMap.empty[String, TrackedRaid]
-  // Highest broadcast index the drip has already attempted for a raid — a per-process
-  // shortcut so ticks don't re-hit the dedup table for lines already sent.
-  private val attempted = TrieMap.empty[String, Int]
+  // Raids whose broadcast lines have already been scheduled this process — so a raid
+  // that stays in the feed across polls is not scheduled twice (the database dedup is
+  // the durable guard; this just avoids redundant timers).
+  private val scheduledRaids = TrieMap.empty[String, Unit]
 
   private def typePriority(id: Int): Int = if (RaidTypeCatalog.get(id).isDefined) 1 else 0
 
@@ -60,6 +63,11 @@ final class ObserverRaidPoller(
               if (raidRepository.markPostedIfNew(guildId, raid.raidId, "imminent"))
                 post(guildId, channelId, ObserverEmbeds.imminentEmbed(raid, RaidTypeCatalog.get(raid.raidTypeId)))
             }
+          // Once we know when it starts, schedule every broadcast line precisely — once.
+          tracked.get(raid.raidId).flatMap(_.anchor).foreach { anchor =>
+            if (scheduledRaids.putIfAbsent(raid.raidId, ()).isEmpty)
+              scheduleLines(raid.raidId, world, raid.raidTypeId, anchor, now)
+          }
         }
       }
       pruneTracked(now)
@@ -69,29 +77,28 @@ final class ObserverRaidPoller(
       case ex: Throwable => logger.warn("Observer raid poll failed", ex)
     }
 
-  def drip(): Unit =
-    try {
-      val now = Instant.now()
-      tracked.foreach { case (raidId, t) =>
-        t.anchor.foreach { anchor =>
-          val raidType = RaidTypeCatalog.get(t.raidTypeId)
-          val broadcasts = raidType.map(_.broadcasts).getOrElse(Vector.empty)
-          val channels = raidRepository.channelsForWorld(t.world)
-          if (broadcasts.nonEmpty && channels.nonEmpty) {
-            val elapsed = Duration.between(anchor, now).toMillis
-            val from = attempted.getOrElse(raidId, -1) + 1
-            broadcasts.zipWithIndex.drop(from).takeWhile(_._1.millis <= elapsed).foreach { case (event, i) =>
-              channels.foreach { case (guildId, channelId) =>
-                if (raidRepository.markPostedIfNew(guildId, raidId, s"line:$i"))
-                  event.message.foreach(m => post(guildId, channelId, ObserverEmbeds.raidLineEmbed(m)))
-              }
-              attempted.update(raidId, i)
-            }
-          }
-        }
+  /** Schedule each of a raid's broadcasts to post at its exact moment. A line whose
+   *  moment has already passed (a raid caught late, or already in progress) is given a
+   *  zero delay, so it posts on the next scheduler tick rather than being lost. */
+  private def scheduleLines(raidId: String, world: String, raidTypeId: Int, anchor: Instant, now: Instant): Unit = {
+    val broadcasts = RaidTypeCatalog.get(raidTypeId).map(_.broadcasts).getOrElse(Vector.empty)
+    broadcasts.zipWithIndex.foreach { case (event, index) =>
+      event.message.foreach { message =>
+        val delayMs = math.max(0L, Duration.between(now, anchor.plusMillis(event.millis)).toMillis)
+        schedule(delayMs.millis, () => postLine(raidId, world, index, message))
       }
+    }
+  }
+
+  /** Post one broadcast line, when its timer fires, to every guild's raids channel for
+   *  the world — channels resolved now, so one created since scheduling is included.
+   *  Deduped per `(guild, raidId, line:index)`, so a re-scheduled line never repeats. */
+  private def postLine(raidId: String, world: String, index: Int, message: String): Unit =
+    try raidRepository.channelsForWorld(world).foreach { case (guildId, channelId) =>
+      if (raidRepository.markPostedIfNew(guildId, raidId, s"line:$index"))
+        post(guildId, channelId, ObserverEmbeds.raidLineEmbed(message))
     } catch {
-      case ex: Throwable => logger.warn("Observer raid drip failed", ex)
+      case ex: Throwable => logger.warn(s"Observer raid line post failed for raid '$raidId' line $index", ex)
     }
 
   /** Mark the currently-active raids on `world` as already posted for this guild —
@@ -110,8 +117,8 @@ final class ObserverRaidPoller(
     }
 
   /** Pick one entry to represent a raid across its stages: prefer one carrying a start
-   *  time (needed to time the drip), else the first — location and creatures come from
-   *  the catalogue regardless of which stage revealed it. */
+   *  time (needed to time the broadcasts), else the first — location and creatures come
+   *  from the catalogue regardless of which stage revealed it. */
   private def represent(entries: List[RaidAnnouncement]): RaidAnnouncement =
     entries.find(_.startDate.isDefined).getOrElse(entries.head)
 
@@ -137,7 +144,7 @@ final class ObserverRaidPoller(
       val stale = t.anchor.isEmpty && now.isAfter(t.firstSeen.plus(Duration.ofHours(2)))
       if (done || stale) {
         tracked.remove(raidId)
-        attempted.remove(raidId)
+        scheduledRaids.remove(raidId)
       }
     }
 }
