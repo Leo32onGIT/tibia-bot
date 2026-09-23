@@ -1555,19 +1555,20 @@ object BotApp extends App with StrictLogging {
                           messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]): Unit = {
     def send(embeds: List[net.dv8tion.jda.api.entities.MessageEmbed]) =
       channel.sendMessageEmbeds(embeds.asJava).setSuppressedNotifications(true)
-    messages match {
+    // The button rides the last message, at the foot of the post where a reader
+    // finishes it. A refresh still rewrites only the board, which leads the
+    // first message; on the day the post spills, a press down here finds that
+    // message above it (see interactions.StatisticsButtons).
+    val lastIndex = messages.size - 1
+    val sends = messages.zipWithIndex.map { case (embeds, index) =>
+      if (index == lastIndex && Config.Statistics.Refresh.enabled) send(embeds).setComponents(statisticsRefreshRow)
+      else send(embeds)
+    }
+    sends match {
       case Nil => ()
       case first :: rest =>
-        // The button rides the first message, which is where the experience
-        // board is and the only message a refresh ever rewrites. On the day the
-        // post spills, the second message carries the creatures and the bosses,
-        // which a refresh does not touch and which would wear a control that
-        // rewrites somewhere else.
-        val opening =
-          if (Config.Statistics.Refresh.enabled) send(first).setComponents(statisticsRefreshRow)
-          else send(first)
         rest.foldLeft[net.dv8tion.jda.api.requests.RestAction[net.dv8tion.jda.api.entities.Message]](
-          opening)((sent, next) => sent.flatMap(_ => send(next))).queue(null, null)
+          first)((sent, next) => sent.flatMap(_ => next)).queue(null, null)
     }
   }
 

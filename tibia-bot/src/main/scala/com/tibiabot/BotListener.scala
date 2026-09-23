@@ -249,7 +249,7 @@ class BotListener extends ListenerAdapter with StrictLogging {
         }
       })
     }
-    // The refresh button under a statistics post. It rewrites the message it is
+    // The refresh button under a statistics post. It rewrites the post it is
     // on, so it defers an edit here on the event thread and does its database
     // reads on the interaction pool, the same as the two above.
     else if (interactions.StatisticsButtons.handles(event.getComponentId)) {

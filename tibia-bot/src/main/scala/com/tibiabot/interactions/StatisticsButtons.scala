@@ -4,6 +4,7 @@ import com.tibiabot.{BotApp, Config, presentation}
 import com.tibiabot.domain.Worlds
 import com.tibiabot.statistics.RefreshDecision
 import com.typesafe.scalalogging.StrictLogging
+import net.dv8tion.jda.api.entities.{Message, MessageEmbed}
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 
 import scala.jdk.CollectionConverters._
@@ -35,7 +36,7 @@ object StatisticsButtons extends StrictLogging {
    *  switched off, and answering it is better than leaving a dead control. */
   def handles(componentId: String): Boolean = componentId == RefreshId
 
-  /** The press rewrites the message it is on, so it defers an edit — the same
+  /** The press rewrites the post it is on, so it defers an edit — the same
    *  shape the respawn and panel buttons use, acknowledged on the event thread
    *  before the work is queued. */
   def handle(event: ButtonInteractionEvent): Unit = {
@@ -63,20 +64,46 @@ object StatisticsButtons extends StrictLogging {
   private def worldFor(guildId: String, channelId: String): Option[Worlds] =
     BotApp.worldsData.getOrElse(guildId, Nil).find(_.statisticsChannel == channelId)
 
-  /** Put the new board in front of what the message already carries.
+  /** Put the new board in front of what the board's message already carries.
+   *
+   *  The button sits on the post's last message and the board leads its first,
+   *  so on most days they are the same message and on a busy day they are not.
+   *  Then the board's message is the nearest one of ours above the press that
+   *  carries it — the post's first, since the channel is cleared for each day.
    *
    *  The embeds after the board are sent back exactly as they arrived, which is
    *  what keeps a refresh from quietly rewriting the war or the bosses — see
    *  [[presentation.StatisticsEmbeds.replaceBoard]]. */
-  private def rewrite(event: ButtonInteractionEvent, board: List[net.dv8tion.jda.api.entities.MessageEmbed]): Unit = {
-    val existing = event.getMessage.getEmbeds.asScala.toList
-    val embeds = presentation.StatisticsEmbeds.replaceBoard(existing, board)
-    event.getHook.editOriginalEmbeds(embeds.asJava).queue(
-      _ => (),
-      (error: Throwable) => {
-        logger.warn(s"Statistics: could not rewrite the post in '${event.getChannel.getId}': ${error.getMessage}")
-        followUp(event, s"${Config.noEmoji} The figures were read, but the post could not be updated.")
-      })
+  private def rewrite(event: ButtonInteractionEvent, board: List[MessageEmbed]): Unit = {
+    val pressed = event.getMessage
+    if (holdsBoard(pressed))
+      event.getHook.editOriginalEmbeds(spliced(pressed, board).asJava).queue(_ => (), failed(event, _))
+    else {
+      val self = event.getJDA.getSelfUser.getId
+      event.getChannel.getHistoryBefore(pressed, 10).queue(
+        history =>
+          history.getRetrievedHistory.asScala.find(m => m.getAuthor.getId == self && holdsBoard(m)) match {
+            case Some(message) =>
+              event.getChannel.editMessageEmbedsById(message.getId, spliced(message, board).asJava)
+                .queue(_ => (), failed(event, _))
+            case None =>
+              logger.warn(s"Statistics: no board above the pressed post in '${event.getChannel.getId}'")
+              followUp(event, s"${Config.noEmoji} The figures were read, but the post could not be updated.")
+          },
+        failed(event, _))
+    }
+  }
+
+  /** The board's colour marks it, the same way [[presentation.StatisticsEmbeds.replaceBoard]] finds it. */
+  private def holdsBoard(message: Message): Boolean =
+    message.getEmbeds.asScala.exists(_.getColorRaw == presentation.StatisticsEmbeds.WorldColor)
+
+  private def spliced(message: Message, board: List[MessageEmbed]): List[MessageEmbed] =
+    presentation.StatisticsEmbeds.replaceBoard(message.getEmbeds.asScala.toList, board)
+
+  private def failed(event: ButtonInteractionEvent, error: Throwable): Unit = {
+    logger.warn(s"Statistics: could not rewrite the post in '${event.getChannel.getId}': ${error.getMessage}")
+    followUp(event, s"${Config.noEmoji} The figures were read, but the post could not be updated.")
   }
 
   /** What a refusal says, or None where it says nothing.
