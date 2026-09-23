@@ -28,8 +28,10 @@ object PanelCommands {
       else {
         val worlds = worldsOf(event)
         if (worlds.isEmpty) refuse(event, noWorldsText)
-        else event.getHook.sendMessageEmbeds(Panels.settingsEmbed(worlds))
-          .setComponents(Panels.settingsButtons.asJava).setEphemeral(true).queue()
+        // Laid out with Discord's layout components, so the message is flagged as
+        // such and carries no embed — see Panels.settingsPanel.
+        else event.getHook.sendMessageComponents(Panels.settingsPanel(worlds))
+          .useComponentsV2().setEphemeral(true).queue()
       }
     }
 

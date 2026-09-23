@@ -57,38 +57,56 @@ object PanelModals extends StrictLogging {
       case Some(world) =>
         val service = BotApp.worldSettingsService
         val name = world.name
+        // Only what actually differs from the world's current value is applied. A
+        // form opens filled in with every current value, so a box left as it was
+        // still arrives — and applying it answered "already set" once per box,
+        // which on a four-box form buried the one change somebody made. Each
+        // `.map` below runs its write as the list is built, so the list order is
+        // the order they happen in.
         val embeds: List[MessageEmbed] = action match {
           case PanelIds.Fullbless =>
-            number(event, PanelForms.LevelField).map(level => service.fullblessLevel(event, name, level)).toList
-
-          case PanelIds.Layout =>
-            choice(event, PanelForms.OptionField).map(v => service.onlineListConfig(event, name, v)).toList
-
-          case PanelIds.Neutral =>
-            List(
-              choice(event, PanelForms.LevelsField).map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "levels")),
-              choice(event, PanelForms.DeathsField).map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "deaths"))
-            ).flatten
+            changed(number(event, PanelForms.LevelField), world.fullblessLevel)
+              .map(level => service.fullblessLevel(event, name, level)).toList
 
           case PanelIds.ChannelFilter =>
             List(
-              number(event, PanelForms.LevelsField).map(v => service.minLevel(event, name, v, "levels")),
-              number(event, PanelForms.DeathsField).map(v => service.minLevel(event, name, v, "deaths"))
+              changed(number(event, PanelForms.LevelsField), world.levelsMin)
+                .map(v => service.minLevel(event, name, v, "levels")),
+              changed(choice(event, PanelForms.NeutralLevelsField), PanelForms.showHideOf(world.showNeutralLevels))
+                .map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "levels")),
+              changed(number(event, PanelForms.DeathsField), world.deathsMin)
+                .map(v => service.minLevel(event, name, v, "deaths")),
+              changed(choice(event, PanelForms.NeutralDeathsField), PanelForms.showHideOf(world.showNeutralDeaths))
+                .map(v => service.deathsLevelsHideShow(event, name, v, "neutrals", "deaths"))
             ).flatten
 
-          case PanelIds.OnlineFilter =>
+          // The level floors before the layout: switching layout rebuilds the
+          // online list's channels, which should start out with the new floors.
+          case PanelIds.Layout =>
             List(
-              number(event, PanelForms.EnemiesField).map(v => service.onlineMinLevel(event, name, v, "enemies")),
-              number(event, PanelForms.AlliesField).map(v => service.onlineMinLevel(event, name, v, "allies")),
-              number(event, PanelForms.NeutralsField).map(v => service.onlineMinLevel(event, name, v, "neutrals"))
+              changed(number(event, PanelForms.EnemiesField), world.onlineEnemiesMin)
+                .map(v => service.onlineMinLevel(event, name, v, "enemies")),
+              changed(number(event, PanelForms.AlliesField), world.onlineAlliesMin)
+                .map(v => service.onlineMinLevel(event, name, v, "allies")),
+              changed(number(event, PanelForms.NeutralsField), world.onlineNeutralsMin)
+                .map(v => service.onlineMinLevel(event, name, v, "neutrals")),
+              changed(choice(event, PanelForms.OptionField), if (world.onlineCombined == "combine") "combine" else "separate")
+                .map(v => service.onlineListConfig(event, name, v))
             ).flatten
 
           case _ => Nil
         }
-        if (embeds.isEmpty) reply(event, s"${Config.noEmoji} Nothing was changed - every box was left blank.")
-        else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue())
+        // One reply for the whole form, listing each change in turn.
+        embeds match {
+          case Nil => reply(event, s"${Config.noEmoji} Nothing was changed — every box was left as it was.")
+          case single :: Nil => event.getHook.sendMessageEmbeds(single).setEphemeral(true).queue()
+          case several => reply(event, several.map(_.getDescription).mkString("\n\n"))
+        }
     }
   }
+
+  /** A submitted value, unless it is the one already set. */
+  private def changed[A](submitted: Option[A], current: A): Option[A] = submitted.filter(_ != current)
 
   /** Point the command log at an existing channel.
    *

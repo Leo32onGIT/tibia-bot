@@ -101,8 +101,32 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
   test("a single-world guild is never asked which world") {
     PanelForms.worldPicker(one) shouldBe empty
     PanelForms.worldPicker(several) shouldBe defined
-    sizeOf(SettingsForms.modal(PanelIds.Neutral, several).get) shouldBe
-      sizeOf(SettingsForms.modal(PanelIds.Neutral, one).get) + 1
+    sizeOf(SettingsForms.modal(PanelIds.ChannelFilter, several).get) shouldBe
+      sizeOf(SettingsForms.modal(PanelIds.ChannelFilter, one).get) + 1
+  }
+
+  /** The ids a form's fields answer to, in the order they are drawn. */
+  private def fieldIds(modal: Modal): List[String] =
+    modal.getComponents.asScala.toList.map(_.asInstanceOf[Label].getChild).map {
+      case input: TextInput => input.getCustomId
+      case menu: net.dv8tion.jda.api.components.selections.SelectMenu => menu.getCustomId
+      case other => other.toString
+    }
+
+  test("the channel filters form carries each channel's neutral toggle under its level floor") {
+    fieldIds(SettingsForms.modal(PanelIds.ChannelFilter, one).get) shouldBe List(
+      PanelForms.LevelsField, PanelForms.NeutralLevelsField, PanelForms.DeathsField, PanelForms.NeutralDeathsField)
+  }
+
+  test("the online list form carries the layout and each side's level floor") {
+    fieldIds(SettingsForms.modal(PanelIds.Layout, one).get) shouldBe List(
+      PanelForms.OptionField, PanelForms.EnemiesField, PanelForms.AlliesField, PanelForms.NeutralsField)
+  }
+
+  test("both merged forms are exactly full on a guild tracking several worlds") {
+    List(PanelIds.ChannelFilter, PanelIds.Layout).foreach { action =>
+      withClue(action) { sizeOf(SettingsForms.modal(action, several).get) shouldBe Modal.MAX_COMPONENTS }
+    }
   }
 
   test("no form is offered when no world is set up") {

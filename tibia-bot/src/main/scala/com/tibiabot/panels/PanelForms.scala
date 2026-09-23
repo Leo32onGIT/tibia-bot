@@ -37,6 +37,10 @@ object PanelForms {
   val EnemiesField = "enemies"
   val AlliesField = "allies"
   val NeutralsField = "neutrals"
+  /** The neutral show/hide toggles in the channel filters form, named apart from
+   *  that form's own number boxes (`levels` / `deaths`) that they sit beside. */
+  val NeutralLevelsField = "neutral-levels"
+  val NeutralDeathsField = "neutral-deaths"
   val NamesField = "names"
   val KindField = "kind"
   val ReasonField = "reason"

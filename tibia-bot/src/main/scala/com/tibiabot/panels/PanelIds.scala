@@ -62,29 +62,29 @@ object PanelIds {
   // --- settings actions ----------------------------------------------------
 
   val Fullbless = "fullbless"
+  /** The online list: its layout and the level floors for each side. */
   val Layout = "layout"
-  val Neutral = "neutral"
+  /** The levels and deaths channels: their level floors, and whether players on
+   *  neither list are shown there. */
   val ChannelFilter = "chanfilter"
-  val OnlineFilter = "onlinefilter"
   /** Where the bot's command log is posted. The only setting on this panel that
    *  is about the server rather than about a world — hence no world picker on its
    *  form, and last on the panel. */
   val CommandLog = "cmdlog"
 
-  /** Every button on `/settings`, in the order they are drawn: the one that sets
-   *  a level for the whole world, then what the channels and the online list
-   *  show, then neutrals — the one that is about players nobody here tracks, and
-   *  so the least often wanted — and the command log after them, which is set
-   *  once for the server and then forgotten about.
+  /** Every button on `/settings`.
    *
-   *  Six, so they no longer fit one row; Panels.rows splits them 5 and 1. The
-   *  daily statistics post is not among them: its channel is part of a world
+   *  Four: the neutral toggles live in the channel filters form and the online
+   *  list's level floors in its layout form, each beside the setting it qualifies
+   *  — they were buttons of their own when the panel was a row of buttons with no
+   *  room to explain them. The order they are drawn in is Panels.settingsPanel's.
+   *  The daily statistics post is not among them: its channel is part of a world
    *  like the deaths and levels channels are, made by `/setup` and rebuilt by
    *  `/repair`, so there is nothing here to turn on. Nor is the exiva list,
    *  which is no longer a setting at all — an ally death carries a button that
    *  writes it into the post — see presentation.ExivaList. */
   val settingsActions: List[String] =
-    List(Fullbless, ChannelFilter, Layout, OnlineFilter, Neutral, CommandLog)
+    List(ChannelFilter, Layout, Fullbless, CommandLog)
 
   // --- hunted/allies actions ----------------------------------------------
 

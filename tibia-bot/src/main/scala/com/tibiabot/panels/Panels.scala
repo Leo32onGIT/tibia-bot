@@ -7,6 +7,10 @@ import com.tibiabot.presentation.Embeds
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
+import net.dv8tion.jda.api.components.container.{Container, ContainerChildComponent}
+import net.dv8tion.jda.api.components.section.Section
+import net.dv8tion.jda.api.components.separator.Separator
+import net.dv8tion.jda.api.components.textdisplay.TextDisplay
 import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.entities.emoji.Emoji
 
@@ -33,48 +37,61 @@ object Panels {
 
   // --- /settings -----------------------------------------------------------
 
-  /** One of these comes from config rather than being unicode picked here: the
-   *  server's own blessing icon, so a setting is labelled with the same symbol
-   *  the feature it configures already uses elsewhere.
+  /** One setting on the panel: the form its button opens, what it is called, the
+   *  emoji it goes by, the group it sits under, and a line saying what it changes —
+   *  written from what the form actually edits (see [[SettingsForms]]). */
+  private final case class SettingRow(action: String, name: String, emoji: String, group: String, explains: String)
+
+  /** In display order, grouped by what each applies to: one world at a time
+   *  (the form asks which when there are several), or the whole server.
    *
-   *  A `def`, deliberately. As a `val` it read Config while this object was being
-   *  initialised, which made merely touching Panels — from any test, for any
-   *  reason — require a fully configured environment, and fail with an
-   *  initialiser error where it did not have one. Read it when a button is
-   *  actually being drawn instead. */
-  private def settingsLabels: Map[String, (String, String)] = Map(
-    PanelIds.Fullbless     -> ("Fullbless" -> Config.inqEmoji),
-    PanelIds.ChannelFilter -> ("Channel Filters" -> "📊"),
-    PanelIds.Layout        -> ("Online Layout" -> "📈"),
-    PanelIds.OnlineFilter  -> ("Online Filters" -> "📋"),
-    PanelIds.Neutral       -> ("Neutrals" -> "⚪"),
-    PanelIds.CommandLog    -> ("Command Log" -> "🖥️")
+   *  The fullbless emoji comes from config rather than being picked here — the
+   *  server's own blessing icon, so the setting wears the symbol the feature
+   *  already uses elsewhere — and arrives as an argument so building the panel
+   *  never needs a configured environment. */
+  private def settingRows(fullblessEmoji: String): List[SettingRow] = List(
+    SettingRow(PanelIds.ChannelFilter, "Channel Filters", "📊", "Per world",
+      "The lowest level shown in the levels and deaths channels, and whether players on neither list appear there."),
+    SettingRow(PanelIds.Layout, "Online List", "📈", "Per world",
+      "One channel for everyone or a channel per side, and the lowest level shown for enemies, allies and neutrals."),
+    SettingRow(PanelIds.Fullbless, "Fullbless", fullblessEmoji, "Per world",
+      "The level an enemy has to be for the fullbless role to be pinged when they fullbless."),
+    SettingRow(PanelIds.CommandLog, "Command Log", "🖥️", "Server-wide",
+      "Where the bot records changes to your lists and settings, and its notices to admins.")
   )
 
-  def settingsButtons: List[ActionRow] =
-    rows(PanelIds.settingsActions.map { action =>
-      val (label, emoji) = settingsLabels(action)
-      // fromFormatted rather than fromUnicode: these are a mix now, and the
-      // custom ones arrive as "<:name:id>", which fromUnicode would take
-      // literally. It reads plain unicode just as happily.
-      Button.secondary(PanelIds.button(Panel.Settings, action), label)
-        .withEmoji(Emoji.fromFormatted(emoji))
-    })
-
-  /** Names every world the panel can configure, so somebody with one world can
-   *  see that at a glance and somebody with six knows the forms will ask which. */
-  def settingsEmbed(worlds: List[Worlds]): MessageEmbed = {
+  /** The `/settings` reply: each setting's name and what it changes, with its own
+   *  ⚙️ button beside it, under a small heading for per-world and server-wide.
+   *
+   *  Built from Discord's layout components (a container of sections) rather than
+   *  an embed and a row of buttons, because that is the only way to put a button
+   *  next to the text explaining it — with an embed, the reader has to match a
+   *  paragraph to a button below it. The message must be sent with
+   *  `useComponentsV2`, and can then carry no embed of its own. Every button is
+   *  the same gear: the text beside it already names what it opens.
+   *
+   *  The header names every world the panel can configure, so somebody with one
+   *  world can see that at a glance and somebody with six knows the forms will ask
+   *  which. */
+  def settingsPanel(worlds: List[Worlds], fullblessEmoji: String = Config.inqEmoji): Container = {
     val worldList =
       if (worlds.isEmpty) "_No worlds are set up yet — run `/setup` first._"
       else worlds.map(w => s"**${w.name}**").sorted.mkString(", ")
-    new EmbedBuilder()
-      .setTitle("Server settings")
-      .setDescription(
-        "Pick what you want to change. Each one opens a form showing what it is " +
-          "set to now, so you can check a setting without changing it.\n\n" +
-          s"Tracking: $worldList")
-      .setColor(Embeds.BrandColor)
-      .build()
+    val header: ContainerChildComponent = TextDisplay.of(
+      s"### ⚙️ Server settings\n-# Tracking: $worldList · each button opens a form showing what it's set to now.")
+    val rows = settingRows(fullblessEmoji)
+    val body = rows.zipWithIndex.flatMap { case (setting, index) =>
+      val startsGroup = index == 0 || rows(index - 1).group != setting.group
+      val heading: List[ContainerChildComponent] =
+        if (startsGroup) List(
+          Separator.createDivider(Separator.Spacing.SMALL),
+          TextDisplay.of(s"-# **${setting.group.toUpperCase}**"))
+        else Nil
+      heading :+ (Section.of(
+        Button.secondary(PanelIds.button(Panel.Settings, setting.action), Emoji.fromUnicode("⚙️")),
+        TextDisplay.of(s"${setting.emoji} **${setting.name}**\n-# ${setting.explains}")): ContainerChildComponent)
+    }
+    Container.of((header :: body).asJava)
   }
 
   // --- /hunted and /allies -------------------------------------------------

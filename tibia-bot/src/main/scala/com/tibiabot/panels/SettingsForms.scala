@@ -6,13 +6,17 @@ import com.tibiabot.panels.PanelIds.Panel
 import net.dv8tion.jda.api.components.label.Label
 import net.dv8tion.jda.api.modals.Modal
 
-/** The five forms behind `/settings`.
+/** The four forms behind `/settings`.
  *
  *  Each was a whole top-level command once — `/fullbless`, `/online`, `/neutral`
  *  and `/filter` — and between them they cost nine rows of the command picker.
- *  `filter` is two forms rather than one because world plus five level floors is
- *  six components and Discord allows five; splitting it by what the floor
- *  applies to (a channel, or an online list) is the seam that reads.
+ *  They are grouped by what they change rather than by kind of value: the levels
+ *  and deaths channels (their level floors, and whether neutrals appear there),
+ *  and the online list (its layout, and the level floor for each side).
+ *
+ *  Both of those forms are full on a guild tracking several worlds: four fields
+ *  plus the world picker is the five components Discord allows. A setting added
+ *  to either needs a form of its own.
  */
 object SettingsForms {
 
@@ -35,27 +39,23 @@ object SettingsForms {
           "Enemy fullblesses at or above this level poke the role.",
           only.map(_.fullblessLevel), "250"))
 
-      case PanelIds.Layout =>
-        Some("Online list layout", picker :+ choice(OptionField, "Online list",
-          "One channel for everyone, or a channel per side.",
-          SeparateCombine, only.map(_.onlineCombined).map(v => if (v == "combine") "combine" else "separate")))
-
-      case PanelIds.Neutral =>
-        Some("Neutral players", picker ++ List(
-          choice(LevelsField, "Neutral levels", "Level-ups by players you don't track.",
-            ShowHide, only.map(w => showHideOf(w.showNeutralLevels))),
-          choice(DeathsField, "Neutral deaths", "Deaths of players you don't track.",
-            ShowHide, only.map(w => showHideOf(w.showNeutralDeaths)))))
-
+      // Each channel's level floor, with the neutral toggle for that channel right
+      // under it — both decide what the channel shows.
       case PanelIds.ChannelFilter =>
-        Some("Channel level filters", picker ++ List(
+        Some("Levels and deaths channels", picker ++ List(
           number(LevelsField, "Levels channel", "Hide level-ups below this level.",
             only.map(_.levelsMin), "8"),
+          choice(NeutralLevelsField, "Neutral level-ups", "Level-ups by players on neither list.",
+            ShowHide, only.map(w => showHideOf(w.showNeutralLevels))),
           number(DeathsField, "Deaths channel", "Hide deaths below this level.",
-            only.map(_.deathsMin), "8")))
+            only.map(_.deathsMin), "8"),
+          choice(NeutralDeathsField, "Neutral deaths", "Deaths of players on neither list.",
+            ShowHide, only.map(w => showHideOf(w.showNeutralDeaths)))))
 
-      case PanelIds.OnlineFilter =>
-        Some("Online list filters", picker ++ List(
+      case PanelIds.Layout =>
+        Some("Online list", picker ++ List(
+          choice(OptionField, "Layout", "One channel for everyone, or a channel per side.",
+            SeparateCombine, only.map(_.onlineCombined).map(v => if (v == "combine") "combine" else "separate")),
           number(EnemiesField, "Enemies list", "Hide enemies below this level; 0 shows everyone.",
             only.map(_.onlineEnemiesMin), "0"),
           number(AlliesField, "Allies list", "Hide allies below this level; 0 shows everyone.",
