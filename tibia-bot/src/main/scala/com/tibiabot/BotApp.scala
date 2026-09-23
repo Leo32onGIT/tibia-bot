@@ -996,8 +996,11 @@ object BotApp extends App with StrictLogging {
   // sweep is a no-op when Observer is off or nothing is linked.
   if (Config.Observer.enabled) {
     actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
-    // Poll the pooled raid feeds and post new raids to the guild raids channels.
+    // Detect new raids from the pooled feeds and post each one's imminent heads-up.
     actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 5.minutes)(() => observerRaidPoller.poll())(ex)
+    // Drip each detected raid's broadcast lines at their real timing — API-free, off
+    // the catalogue, so it ticks often without adding feed load.
+    actorSystem.scheduler.scheduleWithFixedDelay(3.minutes, 20.seconds)(() => observerRaidPoller.drip())(ex)
   }
 
   // Register slash commands per guild: support servers get the admin set,

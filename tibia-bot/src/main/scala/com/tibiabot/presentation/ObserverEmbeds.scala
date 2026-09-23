@@ -2,6 +2,8 @@ package com.tibiabot.presentation
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
+import com.tibiabot.observer.{RaidCreature, RaidType}
+import com.tibiabot.statistics.BossCatalogue
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
@@ -66,23 +68,62 @@ object ObserverEmbeds {
         .build())
     }
 
-  /** One raid announcement for the raids channel. `category` is the stage the feed
-   *  reported it at; `startDate` renders as a live relative timestamp. */
-  def raidEmbed(raid: RaidAnnouncement): MessageEmbed = {
-    val stage = raid.category match {
-      case "areaRevealed"    => "Area revealed"
-      case "subareaRevealed" => "Subarea revealed"
-      case "raidStarted"     => "Raid started"
-      case other             => other
+  /** Guilded-neutral-death grey (`4540237`) — the raids channel reuses it for the
+   *  drip lines so a broadcast reads as neutral, ambient news. */
+  private val DripGrey = 4540237
+
+  /** Boss names (and race aliases) from the boss catalogue, lower-cased — used to
+   *  pick the imminent embed's thumbnail: a boss over an ordinary creature. */
+  private lazy val bossNames: Set[String] =
+    BossCatalogue.bosses.flatMap(b => b.name.toLowerCase :: b.raceName.map(_.toLowerCase).toList).toSet
+
+  private def wikiSlug(name: String): String = name.trim.replace(" ", "_")
+
+  /** A creature as a wiki-linked bullet, with its count qualifier (if any) outside
+   *  the link — matching how the bot links creatures elsewhere. */
+  private def creatureBullet(c: RaidCreature): String =
+    s"• [${c.name}](https://tibia.fandom.com/wiki/${wikiSlug(c.name)})${c.qualifier.map(q => s" $q").getOrElse("")}"
+
+  /** The thumbnail: the raid's boss if it brings one, otherwise its first creature,
+   *  as the bot's usual TibiaWiki image link. */
+  private def thumbnailUrl(creatures: Vector[RaidCreature]): Option[String] =
+    creatures.find(c => bossNames.contains(c.name.toLowerCase)).orElse(creatures.headOption)
+      .map(c => s"https://www.tibiawiki.com.br/wiki/Special:Redirect/file/${wikiSlug(c.name)}.gif")
+
+  /** The imminent-raid heads-up, posted once when a raid is first sighted (at
+   *  whichever stage a member's exploration reveals it — area or subarea). The
+   *  detailed one: the `:raid:` emoji and the raid's name (linked to its wiki page)
+   *  as the title, a thumbnail of its boss or lead creature, the subarea, when it is
+   *  due to start, and its creatures as wiki-linked bullets — all from the catalogue,
+   *  so complete regardless of the stage that revealed it. Without a catalogue entry
+   *  it falls back to the area. */
+  def imminentEmbed(raid: RaidAnnouncement, raidType: Option[RaidType]): MessageEmbed = {
+    val area = raidType.flatMap(_.area).getOrElse(raid.area)
+    val subarea = raidType.flatMap(_.subarea).orElse(raid.subarea).filter(_.nonEmpty)
+    val locName = subarea.getOrElse(area)
+    val title = s"${Config.raidEmoji} ${raidType.map(_.name).getOrElse(locName)}"
+    val when = raid.startDate match {
+      case Some(d) if d.isAfter(java.time.Instant.now()) => s"Starts <t:${d.getEpochSecond}:R>"
+      case Some(d)                                       => s"Started <t:${d.getEpochSecond}:R>"
+      case None                                          => "Starting soon"
     }
-    val where = raid.subarea.filter(_.nonEmpty).map(s => s"${raid.area} · $s").getOrElse(raid.area)
-    val starts = raid.startDate.map(d => s" — starts <t:${d.getEpochSecond}:R>").getOrElse("")
-    new EmbedBuilder()
+    val creatures = raidType.map(_.creatures).getOrElse(Vector.empty)
+    val creatureBlock = if (creatures.nonEmpty) s"\n\n**Creatures:**\n${creatures.map(creatureBullet).mkString("\n")}" else ""
+    val builder = new EmbedBuilder()
       .setColor(Embeds.AutomaticColor)
-      .setTitle(s"$where — ${raid.world}")
-      .setDescription(s"$stage$starts")
-      .build()
+      .setTitle(title, raidType.flatMap(_.link).orNull)
+      .setDescription(s"$locName\n$when$creatureBlock".take(4000))
+    thumbnailUrl(creatures).foreach(builder.setThumbnail)
+    builder.build()
   }
+
+  /** One raid broadcast line, dripped as the raid unfolds: just the in-world text in
+   *  bold, in the neutral grey. Short and concise by design — no title, no footer. */
+  def raidLineEmbed(message: String): MessageEmbed =
+    new EmbedBuilder()
+      .setColor(DripGrey)
+      .setDescription(s"**${message.take(3990)}**")
+      .build()
 
   /** Add is offered when there is no token; Remove when there is one. The other is
    *  shown disabled so the panel always reads as a pair (as `/boosted` does). The

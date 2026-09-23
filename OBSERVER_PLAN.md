@@ -213,10 +213,28 @@ observer_tokens
     persists when a token is removed (chat history stays). `observer_raid_channels`
     (keyed guild+world) + `observer_posted_raids` back it; channel creation seeds
     dedup so it starts clean. Compiles + command specs green.
-  - *Deferred:* raid-type **priority** values (the `RaidTypeInformation` API returns
-    `[]` so far; `RaidRanking`'s `typePriority` hook is ready to populate from a
-    config map or once that endpoint's input is cracked). Raid embeds show the area
-    (how Tibia raids are identified) rather than a per-type name for the same reason.
+  - **Raid names + live unfurl** — the feed reports a raid only as a numeric type id,
+    an area and a stage (no name, no text, no timing). A bundled catalogue
+    (`resources/raidtypes.json`), `RaidTypeCatalog` keyed by that id, supplies the
+    raid's name, location, creatures, wiki link and its full **timed broadcast
+    script**. Because that script is deterministic, delivery is two passes
+    (`ObserverRaidPoller`):
+      - *Detection* (5-min, the only API call): on a raid's **first sighting** — at
+        whichever stage a member's exploration reveals it, area *or* subarea; deduped
+        on `raidId` — posts one **imminent-raid** embed and registers the raid. The
+        embed: title = `:raid:` emoji + raid name, linked to its wiki page; yellow
+        (`14397256`); thumbnail of its boss (via `BossCatalogue`) or lead creature
+        (TibiaWiki image); description = subarea, `Starts <t:…:R>`, then the creatures
+        as wiki-linked bullets. No footer.
+      - *Drip* (20-s tick, API-free): replays each broadcast line at `startDate +
+        millis` from the catalogue — short embeds, in-world text in **bold**, in the
+        guilded-neutral-death grey (`4540237`), no footer, one message per line.
+        Dedup is durable in `observer_posted_raids` (`key` = `imminent` / `line:i`),
+        so a restart re-hydrates from the next poll without re-posting.
+    Unknown ids fall back to area + stage; a missing/bad catalogue degrades to that
+    too (graceful, as `BossCatalogue`). Layout was designed against an interactive
+    Discord mockup and signed off; compiles green; both embeds verified live against
+    real ids; image rebuilt and the dev bot recreated on it.
 
 ## 10. Open decisions (for review)
 

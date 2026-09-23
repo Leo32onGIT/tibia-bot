@@ -252,6 +252,8 @@ object Config {
  val inqEmoji: String = discord.getString("inq-emoji")
  val kilmareshEmoji: String = discord.getString("kilmaresh-emoji")
  val exivaEmoji: String = discord.getString("exiva-emoji")
+ /** Precedes the raid name in the imminent-raid embed's title. */
+ val raidEmoji: String = discord.getString("raid-emoji")
  val indentEmoji: String = discord.getString("indent-emoji")
  val dailyEmoji: String = discord.getString("daily-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")
