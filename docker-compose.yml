@@ -23,6 +23,7 @@ services:
         required: false
       observer-sidecar:
         condition: service_started
+        # Skipped, not an error, when the `observer` profile is inactive.
         required: false
     # With the bundled DB the bot may restart a couple of times while Postgres
     # initialises — expected and harmless. Deliberately NOT depends_on postgres,
@@ -40,10 +41,16 @@ services:
 
   # The Observer sidecar: bridges the bot to CipSoft's Tibia Observer API (browser-
   # TLS Cloudflare pass + request shapes). The bot reaches it at
-  # http://observer-sidecar:8787 (OBSERVER_SIDECAR_URL in .env). No host ports —
+  # http://observer-sidecar:8787, its default sidecar-url in discord.conf. No host ports —
   # only the bot on this network needs it.
+  #
+  # Only with the `observer` profile, and only on the primary (or a lone bot): every
+  # Observer request leaves from that one host, and a secondary reads the feeds the
+  # primary publishes to Redis instead of calling the API. Anywhere else it would
+  # just be one more always-on container.
   observer-sidecar:
     build: ./observer-sidecar
+    profiles: ["observer"]
     env_file: .env
     networks:
       - violentbot
