@@ -86,7 +86,7 @@ final class BoostedService(
     tibiaDataClient.getBoostedBoss().map {
       case Right(boostedResponse) =>
         val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
       case Left(_) =>
         com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Vigour"), "The boosted boss today failed to load?")
     }
@@ -96,7 +96,7 @@ final class BoostedService(
     tibiaDataClient.getBoostedCreature().map {
       case Right(creatureResponse) =>
         val boostedCreature = creatureResponse.creatures.boosted.name
-        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
       case Left(_) =>
         com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Tenacity"), "The boosted creature today failed to load?")
     }

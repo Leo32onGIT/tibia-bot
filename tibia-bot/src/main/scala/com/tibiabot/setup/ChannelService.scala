@@ -42,7 +42,7 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param forgetWorldSubscriptions drops the mass-log/bounty DM subscriptions for a removed world; a callback rather than the service itself, since this is the only thing here that needs it
  *  @param sharedConfigGuilds  guilds whose database is shared with another bot, so it must NOT be dropped on leave
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
- *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
+ *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Mini World Changes/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
  *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
  */
 final class ChannelService(

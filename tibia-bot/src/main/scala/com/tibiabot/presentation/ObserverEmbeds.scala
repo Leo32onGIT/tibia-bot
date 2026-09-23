@@ -2,7 +2,7 @@ package com.tibiabot.presentation
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
-import com.tibiabot.observer.{RaidCreature, RaidType}
+import com.tibiabot.observer.{MiniWorldChangeCatalog, RaidCreature, RaidType}
 import com.tibiabot.statistics.BossCatalogue
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -65,6 +65,40 @@ object ObserverEmbeds {
         .setTitle("Mini World Changes")
         .setColor(Embeds.BrandColor)
         .setDescription(body)
+        .build())
+    }
+
+  /** The bot's own mini world change art, hosted with its other Discord assets. */
+  private val MwcThumbnail = "https://violentbot.xyz/discord/observer/miniworldchange.png"
+
+  /** Room for the changes, kept under Discord's 4096 description limit. */
+  private val MaxMwcDescription = 4000
+
+  /** The Mini World Changes embed in a guild's server-save notifications message,
+   *  for its world — the same world the Dream Courts embed names. Each change is its
+   *  name, linked to its wiki page, with the feed's description as a small grey line
+   *  under it. `None` when nothing is active, so a quiet day (or a world no linked
+   *  member covers, which the feed can't tell apart) just leaves the embed out. */
+  def serverSaveMwcEmbed(world: String, changes: List[MiniWorldChange],
+                         emoji: String = Config.raidEmoji): Option[MessageEmbed] =
+    if (changes.isEmpty) None
+    else {
+      val lead =
+        if (changes.size == 1) s"The mini world change for **$world** is:"
+        else s"The mini world changes for **$world** are:"
+      val entries = changes.map { c =>
+        val name = s"### $emoji **[${c.title}](${MiniWorldChangeCatalog.wikiUrl(c.title)})**"
+        // `-#` only reaches the end of its line, so the body is kept to one.
+        val body = c.body.trim.replaceAll("\\s*\\n\\s*", " ")
+        if (body.nonEmpty) s"$name\n-# $body" else name
+      }
+      // Whole entries only, so a long day can never cut a link in half.
+      val lengths = entries.scanLeft(lead.length)(_ + 1 + _.length).tail
+      val kept = entries.zip(lengths).takeWhile(_._2 <= MaxMwcDescription).map(_._1)
+      Some(new EmbedBuilder()
+        .setDescription((lead :: kept).mkString("\n"))
+        .setThumbnail(MwcThumbnail)
+        .setColor(Embeds.BrandColor)
         .build())
     }
 

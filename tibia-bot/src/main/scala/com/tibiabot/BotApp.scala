@@ -1955,7 +1955,7 @@ object BotApp extends App with StrictLogging {
                 boostedService.boostedMonsterUpdate(boostedBoss, "", "1", "")
               }
               (
-                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
                 boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
                 boostedBoss
               )
@@ -1972,7 +1972,7 @@ object BotApp extends App with StrictLogging {
                 boostedService.boostedMonsterUpdate("", boostedCreature, "", "1")
               }
               (
-                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
                 boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
                 boostedCreature
               )
@@ -2073,7 +2073,8 @@ object BotApp extends App with StrictLogging {
   /** Replace every guild's boosted message: delete the one currently posted in
    *  its boosted channel and send a fresh one carrying `boostedEmbeds` (the
    *  boosted boss and creature) plus Rashid, that guild's own Dream Courts
-   *  boss, and the Drome cycle when it's due. Returns how many guilds a send
+   *  boss and mini world changes, and the Drome cycle when it's due (see
+   *  serverSaveExtraEmbeds). Returns how many guilds a send
    *  was dispatched for — the send itself is queued, so a guild counted here
    *  can still fail asynchronously (logged per guild).
    *
@@ -2099,35 +2100,8 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              val dreamScarDaily =
-                dreamScar
-                  .get(lastWorld)
-                  .orElse(dreamScar.get("Unknown"))
-                  .getOrElse("Unknown")
-
-              val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
-              val rashidEmbed = new EmbedBuilder()
-              rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
-              rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-              rashidEmbed.setColor(BrandColor)
-
-              val now = Instant.now()
-              val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
-              val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                .setColor(BrandColor)
-
-              val dreamScarEmbed = new EmbedBuilder()
-              dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
-              dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
-              dreamScarEmbed.setColor(BrandColor)
-
-              val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
-              val addRashidDreamScarEmbeds: List[MessageEmbed] = boostedEmbeds ++ embedsList
-
               posted += 1
-              boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+              boostedChannel.sendMessageEmbeds((boostedEmbeds ++ serverSaveExtraEmbeds(lastWorld)).asJava)
                 .setComponents(ActionRow.of(
                   Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                 ))
@@ -2560,9 +2534,10 @@ object BotApp extends App with StrictLogging {
   }
 
 
-  /** The Rashid / Dream Courts / (Drome, when active) server-save embeds for a
-   *  world, appended after the boosted embeds in the notifications message.
-   *  Reads the live dreamScar map and dromeTime. */
+  /** The Rashid / Dream Courts / Mini World Changes / (Drome, when active)
+   *  server-save embeds for a world, appended after the boosted embeds in the
+   *  notifications message. Reads the live dreamScar map and dromeTime; the mini
+   *  world changes are left out when nothing is active on the world. */
   private def serverSaveExtraEmbeds(world: String): List[MessageEmbed] = {
     val dreamScarDaily =
       dreamScar
@@ -2571,22 +2546,23 @@ object BotApp extends App with StrictLogging {
         .getOrElse("Unknown")
     val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
     val rashidEmbed = new EmbedBuilder()
-      .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+      .setDescription(s"Today Rashid can be found in:\n### ${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
       .setColor(BrandColor)
       .build()
     val dreamScarEmbed = new EmbedBuilder()
-      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
       .setThumbnail(creatureImageUrl(dreamScarDaily))
       .setColor(BrandColor)
       .build()
+    val mwcEmbed = presentation.ObserverEmbeds.serverSaveMwcEmbed(world, observerService.pooledMwcForWorld(world))
     val dromeShow = ServerSaveSchedule.shouldShowDrome(Instant.now(), dromeTime)
     val dromeEmbed = new EmbedBuilder()
-      .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+      .setDescription(s"The current Drome cycle will end:\n### ${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
       .setColor(BrandColor)
       .build()
-    if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
+    List(rashidEmbed, dreamScarEmbed) ++ mwcEmbed ++ (if (dromeShow) List(dromeEmbed) else Nil)
   }
 
   def charUrl(char: String): String = presentation.Urls.charUrl(char)

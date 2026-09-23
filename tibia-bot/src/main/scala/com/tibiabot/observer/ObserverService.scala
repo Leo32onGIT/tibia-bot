@@ -4,6 +4,7 @@ import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, Raid
 import com.tibiabot.persistence.ObserverRepository
 import com.typesafe.scalalogging.StrictLogging
 
+import java.time.{Duration, Instant}
 import scala.collection.concurrent.TrieMap
 
 /** The members' Tibia Observer links: what is stored, and the add/remove
@@ -115,6 +116,44 @@ final class ObserverService(
         }
       case _ => Nil
     }
+
+  /** The pooled mini world changes, keyed by lower-cased world, and when they were
+   *  fetched. See [[pooledMwcForWorld]]. */
+  @volatile private var pooledMwc: (Instant, Map[String, List[MiniWorldChange]]) = (Instant.EPOCH, Map.empty)
+
+  /** How long a pooled fetch is reused — long enough to cover one server-save
+   *  repost, which asks once per guild, and short enough to be fresh by the next. */
+  private val MwcPoolTtl = Duration.ofMinutes(2)
+
+  /** A world's active mini world changes pooled across **every** linked account,
+   *  de-duplicated by title and sorted by it — the same shared coverage as raids: a
+   *  guild's world is covered if any linked member, in any Discord, has a rule for
+   *  it. Empty when Observer is off, nobody covers the world, or every fetch fails. */
+  def pooledMwcForWorld(world: String): List[MiniWorldChange] =
+    if (!enabled) Nil
+    else {
+      val (fetchedAt, byWorld) = pooledMwc
+      val current =
+        if (fetchedAt.plus(MwcPoolTtl).isAfter(Instant.now())) byWorld
+        else {
+          val fresh = fetchPooledMwc()
+          pooledMwc = (Instant.now(), fresh)
+          fresh
+        }
+      current.getOrElse(world.toLowerCase, Nil)
+    }
+
+  private def fetchPooledMwc(): Map[String, List[MiniWorldChange]] =
+    tokens.values.toList.filter(_.status == ObserverStatus.Linked).flatMap { t =>
+      try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).map(apiClient.mwc).getOrElse(Nil)
+      catch {
+        case ex: Throwable =>
+          logger.warn(s"Observer MWC poll failed for '${t.userId}' in guild '${t.guildId}'", ex)
+          Nil
+      }
+    }.filter(c => c.world.nonEmpty && c.title.nonEmpty)
+      .groupBy(_.world.toLowerCase)
+      .view.mapValues(_.distinctBy(_.title.toLowerCase).sortBy(_.title.toLowerCase)).toMap
 
   /** The currently-announced/active raids for a linked member, via the sidecar.
    *  Exploration-gated to that account's areas. Empty on any failure. */
