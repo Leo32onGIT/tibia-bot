@@ -241,6 +241,20 @@ observer_tokens
     Discord mockup and signed off; compiles green; both embeds verified live against
     real ids; image rebuilt and the dev bot recreated on it.
 
+- **Fleet split: BUILT.** Every Observer request now leaves from one bot, the same
+  shape as the fansite pipeline. The primary (or a lone bot) runs the sidecar
+  (`observer` compose profile), fetches the pooled MWC and raid feeds for every
+  linked account (read fresh from the shared table, so links made through any bot
+  are covered), runs the renewal sweep, and publishes the feeds to Redis with a TTL
+  (`ObserverFeed`). A secondary never calls the API: it reads the primary's copy,
+  treats a missing copy as a failed fetch, and hands `/observer` link and unlink to
+  the primary over Redis (`ObserverRelay`) — so it never handles a credential and
+  runs on `OBSERVER_API_MODE=on` alone, the encryption secret staying on the
+  primary. The boosted DM's section is now the
+  pooled changes on the member's account worlds rather than a per-member fetch. The
+  raids poller only touches channels in guilds its own bot serves, since those rows
+  are shared.
+
 ## 10. Open decisions (for review)
 
 1. **World scope of MWC** — a member's token resolves to one account/world. Show MWC

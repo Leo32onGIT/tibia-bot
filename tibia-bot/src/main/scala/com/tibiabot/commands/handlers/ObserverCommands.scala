@@ -13,7 +13,7 @@ object ObserverCommands {
     Option(event.getGuild) match {
       case None =>
         reply(event, s"${Config.noEmoji} `/observer` only works inside a server.")
-      case Some(_) if !Config.Observer.storageEnabled =>
+      case Some(_) if !Config.Observer.available =>
         reply(event, s"${Config.noEmoji} Tibia Observer isn't set up on this bot yet.")
       case Some(guild) =>
         val token = BotApp.observerService.statusFor(guild.getId, event.getUser.getId)

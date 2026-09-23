@@ -32,13 +32,25 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *  `"imminent"` or `"line:i"`; the in-memory registry is only bookkeeping, so a
  *  restart re-hydrates from the next detection poll (which re-schedules the remaining
  *  lines) without re-posting. `post` sends one embed to one channel through the bot's
- *  rate-limited lane; `schedule` runs a task once after a delay (the actor scheduler). */
+ *  rate-limited lane; `schedule` runs a task once after a delay (the actor scheduler).
+ *
+ *  `pooledRaids` is the feed — fetched on the bot that talks to the API, the
+ *  primary's published copy on one that does not (see [[ObserverFeed]]). The raids
+ *  channels and the dedup rows live in the shared cache database, so every bot sees
+ *  every guild's channels; `servesGuild` narrows them to this bot's own. Without it,
+ *  one bot would mark another's guilds posted and then fail to post there, and the
+ *  bot that runs them would never post at all. */
 final class ObserverRaidPoller(
-  observerService: ObserverService,
+  pooledRaids: () => Map[String, List[RaidAnnouncement]],
   raidRepository: ObserverRaidRepository,
   post: (String, String, MessageEmbed) => Unit,
-  schedule: (FiniteDuration, () => Unit) => Unit
+  schedule: (FiniteDuration, () => Unit) => Unit,
+  servesGuild: String => Boolean
 ) extends StrictLogging {
+
+  /** The raids channels for a world in guilds this bot runs. */
+  private def ownChannels(world: String): List[(String, String)] =
+    raidRepository.channelsForWorld(world).filter { case (guildId, _) => servesGuild(guildId) }
 
   private val tracked = TrieMap.empty[String, TrackedRaid]
   // Raids whose broadcast lines have already been scheduled this process — so a raid
@@ -51,8 +63,8 @@ final class ObserverRaidPoller(
   def poll(): Unit =
     try {
       val now = Instant.now()
-      observerService.pooledRaidsByWorld().foreach { case (world, raids) =>
-        val channels = raidRepository.channelsForWorld(world)
+      pooledRaids().foreach { case (world, raids) =>
+        val channels = ownChannels(world)
         // The feed lists a raid once per stage; collapse to one entry per raid.
         val perRaid = raids.groupBy(_.raidId).values.map(represent).toList
         RaidRanking.order(perRaid, typePriority).foreach { raid =>
@@ -94,7 +106,7 @@ final class ObserverRaidPoller(
    *  the world — channels resolved now, so one created since scheduling is included.
    *  Deduped per `(guild, raidId, line:index)`, so a re-scheduled line never repeats. */
   private def postLine(raidId: String, world: String, index: Int, message: String): Unit =
-    try raidRepository.channelsForWorld(world).foreach { case (guildId, channelId) =>
+    try ownChannels(world).foreach { case (guildId, channelId) =>
       if (raidRepository.markPostedIfNew(guildId, raidId, s"line:$index"))
         post(guildId, channelId, ObserverEmbeds.raidLineEmbed(message))
     } catch {
@@ -106,7 +118,7 @@ final class ObserverRaidPoller(
    *  channel for that world is first created, so it starts with the next new raid
    *  rather than backfilling raids already in progress. */
   def seedPosted(guildId: String, world: String): Unit =
-    try observerService.pooledRaidsByWorld().getOrElse(world, Nil)
+    try pooledRaids().getOrElse(world, Nil)
       .groupBy(_.raidId).foreach { case (raidId, entries) =>
         raidRepository.markPostedIfNew(guildId, raidId, "imminent")
         val broadcasts = RaidTypeCatalog.get(entries.head.raidTypeId).map(_.broadcasts).getOrElse(Vector.empty)

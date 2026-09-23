@@ -241,18 +241,39 @@ object BotApp extends App with StrictLogging {
   val notifyService = new notifications.NotifyService(notifyRepository, discordGateway, outboundSender)
 
   // Members' Tibia Observer links behind /observer. Cache filled after the cache
-  // database exists (below), like notifyService. Phase 1: stores encrypted tokens,
-  // no live linking (Config.Observer.enabled gates that).
+  // database exists (below), like notifyService. Config.Observer.enabled gates
+  // live linking and polling.
+  // Every Observer request leaves from one bot, the same way the fansite API's do:
+  // the primary (or a lone bot) talks to the API through the sidecar and publishes
+  // the feeds to Redis; a secondary reads the primary's copy, and hands linking and
+  // unlinking to the primary over Redis. See observer.ObserverFeed / ObserverRelay.
+  val observerMode: observer.ObserverFeed.Mode =
+    if (!Config.Observer.enabled) observer.ObserverFeed.Off
+    else Config.BotRole.current match {
+      case Config.BotRole.Primary   => observer.ObserverFeed.Publisher
+      case Config.BotRole.Secondary => observer.ObserverFeed.Consumer
+      case Config.BotRole.Disabled  => observer.ObserverFeed.Standalone
+    }
+  val observerRelay = new observer.ObserverRelay(persistence.RedisCacheProvider.cache)(ex)
+
   val observerService = new observer.ObserverService(
     observerRepository,
     observer.TokenCrypto.fromSecret(Config.Observer.encryptionSecret),
     new observer.ObserverApiClient(),
-    Config.Observer.enabled)
+    Config.Observer.enabled,
+    relay = Option.when(observerMode == observer.ObserverFeed.Consumer)(observerRelay))
+
+  val observerFeed = new observer.ObserverFeed(
+    observerMode,
+    fetchMwc = () => observerService.fetchPooledMwc(),
+    fetchRaids = () => observerService.fetchPooledRaids(),
+    cache = persistence.RedisCacheProvider.cache)
 
   // Pools raids across every linked account and fans each new one out — rank-ordered
-  // — to the per-world raids channel of every guild that has one for that world.
+  // — to the per-world raids channel of every guild this bot runs that has one for
+  // that world.
   val observerRaidPoller = new observer.ObserverRaidPoller(
-    observerService,
+    () => observerFeed.raidsByWorld(),
     observerRaidRepository,
     post = (guildId, channelId, embed) => outboundSender.enqueue("observer-raid") { () =>
       Option(discordGateway.guildById(guildId))
@@ -261,7 +282,8 @@ object BotApp extends App with StrictLogging {
     },
     // Fire a raid's broadcast lines at their exact moment — the scheduler sleeps until
     // each is due, so there is no polling and the line lands to the second.
-    schedule = (delay, task) => { actorSystem.scheduler.scheduleOnce(delay)(task())(ex); () })
+    schedule = (delay, task) => { actorSystem.scheduler.scheduleOnce(delay)(task())(ex); () },
+    servesGuild = guildId => discordGateway.guildById(guildId) != null)
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -994,23 +1016,42 @@ object BotApp extends App with StrictLogging {
   // first online-list sweep already sees whatever is subscribed.
   notifyService.load()
   observerService.load()
-  // Keep Observer credentials fresh: the JWT lasts ~90 days and /renew mints a new
-  // one from it, so a daily sweep means a link never lapses while it is in use. The
-  // sweep is a no-op when Observer is off or nothing is linked.
   if (Config.Observer.enabled) {
-    actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
+    val consumer = observerMode == observer.ObserverFeed.Consumer
+    if (!consumer) {
+      // Keep Observer credentials fresh: the JWT lasts ~90 days and /renew mints a
+      // new one from it, so a daily sweep means a link never lapses while it is in
+      // use. Only where the API is called — the sweep covers every bot's links.
+      actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
+    }
+    if (observerMode == observer.ObserverFeed.Publisher) {
+      // Link and unlink for members of the secondaries' servers.
+      observerRelay.serve(observerService.handleRelayed).failed.foreach { error =>
+        logger.error("Could not listen for relayed Observer requests; secondaries cannot link or unlink", error)
+      }(ex)
+    }
     // Detect new raids from the pooled feeds and post each one's imminent heads-up,
     // then schedule its broadcast lines. Raids are announced well ahead of starting,
     // so a 15-minute sweep catches them in good time; the lines self-schedule to the
-    // second off the catalogue, so there is no fast drip loop.
-    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 15.minutes)(() => observerRaidPoller.poll())(ex)
+    // second off the catalogue, so there is no fast drip loop. A secondary's sweep
+    // only reads the primary's copy, so it looks more often to pick up each new
+    // copy promptly.
+    val raidSweep = if (consumer) 2.minutes else 15.minutes
+    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, raidSweep)(() => observerRaidPoller.poll())(ex)
     // Amend the notifications message when a world's mini world changes move on
     // after it posted: the feed may roll over later than the boosted boss does. The
     // watcher decides for itself when a poll is due; this just gives it a pulse.
-    val mwcWatcher = new observer.MiniWorldChangeWatcher(
-      fetch = () => observerService.refreshPooledMwc(),
-      amend = worlds => amendMwcInBoostedMessages(worlds),
-      now = () => ZonedDateTime.now(domain.time.Clock.Berlin))
+    val mwcWatcher =
+      if (consumer) new observer.MiniWorldChangeWatcher(
+        fetch = () => observerFeed.refreshMwc(),
+        amend = worlds => amendMwcInBoostedMessages(worlds),
+        now = () => ZonedDateTime.now(domain.time.Clock.Berlin),
+        fastInterval = java.time.Duration.ofMinutes(1),
+        slowInterval = java.time.Duration.ofMinutes(2))
+      else new observer.MiniWorldChangeWatcher(
+        fetch = () => observerFeed.refreshMwc(),
+        amend = worlds => amendMwcInBoostedMessages(worlds),
+        now = () => ZonedDateTime.now(domain.time.Clock.Berlin))
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, 1.minute)(() => mwcWatcher.tick())(ex)
   }
 
@@ -2021,6 +2062,10 @@ object BotApp extends App with StrictLogging {
                   boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all"
                 } => entry.user
               }.distinct
+              // The worlds each recipient's linked Observer account covers, read once
+              // for the whole send rather than per DM.
+              val mwcWorlds: Map[String, List[String]] =
+                if (recipients.nonEmpty) observerService.linkedWorldsByUser() else Map.empty
 
               recipients.foreach { recipientId =>
                 // Low priority (per-user DM burst) — goes through the shared background
@@ -2053,10 +2098,11 @@ object BotApp extends App with StrictLogging {
                         }
                       )
                       // A member with a linked Observer token gets a Mini World Changes
-                      // section too. Per-recipient, so it can't be hoisted; the fetch is
-                      // a no-op (empty) when Observer is off or they have no link.
+                      // section too: the pooled changes on their account's worlds. Empty
+                      // when Observer is off or they have no link.
+                      val recipientMwc = observerFeed.mwcForWorlds(mwcWorlds.getOrElse(recipientId, Nil))
                       val recipientEmbeds =
-                        (embeds ++ presentation.ObserverEmbeds.mwcEmbed(observerService.activeMwcForUser(recipientId)).toList).asJava
+                        (embeds ++ presentation.ObserverEmbeds.mwcEmbed(recipientMwc).toList).asJava
                       user.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
                         val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
                         privateChannel.sendMessage(messageText).setEmbeds(recipientEmbeds).setComponents(ActionRow.of(
@@ -2608,7 +2654,7 @@ object BotApp extends App with StrictLogging {
       .setThumbnail(creatureImageUrl(dreamScarDaily))
       .setColor(BrandColor)
       .build()
-    val mwcEmbed = presentation.ObserverEmbeds.serverSaveMwcEmbed(world, observerService.pooledMwcForWorld(world))
+    val mwcEmbed = presentation.ObserverEmbeds.serverSaveMwcEmbed(world, observerFeed.mwcForWorld(world))
     val dromeShow = ServerSaveSchedule.shouldShowDrome(Instant.now(), dromeTime)
     val dromeEmbed = new EmbedBuilder()
       .setDescription(s"The current Drome cycle will end:\n### ${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")

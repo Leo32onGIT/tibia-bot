@@ -86,7 +86,12 @@ object Config {
    *  feature is unavailable and nothing is written. `mode` then gates *live*
    *  linking against CipSoft's Observer API — which is supported only on an as-is,
    *  unsupported basis — so `off` stores tokens without contacting it and `on`
-   *  links them. */
+   *  links them.
+   *
+   *  A secondary is the exception to the first gate. It never touches a
+   *  credential — linking and unlinking are handed to the primary, which encrypts
+   *  and decrypts them, and the feeds come from the primary's published copy — so
+   *  it runs on `mode = on` alone and the secret stays on the primary. */
   object Observer {
     private val observer = discord.getConfig("observer-api")
     val encryptionSecret: String = observer.getString("encryption-secret").trim
@@ -99,8 +104,12 @@ object Config {
     val sidecarToken: String = observer.getString("sidecar-token").trim
     /** Tokens can be stored (encrypted) whenever the secret is present. */
     val storageEnabled: Boolean = encryptionSecret.nonEmpty
-    /** Live linking additionally needs mode=on (a later phase). */
-    val enabled: Boolean = storageEnabled && requestedOn
+    /** Live Observer: mode=on, plus the secret on any bot that handles credentials
+     *  itself — every bot but a secondary. */
+    val enabled: Boolean = requestedOn && (storageEnabled || BotRole.current == BotRole.Secondary)
+    /** Whether `/observer` can take a token here at all: stored encrypted on this
+     *  bot (live or pending), or handed to the primary on a live secondary. */
+    val available: Boolean = storageEnabled || enabled
   }
 
   /** Settings for the character age cache — see

@@ -23,11 +23,16 @@ import java.time.{Duration, Instant, ZonedDateTime}
  *  (`fetch` returns `None`) is skipped without forgetting the last good set, so a
  *  sidecar hiccup never reads as every change ending.
  *
- *  `tick` is meant to run once a minute; it decides for itself when a poll is due. */
+ *  `tick` is meant to run once a minute; it decides for itself when a poll is due.
+ *  A bot reading the primary's published copy rather than the API can pass shorter
+ *  intervals: its polls are Redis reads, and the primary's own cadence already
+ *  bounds how often the copy changes. */
 final class MiniWorldChangeWatcher(
   fetch: () => Option[Map[String, List[MiniWorldChange]]],
   amend: Set[String] => Unit,
-  now: () => ZonedDateTime
+  now: () => ZonedDateTime,
+  fastInterval: Duration = MiniWorldChangeWatcher.FastInterval,
+  slowInterval: Duration = MiniWorldChangeWatcher.SlowInterval
 ) extends StrictLogging {
   import MiniWorldChangeWatcher._
 
@@ -37,7 +42,7 @@ final class MiniWorldChangeWatcher(
   def tick(): Unit =
     try {
       val at = now()
-      val interval = if (ServerSaveSchedule.isServerSaveWindow(at.toLocalTime)) FastInterval else SlowInterval
+      val interval = if (ServerSaveSchedule.isServerSaveWindow(at.toLocalTime)) fastInterval else slowInterval
       if (!lastPoll.plus(interval).isAfter(at.toInstant)) {
         lastPoll = at.toInstant
         poll(at)
