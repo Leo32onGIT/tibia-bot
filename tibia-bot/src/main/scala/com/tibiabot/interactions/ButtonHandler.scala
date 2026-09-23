@@ -475,15 +475,27 @@ object ButtonHandler extends StrictLogging {
     def tagDisplay: String = if (tagId.isEmpty) Names.user(user.getName) else s"**`$tagId`**"
     def note(text: String) =
       new EmbedBuilder().setDescription(text).setColor(presentation.Embeds.BrandColor)
+    // Somebody's own card, redrawn with what just changed leading it — see
+    // CooldownEmbeds.personal. A press on one of those comes from a message laid
+    // out with Discord's layout components, which can only be rewritten as one;
+    // the embed replies further down are for messages posted before it existed.
+    def card(said: String = "") = CooldownEmbeds.personal(
+      k => BotApp.cooldownService.getStamps(user.getId, k).getOrElse(Nil), user.getName, said)
+    def onCard: Boolean = event.getMessage.isUsingComponentsV2
 
     action match {
       case A.Set =>
         event.deferEdit().queue()
         val now = ZonedDateTime.now()
         BotApp.cooldownService.add(user.getId, kind, now, tagId)
-        event.getHook.editOriginalEmbeds(
-          note(s"$emoji can be collected by $tagDisplay <t:${kind.expiresAtEpoch(now)}:R>").build()
-        ).setComponents().queue()
+        if (onCard)
+          event.getHook.editOriginalComponents(card(
+            s"${Config.yesEmoji} ${CooldownEmbeds.itemName(kind)} marked **${CooldownEmbeds.doneLabel(kind).toLowerCase}**: " +
+              s"ready again <t:${kind.expiresAtEpoch(now)}:R>.")).useComponentsV2().queue()
+        else
+          event.getHook.editOriginalEmbeds(
+            note(s"$emoji can be collected by $tagDisplay <t:${kind.expiresAtEpoch(now)}:R>").build()
+          ).setComponents().queue()
 
       case A.Remind =>
         event.deferEdit().queue()
@@ -491,7 +503,7 @@ object ButtonHandler extends StrictLogging {
         BotApp.cooldownService.add(user.getId, kind, now, tagId)
         event.getHook.editOriginalComponents().queue()
         event.getHook.editOriginalEmbeds(
-          note(s"$emoji can be collected by $tagDisplay <t:${kind.expiresAtEpoch(now)}:R>")
+          note(s"$emoji ${CooldownEmbeds.doneLabel(kind)} for $tagDisplay: ready again <t:${kind.expiresAtEpoch(now)}:R>")
             .setFooter("You will be sent a message when the cooldown expires").build()
         ).queue()
 
@@ -505,9 +517,14 @@ object ButtonHandler extends StrictLogging {
       case A.RemoveAll =>
         event.deferEdit().queue()
         BotApp.cooldownService.delAll(user.getId, kind)
-        event.getHook.editOriginalComponents().queue()
-        event.getHook.editOriginalEmbeds(
-          note(s"$emoji ${kind.label} cooldown tracker has been **Disabled**.").build()).queue()
+        if (onCard)
+          event.getHook.editOriginalComponents(card(
+            s"${Config.yesEmoji} Stopped tracking ${CooldownEmbeds.itemName(kind)}.")).useComponentsV2().queue()
+        else {
+          event.getHook.editOriginalComponents().queue()
+          event.getHook.editOriginalEmbeds(
+            note(s"$emoji ${kind.label} cooldown tracker has been **Disabled**.").build()).queue()
+        }
 
       case A.Lock =>
         event.deferEdit().queue()
@@ -530,20 +547,12 @@ object ButtonHandler extends StrictLogging {
       case A.AddForm    => event.replyModal(cooldownForm(kind, adding = true)).queue()
       case A.RemoveForm => event.replyModal(cooldownForm(kind, adding = false)).queue()
 
-      case A.Panel =>
+      // The tracker in the notifications channel is the same message for everyone,
+      // so either of its buttons opens the presser's own card, just for them —
+      // both items at once, whichever was pressed.
+      case A.Panel | A.Open =>
         event.deferReply(true).queue()
-        event.getHook.sendMessageEmbeds(CooldownEmbeds.panel())
-          .addComponents(CooldownEmbeds.panelControls()).queue()
-
-      case A.Open =>
-        event.deferReply(true).queue()
-        val tracked = BotApp.cooldownService.getStamps(user.getId, kind).getOrElse(Nil)
-        if (tracked.isEmpty)
-          event.getHook.sendMessageEmbeds(CooldownEmbeds.empty(kind))
-            .addComponents(CooldownEmbeds.collectRow(kind)).queue()
-        else
-          event.getHook.sendMessageEmbeds(CooldownEmbeds.list(kind, tracked, user.getName))
-            .addComponents(CooldownEmbeds.controls(kind, tracked.size)).queue()
+        event.getHook.sendMessageComponents(card()).useComponentsV2().queue()
     }
   }
 

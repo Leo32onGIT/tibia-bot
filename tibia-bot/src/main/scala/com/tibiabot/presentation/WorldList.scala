@@ -2,10 +2,10 @@ package com.tibiabot.presentation
 
 import com.tibiabot.domain.Vocations
 
-/** Formats a per-world map of already-rendered player lines into a flat list
- *  with a world header before each world's players. Worlds are ordered
+/** Groups already-rendered player lines by world, and orders the worlds:
  *  alphabetically, except the synthetic buckets in [[sortsLast]], which are
- *  pushed to the end. Pure; pinned by WorldListSpec. */
+ *  pushed to the end. Pure; pinned by WorldListSpec. The lists draw their own
+ *  world headings — see panels.ListPanel. */
 object WorldList {
 
   /** Buckets that are not worlds and always follow every real one.
@@ -18,7 +18,7 @@ object WorldList {
   /** Group player entries — each `(level, world, renderedLine)`, keyed by
    *  vocation — into a per-world list of lines. Within a world, players are
    *  ordered by vocation (druid, knight, paladin, sorcerer, monk, none) then by
-   *  descending level; ties keep input order. Pure; the result feeds [[format]].
+   *  descending level; ties keep input order. Pure; the result feeds [[sorted]].
    *
    *  Extracted from listAlliesAndHuntedPlayers, which repeated the per-vocation
    *  group-and-sort six times then folded them together. */
@@ -36,21 +36,15 @@ object WorldList {
     }
   }
 
-  /** Flatten to lines, each world introduced by a markdown heading.
-   *
-   *  `## ` rather than bolded text with globes either side: Discord renders it
-   *  as an actual heading, which is easier to find when scrolling a long list,
-   *  and it is what the embed packer keys on to start a fresh embed at a world
-   *  boundary — see OnlineListEmbeds.packMessages, which the online list has
-   *  used for the same reason. */
-  def format(worlds: Map[String, List[String]]): List[String] = {
-    val sortedWorlds = worlds.toList.sortWith { (a, b) =>
+  /** The worlds in display order — alphabetical, the buckets in [[sortsLast]]
+   *  after every real world — each with its lines, for a caller drawing its own
+   *  world headings. */
+  def sorted(worlds: Map[String, List[String]]): List[(String, List[String])] =
+    worlds.toList.sortWith { (a, b) =>
       (sortsLast.contains(a._1), sortsLast.contains(b._1)) match {
         case (false, true) => true
         case (true, false) => false
         case _             => a._1 < b._1
       }
     }
-    sortedWorlds.flatMap { case (world, players) => s"## $world" :: players }
-  }
 }

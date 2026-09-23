@@ -375,25 +375,23 @@ final class HuntedAlliedService(
    *  out: the list is the record of who is on it, and a missing sheet is a gap in
    *  what is known about them, not evidence they are not there.
    */
-  def playersEmbeds(guild: Guild, arg: String): List[MessageEmbed] = {
-    val guildId = guild.getId
-    val embedColor = 3092790
-    val thumbnail =
-      if (arg == "allies") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
-      else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"
+  /** The picture a list is headed with: an angel statue for allies, a stone
+   *  coffin for the hunted. */
+  def listThumbnail(arg: String): String =
+    if (arg == "allies") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
+    else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"
 
+  /** The players on a list, one rendered line each, grouped by the world they
+   *  are on — worlds in order (see presentation.WorldList), each world's players
+   *  by vocation then level. Empty for an empty list. */
+  def playerLines(guild: Guild, arg: String): List[(String, List[String])] = {
+    val guildId = guild.getId
     val listed: List[Players] =
       if (arg == "allies") streamState.alliedPlayersData.getOrElse(guildId, List.empty[Players])
       else streamState.huntedPlayersData.getOrElse(guildId, List.empty[Players])
 
-    if (listed.isEmpty) {
-      val empty = new EmbedBuilder()
-      empty.setTitle("Players")
-      empty.setDescription("*Nobody on the list yet.*")
-      empty.setColor(embedColor)
-      empty.setThumbnail(thumbnail)
-      List(empty.build())
-    } else {
+    if (listed.isEmpty) Nil
+    else {
       val allWorlds: List[Worlds] = worldConfig(guild)
       val cached: Map[String, ListCache] =
         allWorlds.flatMap(w => getListTable(w.name)).map(entry => entry.name.toLowerCase -> entry).toMap
@@ -429,77 +427,33 @@ final class HuntedAlliedService(
         }
       }
 
-      val byWorld = com.tibiabot.presentation.WorldList.byWorld(
-        vocationBuffers.map { case (voc, buffer) => voc -> buffer.toSeq })
-      val lines = com.tibiabot.presentation.WorldList.format(byWorld)
-      // Packed by the online list's packer rather than a flat character count, so
-      // a world's heading opens a fresh embed instead of landing halfway down one
-      // - and so a heading is never left stranded above the players it
-      // introduces. Its message grouping is flattened away here: what a message
-      // may carry is settled later, once the guild embeds are alongside these.
-      //
-      // "Players" is the embed's title rather than a first line, because a line
-      // above the first "## " heading would be split off into an embed of its
-      // own by that very rule - a heading stranded the other way up.
-      com.tibiabot.presentation.OnlineListEmbeds.packMessages(lines).flatten
-        .zipWithIndex.map { case (description, index) =>
-          val embed = new EmbedBuilder()
-          embed.setDescription(description)
-          embed.setColor(embedColor)
-          if (index == 0) {
-            embed.setTitle("Players")
-            embed.setThumbnail(thumbnail)
-          }
-          embed.build()
-        }
+      com.tibiabot.presentation.WorldList.sorted(com.tibiabot.presentation.WorldList.byWorld(
+        vocationBuffers.map { case (voc, buffer) => voc -> buffer.toSeq }))
     }
   }
 
-  /** The guilds on a list, drawn the same way.
+  /** The guilds on a list, one rendered line each, by name.
    *
    *  The member count comes from the activity records this bot already keeps for
    *  a tracked guild's roster - the same records that make a member leaving it
    *  visible - so it costs nothing. A guild whose roster has not been recorded
    *  yet is listed without a count rather than being fetched for one.
    */
-  def guildsEmbeds(guild: Guild, arg: String): List[MessageEmbed] = {
+  def guildLines(guild: Guild, arg: String): List[String] = {
     val guildId = guild.getId
-    val embedColor = 3092790
-    val thumbnail =
-      if (arg == "allies") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
-      else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"
-
     val listed: List[Guilds] =
       if (arg == "allies") streamState.alliedGuildsData.getOrElse(guildId, List.empty[Guilds])
       else streamState.huntedGuildsData.getOrElse(guildId, List.empty[Guilds])
-
-    val builder = new EmbedBuilder()
-    builder.setColor(embedColor)
-    builder.setThumbnail(thumbnail)
-    if (listed.isEmpty) {
-      builder.setTitle("Guilds")
-      builder.setDescription("*No guilds on the list yet.*")
-      List(builder.build())
-    } else {
-      val roster: Map[String, Int] =
-        streamState.activityData.getOrElse(guildId, List())
-          .filter(_.guild.nonEmpty)
-          .groupBy(_.guild.toLowerCase)
-          .map { case (name, members) => name -> members.size }
-
-      val lines = listed.sortBy(_.name).map { entry =>
-        val shown = com.tibiabot.presentation.Names.capitalizeWords(entry.name)
-        val members = roster.get(entry.name.toLowerCase).map(n => s" — **$n** members").getOrElse("")
-        val reason = if (entry.reason == "true") " :pencil:" else ""
-        s"**[$shown](${guildUrl(entry.name)})**$members$reason"
-      }
-      // "Guilds" as the title rather than a first line, matching the players
-      // half - and here it also keeps the label out of the paginated body, so a
-      // guilds list long enough to span embeds is not headed only on page one.
-      com.tibiabot.presentation.ListEmbeds.paginate(lines, thumbnail, embedColor).toList
-        .zipWithIndex.map { case (embed, index) =>
-          if (index == 0) new EmbedBuilder(embed).setTitle("Guilds").build() else embed
-        }
+    val roster: Map[String, Int] =
+      streamState.activityData.getOrElse(guildId, List())
+        .filter(_.guild.nonEmpty)
+        .groupBy(_.guild.toLowerCase)
+        .map { case (name, members) => name -> members.size }
+    listed.sortBy(_.name).map { entry =>
+      val shown = com.tibiabot.presentation.Names.capitalizeWords(entry.name)
+      val members = roster.get(entry.name.toLowerCase).map(n => s" — **$n** members").getOrElse("")
+      val reason = if (entry.reason == "true") " :pencil:" else ""
+      s"**[$shown](${guildUrl(entry.name)})**$members$reason"
     }
   }
 

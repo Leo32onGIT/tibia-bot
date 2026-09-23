@@ -56,11 +56,24 @@ object ModalHandler {
     if (adding) BotApp.cooldownService.add(user.getId, kind, ZonedDateTime.now(), tag)
     else BotApp.cooldownService.del(user.getId, kind, tag)
 
-    val tracked = BotApp.cooldownService.getStamps(user.getId, kind).getOrElse(Nil)
-    val verb = if (adding) "added" else "Disabled"
-    val note = s"${Config.yesEmoji} cooldown tracker for **`$typed`** has been **$verb**."
-
-    event.getHook.editOriginalEmbeds(presentation.CooldownEmbeds.list(kind, tracked, user.getName, note))
-      .setComponents(presentation.CooldownEmbeds.controls(kind, tracked.size)).queue()
+    // Opened from somebody's own card, the card is what gets redrawn — and a
+    // message laid out with Discord's layout components can only be rewritten as
+    // one. A form opened from a per-kind list posted before the card existed
+    // redraws that list, as it always has.
+    val fromCard = Option(event.getMessage).exists(_.isUsingComponentsV2)
+    if (fromCard) {
+      val said =
+        if (adding) s"${Config.yesEmoji} Tracking ${presentation.CooldownEmbeds.itemName(kind)} for **`$typed`**."
+        else s"${Config.yesEmoji} Stopped tracking ${presentation.CooldownEmbeds.itemName(kind)} for **`$typed`**."
+      val card = presentation.CooldownEmbeds.personal(
+        k => BotApp.cooldownService.getStamps(user.getId, k).getOrElse(Nil), user.getName, said)
+      event.getHook.editOriginalComponents(card).useComponentsV2().queue()
+    } else {
+      val tracked = BotApp.cooldownService.getStamps(user.getId, kind).getOrElse(Nil)
+      val verb = if (adding) "added" else "Disabled"
+      val note = s"${Config.yesEmoji} cooldown tracker for **`$typed`** has been **$verb**."
+      event.getHook.editOriginalEmbeds(presentation.CooldownEmbeds.list(kind, tracked, user.getName, note))
+        .setComponents(presentation.CooldownEmbeds.controls(kind, tracked.size)).queue()
+    }
   }
 }

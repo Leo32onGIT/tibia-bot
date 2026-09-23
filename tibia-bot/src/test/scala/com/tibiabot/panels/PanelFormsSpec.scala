@@ -85,7 +85,7 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
   test("every list form fits inside Discord's component limit") {
     for {
       panel <- List(Panel.Hunted, Panel.Allies)
-      action <- List(PanelIds.Add, PanelIds.Remove, PanelIds.Info, PanelIds.Config)
+      action <- List(PanelIds.Add, PanelIds.AddGuild, PanelIds.AddPlayer, PanelIds.Remove, PanelIds.Info, PanelIds.Config)
       worlds <- List(one, several)
     } {
       val modal = ListForms.modal(panel, action, worlds)
@@ -116,6 +116,15 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
   test("the channel filters form carries each channel's neutral toggle under its level floor") {
     fieldIds(SettingsForms.modal(PanelIds.ChannelFilter, one).get) shouldBe List(
       PanelForms.LevelsField, PanelForms.NeutralLevelsField, PanelForms.DeathsField, PanelForms.NeutralDeathsField)
+  }
+
+  test("an Add pressed from a heading does not ask players or guilds, and only players get a tag") {
+    fieldIds(ListForms.modal(Panel.Hunted, PanelIds.AddPlayer, one).get) shouldBe
+      List(PanelForms.NamesField, PanelForms.ReasonField, PanelForms.TagField)
+    fieldIds(ListForms.modal(Panel.Hunted, PanelIds.AddGuild, one).get) shouldBe
+      List(PanelForms.NamesField, PanelForms.ReasonField)
+    fieldIds(ListForms.modal(Panel.Allies, PanelIds.AddPlayer, one).get) shouldBe
+      List(PanelForms.NamesField, PanelForms.ReasonField)
   }
 
   test("the online list form carries the layout and each side's level floor") {

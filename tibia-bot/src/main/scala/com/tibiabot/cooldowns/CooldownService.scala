@@ -103,7 +103,7 @@ final class CooldownService(
             val onFailure = undeliverable(stamp.user)
             user.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
               privateChannel.sendMessageEmbeds(embed).addComponents(ActionRow.of(
-                Button.success(CooldownIds.button(kind, CooldownIds.Action.Remind), "Collected")
+                Button.success(CooldownIds.button(kind, CooldownIds.Action.Remind), CooldownEmbeds.doneLabel(kind))
                   .withEmoji(Emoji.fromFormatted(CooldownEmbeds.emoji(kind))),
                 Button.secondary(CooldownIds.button(kind, CooldownIds.Action.Dismiss), "Dismiss")
               )).queue(

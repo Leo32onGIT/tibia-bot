@@ -88,7 +88,13 @@ object PanelIds {
 
   // --- hunted/allies actions ----------------------------------------------
 
+  /** Add with a "players or guilds?" picker — what panels drawn before the Add
+   *  buttons moved onto the list's headings still carry. Still answered. */
   val Add = "add"
+  /** Add from the Guilds heading, or the Players one: the form already knows
+   *  which, so it has no picker. */
+  val AddGuild = "addguild"
+  val AddPlayer = "addplayer"
   val Remove = "remove"
   val Info = "info"
   val Config = "config"
@@ -107,17 +113,17 @@ object PanelIds {
   /** Nil for a panel that is not a list — `/settings` and `/admin` draw their own
    *  buttons, and returning the hunted set for them would silently draw Add and
    *  Remove on a panel with nothing to add to. */
-  def listActions(panel: Panel): List[String] = {
-    if (panel != Panel.Hunted && panel != Panel.Allies) return Nil
-    // No "view list" button: the panel's own reply is the list. It costs
-    // nothing to draw — see HuntedAlliedService.playersEmbeds — so putting it
-    // behind a press only hid what somebody ran the command to see.
-    //
-    // Five, so they sit on one row: a sixth pushed Clear All onto a second row
-    // of its own. Tagging lives in the Add form instead, which can retag an
-    // entry already on the list — see HuntedAlliedService.addMany.
-    List(Add, Remove, Config, Info, Clear)
-  }
+  def listActions(panel: Panel): List[String] =
+    if (panel != Panel.Hunted && panel != Panel.Allies) Nil
+    else listHeadingActions ++ listFooterActions
+
+  /** The two Adds, each on the heading of the half of the list it adds to. */
+  val listHeadingActions: List[String] = List(AddGuild, AddPlayer)
+
+  /** The row at the foot of the list, in the order drawn. No "view list" button:
+   *  the panel's own reply is the list. Tagging lives in the Add player form and
+   *  on a Look up reply — see HuntedAlliedService.addMany. */
+  val listFooterActions: List[String] = List(Remove, Info, Config, Clear)
 
   // --- admin actions -------------------------------------------------------
 

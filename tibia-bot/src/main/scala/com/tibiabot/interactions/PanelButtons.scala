@@ -3,13 +3,13 @@ package com.tibiabot.interactions
 import com.tibiabot.commands.Permissions
 import com.tibiabot.domain.Worlds
 import com.tibiabot.panels.PanelIds.Panel
-import com.tibiabot.panels.{ListForms, PanelIds, Panels, SettingsForms}
+import com.tibiabot.commands.handlers.PanelCommands
+import com.tibiabot.panels.{ListForms, ListPanel, PanelIds, SettingsForms}
 import com.tibiabot.presentation.Embeds
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
 
-import scala.jdk.CollectionConverters._
 
 /** The buttons on the `/settings`, `/hunted`, `/allies` and `/admin` panels.
  *
@@ -68,14 +68,14 @@ object PanelButtons extends StrictLogging {
     val guildId = event.getGuild.getId
     val worlds: List[Worlds] = BotApp.worldsData.getOrElse(guildId, List())
     action match {
+      // The list is drawn with Discord's layout components, so everything that
+      // replaces its last message is too — such a message cannot take an embed.
       case PanelIds.Clear =>
         val (players, guilds) = counts(guildId, panel)
-        if (players == 0 && guilds == 0)
-          event.getHook.editOriginalEmbeds(Embeds.response(
-            s"${Config.noEmoji} The ${panel.noun} is already empty.")).setComponents().queue()
-        else
-          event.getHook.editOriginalEmbeds(Panels.clearConfirmEmbed(panel, players, guilds))
-            .setComponents(Panels.clearConfirmButtons(panel)).queue()
+        val answer =
+          if (players == 0 && guilds == 0) ListPanel.notice(s"${Config.noEmoji} The ${panel.noun} is already empty.")
+          else ListPanel.confirmClear(panel, players, guilds, Config.noEmoji)
+        event.getHook.editOriginalComponents(answer).useComponentsV2().queue()
 
       // Back out: put the panel back exactly as it was, changing nothing.
       case PanelIds.Cancel =>
@@ -85,7 +85,7 @@ object PanelButtons extends StrictLogging {
         val embed =
           if (panel == Panel.Hunted) BotApp.huntedAlliedService.clearHunted(event)
           else BotApp.huntedAlliedService.clearAllies(event)
-        event.getHook.editOriginalEmbeds(embed).setComponents().queue()
+        event.getHook.editOriginalComponents(ListPanel.notice(embed.getDescription)).useComponentsV2().queue()
 
       // Opens a form for one named player, so it must be the first response —
       // the name comes off the button's own id.
@@ -123,17 +123,12 @@ object PanelButtons extends StrictLogging {
 
   /** Put the panel back as the command drew it: the list, with its buttons. */
   private def redrawList(event: ButtonInteractionEvent, panel: Panel): Unit = {
-    val which = if (panel == Panel.Hunted) "hunted" else "allies"
-    val embeds = BotApp.huntedAlliedService.guildsEmbeds(event.getGuild, which) ++
-      BotApp.huntedAlliedService.playersEmbeds(event.getGuild, which)
     // The message being edited is the one the buttons were on, which is the last
-    // of however many the list needed - so it is the last batch that goes back
+    // of however many the list needed - so it is the last page that goes back
     // into it, not the first. Earlier messages are left as they were: nothing
     // holds a reference to them, and they still read correctly.
-    val pages = com.tibiabot.presentation.ListEmbeds.batches(embeds)
-    val last = pages.lastOption.getOrElse(List(Panels.emptyListEmbed(panel)))
-    event.getHook.editOriginalEmbeds(last.asJava)
-      .setComponents(Panels.listButtons(panel).asJava).queue()
+    val last = PanelCommands.listPagesFor(event.getGuild, panel).last
+    event.getHook.editOriginalComponents(last).useComponentsV2().queue()
   }
 
   private def counts(guildId: String, panel: Panel): (Int, Int) =

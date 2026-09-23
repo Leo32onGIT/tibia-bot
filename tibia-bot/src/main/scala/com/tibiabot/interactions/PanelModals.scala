@@ -137,12 +137,18 @@ object PanelModals extends StrictLogging {
     val hunted = panel == Panel.Hunted
     val service = BotApp.huntedAlliedService
     action match {
-      case PanelIds.Add | PanelIds.Remove =>
-        val kind = choice(event, PanelForms.KindField).getOrElse("player")
+      case PanelIds.Add | PanelIds.AddGuild | PanelIds.AddPlayer | PanelIds.Remove =>
+        // Pressed from a heading, the form knows which half of the list it adds
+        // to; the older Add and the Remove at the foot ask.
+        val kind = action match {
+          case PanelIds.AddGuild  => "guild"
+          case PanelIds.AddPlayer => "player"
+          case _                  => choice(event, PanelForms.KindField).getOrElse("player")
+        }
         val parsed = NameList.parse(text(event, PanelForms.NamesField))
         val (names, overflow) = NameList.take(parsed, ListForms.MaxNames)
         if (names.isEmpty) reply(event, s"${Config.noEmoji} No names in that - one per line.")
-        else if (action == PanelIds.Add) {
+        else if (action != PanelIds.Remove) {
           val reason = text(event, PanelForms.ReasonField)
           // Hunted only, and only for players - the tag lives on the player entry.
           val tag = if (hunted && kind == "player") choice(event, PanelForms.TagField).getOrElse("") else ""

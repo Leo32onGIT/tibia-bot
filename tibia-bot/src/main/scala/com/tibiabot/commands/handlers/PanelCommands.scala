@@ -3,13 +3,12 @@ package com.tibiabot.commands.handlers
 import com.tibiabot.commands.Permissions
 import com.tibiabot.domain.Worlds
 import com.tibiabot.panels.PanelIds.Panel
-import com.tibiabot.panels.{PanelIds, Panels}
+import com.tibiabot.panels.{ListPanel, Panels}
 import com.tibiabot.{BotApp, Config}
-import com.tibiabot.presentation.{Embeds, ListEmbeds}
+import com.tibiabot.presentation.Embeds
 import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
-import scala.jdk.CollectionConverters._
 
 /** `/settings`, `/hunted` and `/allies` — three commands that each answer with a
  *  panel of buttons rather than carrying a subcommand tree.
@@ -45,47 +44,33 @@ object PanelCommands {
       if (!Permissions.callerIsModerator(event, BotApp.moderatorRoleId(guildId))) refuse(event, moderatorText)
       else if (worldsOf(event).isEmpty) refuse(event, noWorldsText)
       else {
-        // Split by what a message can actually carry, not by embed count: the cap
-        // that bites is the 6000 characters summed across a message's embeds, and
-        // two full pages are already past it. See ListEmbeds.batches.
-        val pages = ListEmbeds.batches(listEmbedsFor(event.getGuild, panel))
-        // Buttons go under the *last* message. A list long enough to span several
-        // is a list you have scrolled to the bottom of, and the controls belong
-        // where that leaves you rather than back above the part you just read.
-        // An empty list still draws two "nothing on it" embeds, so this is never
-        // empty in practice — but a deferred reply nobody answers hangs as
-        // "thinking" forever, which is too poor a failure to leave to that.
-        val pagesToSend = if (pages.nonEmpty) pages else List(List(Panels.emptyListEmbed(panel)))
+        val pages = listPagesFor(event.getGuild, panel)
         // Every send carries setEphemeral, not just the ones after the first.
         // The deferral was ephemeral, so the first send inherits it — but each one
         // after that is a *followup*, and a followup defaults to public. A list
         // long enough to need a second message therefore posted the rest of itself
         // to the channel, buttons and all, for everybody to see.
-        pagesToSend.init.foreach(page =>
-          event.getHook.sendMessageEmbeds(page.asJava).setEphemeral(true).queue())
-        event.getHook.sendMessageEmbeds(pagesToSend.last.asJava)
-          .setComponents(Panels.listButtons(panel).asJava).setEphemeral(true).queue()
+        pages.foreach(page =>
+          event.getHook.sendMessageComponents(page).useComponentsV2().setEphemeral(true).queue())
       }
     }
 
-  /** Draw a list panel: the list itself, with the buttons under it.
+  /** Draw a list panel: the list itself, as a card with its buttons — see
+   *  panels.ListPanel for the layout and how a long list spills onto further
+   *  messages, the last of which carries the row of buttons.
    *
    *  The list is the reply rather than something behind a button. It is built
-   *  from cache and costs nothing (see HuntedAlliedService.playersEmbeds), so
-   *  there was never a reason to make somebody press for it — and a panel that
-   *  opened on "75 players and 6 guilds" told them the one thing they already
-   *  knew.
-   *
-   *  Discord takes ten embeds to a message. A list long enough to page past that
-   *  sends the rest behind it rather than losing them; the buttons stay on the
-   *  first message, where the eye starts.
+   *  from cache and costs nothing, so there was never a reason to make somebody
+   *  press for it — and a panel that opened on "75 players and 6 guilds" told
+   *  them the one thing they already knew.
    */
-  private[handlers] def listEmbedsFor(guild: net.dv8tion.jda.api.entities.Guild, panel: Panel): List[MessageEmbed] = {
+  private[tibiabot] def listPagesFor(guild: net.dv8tion.jda.api.entities.Guild, panel: Panel)
+      : List[net.dv8tion.jda.api.components.container.Container] = {
     val which = if (panel == Panel.Hunted) "hunted" else "allies"
-    BotApp.huntedAlliedService.guildsEmbeds(guild, which) ++
-      BotApp.huntedAlliedService.playersEmbeds(guild, which)
+    val service = BotApp.huntedAlliedService
+    ListPanel.pages(panel, service.listThumbnail(which), service.guildLines(guild, which),
+      service.playerLines(guild, which))
   }
-
 
   private[handlers] def counts(guildId: String, panel: Panel): (Int, Int) =
     if (panel == Panel.Hunted)

@@ -322,12 +322,30 @@ final class ChannelService(
       channel.sendMessageEmbeds(embed.build()).queue()
     }
 
-  /** Post the cooldown-tracker embed + one button per tracked collectible into a
-   *  guild's notifications channel (done on every /setup and /repair of that
-   *  channel). The same embed `/cooldowns` answers with, ephemerally. */
+  /** Post the cooldown tracker into a guild's notifications channel (done on
+   *  every /setup and /repair of that channel): each tracked collectible with a
+   *  button that opens the presser's own cooldowns. See CooldownEmbeds.tracker. */
   private def postCooldownTracker(channel: TextChannel): Unit =
-    channel.sendMessageEmbeds(CooldownEmbeds.panel())
-      .addComponents(CooldownEmbeds.panelControls()).queue()
+    channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().queue()
+
+  /** Bring the cooldown tracker in an existing notifications channel up to date,
+   *  for /repair: post one when it is missing, and replace one still in the embed
+   *  layout it had before it moved to Discord's layout components (or any
+   *  duplicates). A single up-to-date tracker is left exactly where it is.
+   *
+   *  Found among the bot's recent messages there by its buttons — every tracker,
+   *  old or new, carries cooldown buttons, and nothing else in that channel does.
+   *  True when a tracker was posted. */
+  private def refreshCooldownTracker(channel: TextChannel, recent: List[Message]): Boolean = {
+    val trackers = recent.filter(_.getComponentTree.findAll(classOf[Button]).asScala
+      .exists(button => Option(button.getCustomId).exists(id => com.tibiabot.cooldowns.CooldownIds.parse(id).isDefined)))
+    if (trackers.sizeIs == 1 && trackers.head.isUsingComponentsV2) false
+    else {
+      trackers.foreach(_.delete().queue(_ => (), _ => ()))
+      postCooldownTracker(channel)
+      true
+    }
+  }
 
   /** Build the boosted boss + creature + server-save embeds and post them to a
    *  guild's notifications channel with the server-save button, storing the
@@ -1039,6 +1057,12 @@ final class ChannelService(
               case _: Throwable =>
                 postBoostedNotifications(boostedChannel, guild, worldFormal)
             }
+          }
+          if (refreshCooldownTracker(boostedChannel, messages.toList)) {
+            val rebuilt = s"${Config.yesEmoji} The cooldown tracker in ${boostedChannel.getAsMention} was rebuilt."
+            val said = embedBuild.getDescriptionBuilder.toString
+            if (said.startsWith(Config.noEmoji)) embedBuild.setDescription(rebuilt)
+            else embedBuild.setDescription(s"$said\n$rebuilt")
           }
         } else {
           embedBuild.setDescription(s"${Config.noEmoji} The bot does not have VIEW/SEND permissions for the channel: **${boostedChannel.getName}**.\nI suggest you delete that channel and run the command again.")

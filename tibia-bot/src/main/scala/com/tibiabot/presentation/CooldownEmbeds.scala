@@ -6,6 +6,11 @@ import com.tibiabot.domain.{CooldownKind, CooldownStamp}
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
+import net.dv8tion.jda.api.components.container.{Container, ContainerChildComponent}
+import net.dv8tion.jda.api.components.section.Section
+import net.dv8tion.jda.api.components.separator.Separator
+import net.dv8tion.jda.api.components.textdisplay.TextDisplay
+import net.dv8tion.jda.api.components.thumbnail.Thumbnail
 import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.entities.emoji.Emoji
 
@@ -56,28 +61,83 @@ object CooldownEmbeds {
   /** The item's name, linked to its wiki page. */
   def linkedName(kind: CooldownKind): String = s"**[${itemName(kind)}](${wikiPage(page(kind))})**"
 
-  /** The tracker panel: one embed, one button per kind.
-   *
-   *  Posted into a guild's notifications channel by `/setup` and `/repair`, and
-   *  answered ephemerally by `/cooldowns` — the same embed both times, which is
-   *  why it is built in one place. Kooldown-Aid rather than either tracked item,
-   *  since the panel belongs to neither. */
-  def panel(): MessageEmbed =
-    new EmbedBuilder()
-      .setColor(Embeds.BrandColor)
-      .setDescription("This is a **Cooldown Tracker.**\nManage your cooldowns here:")
-      .setThumbnail(wikiFile("Kooldown-Aid"))
-      .build()
+  /** What marking one of these says: a satchel is collected, a dragon head used. */
+  def doneLabel(kind: CooldownKind): String = kind match {
+    case CooldownKind.Satchel    => "Collected"
+    case CooldownKind.DragonHead => "Used"
+  }
 
-  /** The prompt shown when someone has nothing of this kind tracked. */
-  def empty(kind: CooldownKind): MessageEmbed =
-    new EmbedBuilder()
-      .setColor(Embeds.BrandColor)
-      .setThumbnail(thumbnail(kind))
-      .setDescription(
-        s"This is a ${linkedName(kind)} cooldown tracker.\nMark the ${emoji(kind)} as " +
-          s"**Collected** and I will message you when the ${kind.durationDays} day cooldown expires.")
-      .build()
+  /** The heading both cooldown cards open with. Kooldown-Aid rather than either
+   *  tracked item, since the card belongs to neither. */
+  private def cardHeader: Section = Section.of(
+    Thumbnail.fromUrl(wikiFile("Kooldown-Aid")),
+    TextDisplay.of("### ⏳ Cooldown tracker\n-# Mark an item as collected/used and I'll message you when it's ready again."))
+
+  private def divider: Separator = Separator.createDivider(Separator.Spacing.SMALL)
+
+  /** The tracker posted into a guild's notifications channel by `/setup` and
+   *  `/repair`: each item, its cooldown, and a button that opens your own
+   *  cooldowns just for you. It cannot show anybody's own — everyone sees the same
+   *  message — which is why the button is there at all.
+   *
+   *  Laid out with Discord's layout components, so it is sent with
+   *  `useComponentsV2`. `emojiOf` defaults to the configured emoji; a test passes
+   *  its own. */
+  def tracker(emojiOf: CooldownKind => String = emoji): Container = {
+    val rows = CooldownKind.all.flatMap { kind =>
+      List[ContainerChildComponent](divider, Section.of(
+        Button.primary(CooldownIds.button(kind, CooldownIds.Action.Open), Emoji.fromFormatted(emojiOf(kind))),
+        TextDisplay.of(s"${emojiOf(kind)} ${linkedName(kind)}\n-# ${kind.durationDays}-day cooldown")))
+    }
+    Container.of(((cardHeader: ContainerChildComponent) :: rows).asJava)
+  }
+
+  /** Somebody's own cooldowns, both items at once: what `/cooldowns` answers with
+   *  and what the tracker's buttons open. Each item shows when every one of yours
+   *  comes back, with the buttons to act on it underneath — so marking an item is
+   *  one press, not one to find the list and another to use it.
+   *
+   *  `note` leads the card when an action has just changed something and says
+   *  what. */
+  def personal(stamps: CooldownKind => List[CooldownStamp], ownerName: String, note: String = "",
+               emojiOf: CooldownKind => String = emoji): Container = {
+    val lead: List[ContainerChildComponent] = if (note.isEmpty) Nil else List(TextDisplay.of(note))
+    val items = CooldownKind.all.flatMap { kind =>
+      val tracked = stamps(kind)
+      val lines =
+        if (tracked.isEmpty) "-# Nothing tracked yet."
+        else truncate(tracked.map(stamp =>
+          s"• ${whoFor(stamp, ownerName)} — ready <t:${kind.expiresAtEpoch(stamp.when)}:R>"), 1500)
+      List[ContainerChildComponent](
+        divider,
+        Section.of(Thumbnail.fromUrl(thumbnail(kind)),
+          TextDisplay.of(s"${emojiOf(kind)} ${linkedName(kind)}\n-# ${kind.durationDays}-day cooldown\n$lines")),
+        personalControls(kind, tracked.size, emojiOf))
+    }
+    Container.of(((cardHeader: ContainerChildComponent) :: lead ++ items).asJava)
+  }
+
+  /** Under each item on somebody's own card. Collected / Used stamps your own
+   *  cooldown now; the next opens the form that stamps one under a character's
+   *  name. Remove narrows as the list does, as [[controls]] always has: with one
+   *  cooldown it takes that one directly, with more it asks which, and Clear All
+   *  only appears when there is more than one to clear. */
+  private def personalControls(kind: CooldownKind, tracked: Int, emojiOf: CooldownKind => String): ActionRow = {
+    val done = Button.success(CooldownIds.button(kind, CooldownIds.Action.Set), doneLabel(kind))
+      .withEmoji(Emoji.fromFormatted(emojiOf(kind)))
+    val forCharacter = Button.secondary(CooldownIds.button(kind, CooldownIds.Action.AddForm), "For a character…")
+    val removing =
+      if (tracked == 0) Nil
+      else if (tracked == 1) List(Button.danger(CooldownIds.button(kind, CooldownIds.Action.RemoveAll), "Remove"))
+      else List(
+        Button.danger(CooldownIds.button(kind, CooldownIds.Action.RemoveForm), "Remove"),
+        Button.secondary(CooldownIds.button(kind, CooldownIds.Action.RemoveAll), "Clear All"))
+    ActionRow.of((done :: forCharacter :: removing).asJava)
+  }
+
+  /** Who a cooldown is for: the tag it was added under, or you. */
+  private def whoFor(stamp: CooldownStamp, ownerName: String): String =
+    if (stamp.tag.isEmpty) Names.user(ownerName) else s"**`${stamp.tag}`**"
 
   /** One line per tracked cooldown: who it is for, and when it comes back. */
   def line(stamp: CooldownStamp, ownerName: String): String = {
@@ -85,7 +145,9 @@ object CooldownEmbeds {
     s"${emoji(stamp.kind)} can be collected by $displayTag <t:${stamp.kind.expiresAtEpoch(stamp.when)}:R>"
   }
 
-  /** Somebody's tracked cooldowns of one kind. `note` is appended after a blank
+  /** Somebody's tracked cooldowns of one kind — the list the tracker opened
+   *  before it opened [[personal]], kept for redrawing one of those when a button
+   *  on it is pressed. `note` is appended after a blank
    *  line when a form has just changed something and says so — which is the one
    *  case this is called with nothing left to list, and why the heading is
    *  conditional: a "Cooldowns:" heading over no cooldowns reads as a bug. */
@@ -110,23 +172,10 @@ object CooldownEmbeds {
       .setThumbnail(thumbnail(kind))
       .setDescription(
         s"${emoji(kind)} cooldown for $displayTag expired <t:${kind.expiresAtEpoch(stamp.when)}:R>\n\n" +
-          s"Mark it as **Collected** and I will message you when the ${kind.durationDays} day cooldown expires.")
+          s"Mark it as **${doneLabel(kind)}** and I will message you when the ${kind.durationDays} day cooldown expires.")
     if (stamp.tag.nonEmpty) embed.setFooter(s"Tag: ${stamp.tag.toLowerCase}")
     embed.build()
   }
-
-  private def panelButton(kind: CooldownKind): Button =
-    Button.primary(CooldownIds.button(kind, CooldownIds.Action.Open), kind.label)
-      .withEmoji(Emoji.fromFormatted(emoji(kind)))
-
-  /** The panel itself: one button per kind, in `CooldownKind.all` order. */
-  def panelControls(): ActionRow = ActionRow.of(CooldownKind.all.map(panelButton).asJava)
-
-  /** The one button offered when nothing of this kind is tracked yet. */
-  def collectRow(kind: CooldownKind): ActionRow =
-    ActionRow.of(
-      Button.success(CooldownIds.button(kind, CooldownIds.Action.Set), "Collected")
-        .withEmoji(Emoji.fromFormatted(emoji(kind))))
 
   /** The controls under a list, which narrow as there is less to act on: with a
    *  single entry there is nothing to pick between, so Remove takes it directly

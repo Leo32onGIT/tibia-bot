@@ -65,6 +65,27 @@ object ListForms {
           else common
         Some(s"Add to the ${panel.noun}", parts)
 
+      // From a heading of the list, which already says whether this is players or
+      // guilds — so no picker, and the tag only where it can mean anything: on a
+      // player, on the hunted list.
+      case PanelIds.AddGuild | PanelIds.AddPlayer =>
+        val players = action == PanelIds.AddPlayer
+        val noun = if (players) "players" else "guilds"
+        val common = List(
+          namesBox("Add", s"${noun.capitalize}, up to $MaxNames at a time."),
+          label("Reason", "Optional, and applies to every name here.",
+            TextInput.create(ReasonField, TextInputStyle.SHORT)
+              .setPlaceholder("Why are these being added?")
+              .setRequired(false)
+              .setMaxLength(200)
+              .build()))
+        val parts =
+          if (players && panel == Panel.Hunted)
+            common :+ tagPicker("Tag", "Optional, and applies to every player here.",
+              current = None, required = false)
+          else common
+        Some(s"Add $noun to the ${panel.noun}", parts)
+
       case PanelIds.Remove =>
         Some(s"Remove from the ${panel.noun}", List(
           kindPicker(panel, "Remove"),
