@@ -184,6 +184,16 @@ class BotListener extends ListenerAdapter with StrictLogging {
           case ex: Throwable => logger.error(s"Unhandled exception on notification modal '${event.getModalId}'", ex)
         }
       })
+    } else if (interactions.ObserverModals.handles(event.getModalId)) {
+      // Same treatment as the notification forms: it writes to the database and
+      // answers with an ephemeral of its own, so defer a reply unconditionally.
+      event.deferReply(true).queue()
+      interactionExecutor.execute(() => {
+        try interactions.ObserverModals.handle(event)
+        catch {
+          case ex: Throwable => logger.error(s"Unhandled exception on observer modal '${event.getModalId}'", ex)
+        }
+      })
     } else {
       interactions.ModalHandler.handle(event)
     }

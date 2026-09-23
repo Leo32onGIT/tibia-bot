@@ -79,6 +79,30 @@ object Config {
     val disabledForMissingToken: Boolean = requested != Off && token.isEmpty
   }
 
+  /** The Tibia Observer integration — see [[com.tibiabot.observer.ObserverService]].
+   *
+   *  Two gates. `encryption-secret` must be set for tokens to be stored at all
+   *  (they are AES-encrypted at rest); with it unset, `/observer` reports the
+   *  feature is unavailable and nothing is written. `mode` then gates *live*
+   *  linking against CipSoft's Observer API — which is supported only on an as-is,
+   *  unsupported basis — so `off` stores tokens without contacting it and `on`
+   *  links them. */
+  object Observer {
+    private val observer = discord.getConfig("observer-api")
+    val encryptionSecret: String = observer.getString("encryption-secret").trim
+    private val requestedOn: Boolean = observer.getString("mode").trim.toLowerCase == "on"
+    val baseUrl: String = observer.getString("base-url").stripSuffix("/")
+    val clientVersion: String = observer.getString("client-version")
+    val deviceIdentification: String = observer.getString("device-identification")
+    val sidecarUrl: String = observer.getString("sidecar-url").stripSuffix("/")
+    /** Optional shared secret sent to the sidecar as X-Sidecar-Token. */
+    val sidecarToken: String = observer.getString("sidecar-token").trim
+    /** Tokens can be stored (encrypted) whenever the secret is present. */
+    val storageEnabled: Boolean = encryptionSecret.nonEmpty
+    /** Live linking additionally needs mode=on (a later phase). */
+    val enabled: Boolean = storageEnabled && requestedOn
+  }
+
   /** Settings for the character age cache — see
    *  [[com.tibiabot.tibiadata.AgeCachedTibiaApi]]. Separate from `Cache` above
    *  because it is not only durations, and because `enabled` is meant to be a
@@ -228,6 +252,8 @@ object Config {
  val inqEmoji: String = discord.getString("inq-emoji")
  val kilmareshEmoji: String = discord.getString("kilmaresh-emoji")
  val exivaEmoji: String = discord.getString("exiva-emoji")
+ /** Precedes the raid name in the imminent-raid embed's title. */
+ val raidEmoji: String = discord.getString("raid-emoji")
  val indentEmoji: String = discord.getString("indent-emoji")
  val dailyEmoji: String = discord.getString("daily-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")

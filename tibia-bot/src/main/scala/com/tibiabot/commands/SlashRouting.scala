@@ -29,6 +29,7 @@ object SlashRouting {
     "cooldowns" -> (CooldownCommands.handle _),
     "boosted"   -> (BoostedCommands.handle _),
     "patreon"   -> (PatreonCommands.handle _),
+    "observer"  -> (ObserverCommands.handle _),
     "stamina"   -> (RespawnCommands.handle _),
     "bookings"  -> (RespawnCommands.bookings _),
     "lootsplit" -> (LootSplitCommands.handle _),

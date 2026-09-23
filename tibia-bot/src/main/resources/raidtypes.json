@@ -1,0 +1,4777 @@
+{
+  "raidTypes": [
+    {
+      "id": 10,
+      "name": "Dragons on Draconia",
+      "area": "Ab'Dendriel",
+      "subarea": "Draconia",
+      "link": "https://tibia.fandom.com/wiki/Ab'Dendriel_Raids#Dragon_raid_on_Draconia",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There are dragons rising in Draconia!",
+          "creatures": [
+            {
+              "name": "Dragon",
+              "qualifier": "8x"
+            },
+            {
+              "name": "Dragon Hatchling",
+              "qualifier": "12x"
+            },
+            {
+              "name": "Dragon Lord",
+              "qualifier": "2x per tower floor"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Wasps and Bears near Ab'Dendriel",
+      "area": "Ab'Dendriel",
+      "subarea": "Ab'Dendriel Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Ab'Dendriel_Raids#Wasp_and_Bear_Raid_near_Ab'Dendriel",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Forest animals spread out close to Ab'Dendriel!",
+          "creatures": [
+            {
+              "name": "Wasp",
+              "qualifier": "~30x"
+            }
+          ]
+        },
+        {
+          "millis": 0,
+          "creatures": [
+            {
+              "name": "Bear",
+              "qualifier": "~30x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Grynch Clan Goblins in Ab'Dendriel",
+      "area": "Ab'Dendriel",
+      "subarea": "Ab'Dendriel City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Ab'Dendriel to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "War Wolves near Ab'Dendriel",
+      "area": "Ab'Dendriel",
+      "subarea": "Ab'Dendriel Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Ab'Dendriel_Raids#War_Wolf_Raid_on_Ab'Dendriel",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Many aggressive beasts are roaming south of Ab'Dendriel! Take care!",
+          "creatures": [
+            {
+              "name": "Wolf"
+            },
+            {
+              "name": "War Wolf"
+            }
+          ]
+        },
+        {
+          "millis": 60000,
+          "creatures": [
+            {
+              "name": "Wolf"
+            },
+            {
+              "name": "War Wolf"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Wolf"
+            },
+            {
+              "name": "War Wolf"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "creatures": [
+            {
+              "name": "Wolf",
+              "qualifier": "~70x total"
+            },
+            {
+              "name": "War Wolf",
+              "qualifier": "~35x total"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "Ancient Scarabs in Ankrahmun scarab caves",
+      "area": "Southern Darama",
+      "subarea": "Daramian Scarab Caves",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Ancient_Scarab_Raid",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Something is crawling deep in the Ankrahmun Scarab caves.",
+          "creatures": [
+            {
+              "name": "Ancient Scarab"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "Bonebeasts in Mountain/Dipthrah Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Bonebeast_Raid_in_Mountain_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Bonebeasts are rattling down in the Ankrahmun Dipthrah tombs.",
+          "creatures": [
+            {
+              "name": "Bonebeast",
+              "qualifier": "68x total"
+            }
+          ]
+        },
+        {
+          "millis": 500000,
+          "message": "Bonebeasts roaming around in the Ankrahmun Dipthrah tombs.",
+          "creatures": [
+            {
+              "name": "Bonebeast"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "name": "Cobras in Mountain/Dipthrah Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Cobra_Raid_in_Mountain_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There's something sizzling in the Ankrahmun Dipthrah tombs.",
+          "creatures": [
+            {
+              "name": "Cobra",
+              "qualifier": "~100x total"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "Even more sizzling in the Ankrahmun Dipthrah tombs.",
+          "creatures": [
+            {
+              "name": "Cobra"
+            }
+          ]
+        },
+        {
+          "millis": 420000,
+          "message": "Poison overflow in the Ankrahmun Dipthrah tombs!",
+          "creatures": [
+            {
+              "name": "Cobra"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "Djinns in Kha'zeel",
+      "area": "Northern Darama",
+      "subarea": "Ashta'daramai",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Djinn_Raids_near_Ankrahmun",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There is a sudden rise in Djinn population in Kha'zeel!"
+        },
+        {
+          "millis": 300000,
+          "message": "Djinnvasion in Ashta'daramai!"
+        },
+        {
+          "millis": 400000,
+          "message": "Djinnvasion in Mal'ouquah!"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "name": "Gargoyles in Oasis/Rahemos Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Gargoyle_Raid_in_Oasis_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There is something stony moving down in the Ankrahmun Rahemos tombs.",
+          "creatures": [
+            {
+              "name": "Gargoyle",
+              "qualifier": "~70x total"
+            }
+          ]
+        },
+        {
+          "millis": 150000,
+          "message": "Gargoyle attack in the Ankrahmun Rahemos tombs!",
+          "creatures": [
+            {
+              "name": "Gargoyle"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "name": "Grynch Clan Goblins in Ankrahmun",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Ankrahmun to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "name": "Necromancers in Peninsula/Omruc Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Necromancer_Raid_in_Peninsula_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Necromancer attack in the Ankrahmun Omruc tombs!",
+          "creatures": [
+            {
+              "name": "Necromancer"
+            }
+          ]
+        },
+        {
+          "millis": 0,
+          "creatures": [
+            {
+              "name": "Necromancer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "Nomads near Ankrahmun",
+      "area": "Southern Darama",
+      "subarea": "Southern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Nomad_Raid_near_Ankrahmun",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Nomad scouts have been sighted close to the gates to Ankrahmun.",
+          "creatures": [
+            {
+              "name": "Nomad"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "creatures": [
+            {
+              "name": "Nomad"
+            }
+          ]
+        },
+        {
+          "millis": 360000,
+          "creatures": [
+            {
+              "name": "Nomad"
+            }
+          ]
+        },
+        {
+          "millis": 480000,
+          "message": "The desert nomads are launching a full scale attack on Ankrahmun. Some might even have slipped through the defences!",
+          "creatures": [
+            {
+              "name": "Nomad"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "name": "Scarabs and Ancient Scarabs near Ankrahmun",
+      "area": "Southern Darama",
+      "subarea": "Southern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Scarab_Raid_near_Ankrahmun",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Unusual frequent scarab sightings at the gates of Ankrahmun.",
+          "creatures": [
+            {
+              "name": "Larva"
+            },
+            {
+              "name": "Scarab"
+            }
+          ]
+        },
+        {
+          "millis": 360000,
+          "message": "Ancient scarabs are leading an attack on Ankrahmun.",
+          "creatures": [
+            {
+              "name": "Ancient Scarab",
+              "qualifier": "16x total"
+            },
+            {
+              "name": "Scarab"
+            }
+          ]
+        },
+        {
+          "millis": 480000,
+          "message": "Ancient scarabs are leading an attack on Ankrahmun.",
+          "creatures": [
+            {
+              "name": "Ancient Scarab"
+            },
+            {
+              "name": "Scarab"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "message": "Ancient scarabs are leading an attack on Ankrahmun.",
+          "creatures": [
+            {
+              "name": "Ancient Scarab"
+            },
+            {
+              "name": "Scarab"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "name": "Slimes in Shadow/Mahrdis Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Slime_Raid_in_Shadow_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There is something slimy going on in the Ankrahmun Mahrdis tombs."
+        },
+        {
+          "millis": 300000,
+          "message": "Slime attack in the Ankrahmun Mahrdis tombs!",
+          "creatures": [
+            {
+              "name": "Slime",
+              "qualifier": "35x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Terramites near Darama Terramite Cave",
+      "area": "Southern Darama",
+      "subarea": "Southern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Terramite_Raid_near_Ankrahmun",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Something is moving under the surface in the sand north of Ankrahmun!",
+          "creatures": [
+            {
+              "name": "Terramite",
+              "qualifier": "30x"
+            }
+          ]
+        },
+        {
+          "millis": 10000,
+          "message": "Terramites north of Ankrahmun!",
+          "creatures": [
+            {
+              "name": "Terramite",
+              "qualifier": "70x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "name": "Skeletons north of Ankrahmun",
+      "area": "Southern Darama",
+      "subarea": "Southern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Skeleton_Raid_near_Ankrahmun",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Some skeletons are assembling north of Ankrahmun!",
+          "creatures": [
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Ghost"
+            },
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Skeleton"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "name": "Vampires in Shadow/Mahrdis Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Vampire_Raid_in_Shadow_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Cold bodies with long teeth have lowered the temperature down in the Ankrahmun Mahrdis tombs."
+        },
+        {
+          "millis": 300000,
+          "message": "Cold bodies with long teeth. Many teeth. Down in the Ankrahmun Mahrdis tombs.",
+          "creatures": [
+            {
+              "name": "Vampire"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "name": "Vampires in Tarpit/Morguthis Tomb",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun Pharaoh Tombs",
+      "link": "https://tibia.fandom.com/wiki/Ankrahmun_Raids#Vampire_Raid_in_Tarpit_Tomb",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There's a sudden ice cold wind in the Ankrahmun Morguthis tombs!"
+        },
+        {
+          "millis": 300000,
+          "message": "Some vampires appeared in Ankrahmun Morguthis tombs!",
+          "creatures": [
+            {
+              "name": "Vampire"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "name": "Barbarians near Svargrond",
+      "area": "Hrodmir",
+      "subarea": "Svargrond Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Svargrond_Raids#Barbarian_Raid_in_Svargrond",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Scouts report a barbarian army gathering near Svargrond."
+        },
+        {
+          "millis": 180000,
+          "message": "Raiders are attacking Svargrond!"
+        },
+        {
+          "millis": 240000,
+          "message": "Raiders are attacking Svargrond!"
+        },
+        {
+          "millis": 420000,
+          "message": "The barbarians attacks on Svargrond are becoming more and more fierce!"
+        },
+        {
+          "millis": 660000,
+          "message": "The barbarians are preparing for a final assault on Svargrond. Hide or fight!",
+          "creatures": [
+            {
+              "name": "Barbarian Bloodwalker"
+            },
+            {
+              "name": "Barbarian Skullhunter"
+            },
+            {
+              "name": "Barbarian Headsplitter"
+            },
+            {
+              "name": "Barbarian Brutetamer"
+            },
+            {
+              "name": "Ice Witch"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "name": "Amazons north of Carlin",
+      "area": "Carlin",
+      "subarea": "Fields of Glory",
+      "link": "https://tibia.fandom.com/wiki/Carlin_Raids#Amazon_Raid_North_of_Carlin",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Amazons are converging north of Carlin."
+        },
+        {
+          "millis": 540000,
+          "creatures": [
+            {
+              "name": "Amazon"
+            }
+          ]
+        },
+        {
+          "millis": 720000,
+          "message": "Amazon attack north of Carlin!",
+          "creatures": [
+            {
+              "name": "Amazon"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "name": "Grynch Clan Goblins in Carlin",
+      "area": "Carlin",
+      "subarea": "Carlin City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Carlin to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "name": "Orcs north of Carlin",
+      "area": "Carlin",
+      "subarea": "Fields of Glory",
+      "link": "https://tibia.fandom.com/wiki/Carlin_Raids#Orc_Raid_in_the_Woods",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Some orcs are assembling in the woods between Carlin and Northport.",
+          "creatures": [
+            {
+              "name": "Orc"
+            }
+          ]
+        },
+        {
+          "millis": 360000,
+          "creatures": [
+            {
+              "name": "Orc"
+            }
+          ]
+        },
+        {
+          "millis": 450000,
+          "message": "Orcs are attacking Carlin from the north-east!",
+          "creatures": [
+            {
+              "name": "Orc"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Berserker"
+            },
+            {
+              "name": "Orc Leader"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "name": "Trolls north-west of Carlin",
+      "area": "Carlin",
+      "subarea": "Carlin Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Carlin_Raids#Troll_Raid_North-West_of_Carlin",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Trolls trolling north-west of Carlin!",
+          "creatures": [
+            {
+              "name": "Troll"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "message": "Even more Trolls north-west of Carlin!",
+          "creatures": [
+            {
+              "name": "Troll"
+            },
+            {
+              "name": "Troll Guard"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "message": "Beware! Troll Champions north-west of Carlin!",
+          "creatures": [
+            {
+              "name": "Troll"
+            },
+            {
+              "name": "Troll Guard"
+            },
+            {
+              "name": "Troll Champion"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "name": "Weak undead in Ghostlands",
+      "area": "Carlin",
+      "subarea": "Ghostlands",
+      "link": "https://tibia.fandom.com/wiki/Carlin_Raids#Lesser_Undead_Raid_on_Ghostlands",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There is a slight uneven energy in the ghostlands west of Carlin. Something is going to happen soon.",
+          "creatures": [
+            {
+              "name": "Skeleton"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "message": "Skeletons appeared in the ghostlands. Something is wrong there!",
+          "creatures": [
+            {
+              "name": "Skeleton"
+            }
+          ]
+        },
+        {
+          "millis": 280000,
+          "message": "Now the ghostlands are full of ghouls! Seems like there is a massive outburst of negative energy there!",
+          "creatures": [
+            {
+              "name": "Ghoul"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "creatures": [
+            {
+              "name": "Ghost"
+            }
+          ]
+        },
+        {
+          "millis": 720000,
+          "creatures": [
+            {
+              "name": "Demon Skeleton"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "name": "Wasps north of Carlin",
+      "area": "Carlin",
+      "subarea": "Carlin Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Carlin_Raids#Wasp_Raid_North_of_Carlin",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Some wasps have been found north of Carlin. There is some loud buzzing in the air.",
+          "creatures": [
+            {
+              "name": "Wasp"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Wasp"
+            }
+          ]
+        },
+        {
+          "millis": 250000,
+          "message": "Buzzing madness north of Carlin! Be careful if you're allergic!",
+          "creatures": [
+            {
+              "name": "Wasp"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "Willi Wasp the Wicked has arrived!",
+          "creatures": [
+            {
+              "name": "Willi Wasp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 55,
+      "name": "Ferumbras in the Citadel",
+      "area": "Vandura",
+      "subarea": "Kharos",
+      "link": "https://tibia.fandom.com/wiki/Ferumbras",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The seals on Ferumbras' old citadel are glowing. Prepare for HIS return, mortals."
+        },
+        {
+          "millis": 600000,
+          "message": "Ferumbras' return is at hand. The Edron Academy calls for heroes to fight that evil."
+        },
+        {
+          "millis": 1200000,
+          "message": "Ferumbras has returned to his citadel once more. Stop him before it is too late.",
+          "creatures": [
+            {
+              "name": "Ferumbras"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 59,
+      "name": "Grynch Clan Goblins in Darashia",
+      "area": "Northern Darama",
+      "subarea": "Darashia City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Darashia to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "name": "Lions west of Darashia",
+      "area": "Northern Darama",
+      "subarea": "Northern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Lions_west_of_Darashia",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Hungry lions scout the western Darashian desert. Travellers beware!",
+          "creatures": [
+            {
+              "name": "Lion"
+            }
+          ]
+        },
+        {
+          "millis": 250000,
+          "message": "Packs of hungry lions stalk Darashia's western desert. Be on your guard!",
+          "creatures": [
+            {
+              "name": "Lion"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "Hear the roar of Zomba, king of the lions, roaming the Darashia desert!",
+          "creatures": [
+            {
+              "name": "Zomba"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 61,
+      "name": "Minotaurs at the Dark Pyramid",
+      "area": "Northern Darama",
+      "subarea": "Daramian Minotaur Pyramid",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Minotaurs_at_the_Dark_Pyramid",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Minotaurs call to arms in the north of Darashia!",
+          "creatures": [
+            {
+              "name": "Minotaur"
+            },
+            {
+              "name": "Minotaur Archer"
+            },
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "message": "War cries echo from the Minotaurs' retreat in Darashia's north!",
+          "creatures": [
+            {
+              "name": "Minotaur"
+            },
+            {
+              "name": "Minotaur Archer"
+            },
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        },
+        {
+          "millis": 220000,
+          "message": "Wrathful Minotaurs swarm the northern desert of Darashia!",
+          "creatures": [
+            {
+              "name": "Minotaur"
+            },
+            {
+              "name": "Minotaur Archer"
+            },
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        },
+        {
+          "millis": 280000,
+          "message": "Merciless Minotaurs sally forth from their Darashian retreat!",
+          "creatures": [
+            {
+              "name": "Minotaur"
+            },
+            {
+              "name": "Minotaur Archer"
+            },
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 62,
+      "name": "Necromancers and Liches in Deeper Catacombs",
+      "area": "Northern Darama",
+      "subarea": "Northern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Necromancers_and_Liches_in_Deeper_Catacombs",
+      "events": [
+        {
+          "millis": 0,
+          "message": "A necromancer prepares to wake the dead in a crypt below Darashia!",
+          "creatures": [
+            {
+              "name": "Necromancer",
+              "qualifier": "1x"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "creatures": [
+            {
+              "name": "Necromancer",
+              "qualifier": "5x"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "How terrible! Liches have risen from their graves in the Darashian crypts!",
+          "creatures": [
+            {
+              "name": "Lich",
+              "qualifier": "4x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "name": "Pirates north of Darashia",
+      "area": "Northern Darama",
+      "subarea": "Northern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Pirates_in_Darashia",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Pillage and plunder! Pirates have been sighted north of Darashia!",
+          "creatures": [
+            {
+              "name": "Pirate Marauder",
+              "qualifier": "~15x"
+            }
+          ]
+        },
+        {
+          "millis": 60000,
+          "creatures": [
+            {
+              "name": "Pirate Marauder"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Pirate Cutthroat",
+              "qualifier": "~10x"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "creatures": [
+            {
+              "name": "Pirate Buccaneer",
+              "qualifier": "~10x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 64,
+      "name": "Undead horde west of Darashia",
+      "area": "Northern Darama",
+      "subarea": "Northern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Undead_Horde_West_of_Darashia",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Hordes of undead invade from the west of Darashia!",
+          "creatures": [
+            {
+              "name": "Skeleton"
+            }
+          ]
+        },
+        {
+          "millis": 240000,
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            }
+          ]
+        },
+        {
+          "millis": 360000,
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Crypt Shambler"
+            },
+            {
+              "name": "Vampire"
+            }
+          ]
+        },
+        {
+          "millis": 480000,
+          "message": "The undead are attacking Darashia!",
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Crypt Shambler"
+            },
+            {
+              "name": "Vampire"
+            },
+            {
+              "name": "Bonelord"
+            },
+            {
+              "name": "Demon Skeleton"
+            },
+            {
+              "name": "Necromancer"
+            },
+            {
+              "name": "Bonebeast"
+            },
+            {
+              "name": "Lich"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Crypt Shambler"
+            },
+            {
+              "name": "Vampire"
+            },
+            {
+              "name": "Bonelord"
+            },
+            {
+              "name": "Demon Skeleton"
+            },
+            {
+              "name": "Necromancer"
+            },
+            {
+              "name": "Bonebeast"
+            },
+            {
+              "name": "Lich"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 86,
+      "name": "Undead in Drefia",
+      "area": "Northern Darama",
+      "subarea": "Deeper Drefia",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Undead_raid_on_Drefia",
+      "events": [
+        {
+          "millis": 0,
+          "creatures": [
+            {
+              "name": "Ghost"
+            },
+            {
+              "name": "Tarnished Spirit"
+            },
+            {
+              "name": "Demon Skeleton"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "Undead spirits stalk the ruins of Drefia.",
+          "creatures": [
+            {
+              "name": "Ghost"
+            },
+            {
+              "name": "Tarnished Spirit"
+            },
+            {
+              "name": "Demon Skeleton"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 87,
+      "name": "Liches in Drefia",
+      "area": "Northern Darama",
+      "subarea": "Drefia Vampire Crypts",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Liches_in_Drefia",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Mortals, beware. Liches are being summoned in Drefia's Deeper Vampire Crypts",
+          "creatures": [
+            {
+              "name": "Lich"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "Woe and behold! A plague of Liches threatens Drefia's Deeper Vampire Crypts.",
+          "creatures": [
+            {
+              "name": "Lich",
+              "qualifier": "25x total"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 89,
+      "name": "Priestesses in Drefia",
+      "area": "Northern Darama",
+      "subarea": "Deeper Drefia",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Priestess_in_Drefia",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The priestesses in Drefia call their sisters to wake dark powers. Fight their evil purpose!",
+          "creatures": [
+            {
+              "name": "Priestess"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "The priestesses' dark chant in Drefia is almost completed - decimate their numbers to prevent the evils' awakening!",
+          "creatures": [
+            {
+              "name": "Priestess"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 91,
+      "name": "The Pale Count in Drefia",
+      "area": "Northern Darama",
+      "subarea": "Drefia Vampire Crypts",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#The_Pale_Count",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The Pale Count has risen from his crypt deep under Drefia. Blood will flow."
+        },
+        {
+          "millis": 240000,
+          "creatures": [
+            {
+              "name": "The Pale Count"
+            },
+            {
+              "name": "Nightfiend"
+            },
+            {
+              "name": "Vicious Manbat"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 92,
+      "name": "Zombies in Drefia",
+      "area": "Northern Darama",
+      "subarea": "Deeper Drefia",
+      "link": "https://tibia.fandom.com/wiki/Darashia_Raids#Zombies_in_Star_Room",
+      "events": [
+        {
+          "millis": 0,
+          "message": "One of the black rituals in Drefia has succeeded. Dead meat is walking the ritual halls.",
+          "creatures": [
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Zombie"
+            }
+          ]
+        },
+        {
+          "millis": 420000,
+          "creatures": [
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Zombie"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 93,
+      "name": "Dryads in Cormaya",
+      "area": "Edron",
+      "subarea": "Dryad Gardens",
+      "link": "https://tibia.fandom.com/wiki/Dryad",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Dryads have returned to protect their tree gardens underneath Cormaya.",
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 2700000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 3600000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 94,
+      "name": "Dryads north of Edron",
+      "area": "Edron",
+      "subarea": "Edron Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Dryad",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Dryads have returned to protect the forest north of Edron.",
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 2700000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 3600000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 95,
+      "name": "Dryads near Ab'Dendriel",
+      "area": "Carlin",
+      "subarea": "Fields of Glory",
+      "link": "https://tibia.fandom.com/wiki/Dryad",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Dryads have returned to protect the northern forests near Ab'Dendriel.",
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 2700000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 3600000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 96,
+      "name": "Dryads east of Port Hope",
+      "area": "Tiquanda",
+      "subarea": "Port Hope Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Dryad",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Dryads have returned to protect the jungle of Tiquanda.",
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 2700000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        },
+        {
+          "millis": 3600000,
+          "creatures": [
+            {
+              "name": "Dryad"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 99,
+      "name": "Goblins west of Edron",
+      "area": "Edron",
+      "subarea": "Edron Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Edron_Raids#Goblin_Raid_near_Edron",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins are converging west of Edron.",
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Assassin"
+            }
+          ]
+        },
+        {
+          "millis": 240000,
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Assassin"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Assassin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 100,
+      "name": "Grynch Clan Goblins in Edron",
+      "area": "Edron",
+      "subarea": "Edron Castle",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Edron to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "name": "Hunters north of Edron",
+      "area": "Edron",
+      "subarea": "Edron Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Edron_Raids#Hunter_Raid_north_of_Edron",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Some hunters are roaming the woods north of Edron!",
+          "creatures": [
+            {
+              "name": "Hunter"
+            },
+            {
+              "name": "Wild Warrior"
+            }
+          ]
+        },
+        {
+          "millis": 360000,
+          "message": "Happy hunting, hunters!",
+          "creatures": [
+            {
+              "name": "Hunter"
+            },
+            {
+              "name": "Wild Warrior"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "name": "Monks and Warlocks near Edron",
+      "area": "Edron",
+      "subarea": "Edron Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Edron_Raids#Monks_and_Warlocks_Raid_near_Edron",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Some monks have gathered at a stone circle northwest of Edron. They seem to be up to something.",
+          "creatures": [
+            {
+              "name": "Monk"
+            }
+          ]
+        },
+        {
+          "millis": 180000,
+          "message": "More monks have gathered at a stone circle northwest of Edron. Something terrible is going to happen!",
+          "creatures": [
+            {
+              "name": "Monk"
+            },
+            {
+              "name": "Necromancer"
+            },
+            {
+              "name": "Priestess"
+            }
+          ]
+        },
+        {
+          "millis": 320000,
+          "message": "Run! Warlocks northwest of Edron! There seems to be a very unholy gathering!",
+          "creatures": [
+            {
+              "name": "Warlock"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "name": "Orc Berserkers in Edron orc cave",
+      "area": "Edron",
+      "subarea": "Edron Orc Lands",
+      "link": "https://tibia.fandom.com/wiki/Edron_Raids#Orc_Berserker_Raid_in_Edron_Orc_cave",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Deep under Edron, the orc population seems to grow rapidly. Be careful and take a rope with you!"
+        },
+        {
+          "millis": 700000,
+          "message": "Orc berserkers deep under Edron!",
+          "creatures": [
+            {
+              "name": "Orc Berserker"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "name": "Orshabaal on Edron",
+      "area": "Edron",
+      "subarea": "Edron Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Orshabaal",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Orshabaal's minions are working on his return to the World. LEAVE Edron at once, mortals."
+        },
+        {
+          "millis": 180000,
+          "message": "Orshabaal is about to make his way into the mortal realm. Run for your lives!"
+        },
+        {
+          "millis": 400000,
+          "message": "Orshabaal has been summoned from hell to plague the lands of mortals again.",
+          "creatures": [
+            {
+              "name": "Orshabaal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 111,
+      "name": "Wyverns north-west of Edron",
+      "area": "Edron",
+      "subarea": "Edron Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Edron_Raids#Wyvern_Raid_near_Edron",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Shriiiiiek! What evil intentions do the wyverns have northwest of Edron?",
+          "creatures": [
+            {
+              "name": "Wyvern"
+            }
+          ]
+        },
+        {
+          "millis": 220000,
+          "message": "Wyvern attack the northwest of Edron!",
+          "creatures": [
+            {
+              "name": "Wyvern",
+              "qualifier": "~40x total"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 116,
+      "name": "Essences of Darkness in all cities",
+      "area": "Thais",
+      "link": "https://tibia.fandom.com/wiki/The_Lightbearer#Consequences",
+      "events": [
+        {
+          "millis": 0,
+          "message": "One of the ten lights went dark and disappeared! All hope is lost now. Flee into your houses and hope to survive this day.",
+          "creatures": [
+            {
+              "name": "Eclipse Knight"
+            },
+            {
+              "name": "Gloombringer"
+            },
+            {
+              "name": "Harbinger of Darkness"
+            },
+            {
+              "name": "Spawn of Despair"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 165,
+      "name": "Gaz'haragoth on Roshamuul",
+      "area": "Roshamuul",
+      "subarea": "Roshamuul Prison",
+      "link": "https://tibia.fandom.com/wiki/Roshamuul_Raids#Gaz'haragoth",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Gaz'haragoth will shatter your dreams in a barrage of nightmares!",
+          "creatures": [
+            {
+              "name": "Gaz'haragoth"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 166,
+      "name": "Undead in Ghostlands",
+      "area": "Carlin",
+      "subarea": "Ghostlands",
+      "link": "https://tibia.fandom.com/wiki/Carlin_Raids#Undead_Raid_on_Ghostlands",
+      "events": [
+        {
+          "millis": 0,
+          "message": "A disturbance in the ether stirs up the undead of the Ghostlands."
+        },
+        {
+          "millis": 420000,
+          "message": "The undead are reclaiming the Ghostlands once more!"
+        },
+        {
+          "millis": 900000,
+          "message": "The dreaded Banshees and their undead retinue are unleashed in the Ghostland."
+        },
+        {
+          "millis": 1200000,
+          "message": "Banshees wish to feast on the souls of the living! Fight them in the Ghostlands or abandon all hope!",
+          "creatures": [
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Stalker"
+            },
+            {
+              "name": "Ghost"
+            },
+            {
+              "name": "Mummy"
+            },
+            {
+              "name": "Demon Skeleton"
+            },
+            {
+              "name": "Lich"
+            },
+            {
+              "name": "Banshee"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 169,
+      "name": "Morgaroth on Goroma",
+      "area": "Vandura",
+      "subarea": "Hellgorge",
+      "link": "https://tibia.fandom.com/wiki/Morgaroth",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The ancient volcano on Goroma slowly becomes active once again."
+        },
+        {
+          "millis": 360000,
+          "message": "There is an evil presence at the volcano of Goroma."
+        },
+        {
+          "millis": 720000,
+          "message": "Evil Cultists have called an ancient evil into the volcano on Goroma. Beware of its power mortals.",
+          "creatures": [
+            {
+              "name": "Morgaroth"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 174,
+      "name": "The Halloween Hare spawns",
+      "area": "Kazordoon",
+      "subarea": "Kazordoon Surroundings",
+      "link": "https://tibia.fandom.com/wiki/The_Halloween_Hare",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Beware, beware the halloween hare.",
+          "creatures": [
+            {
+              "name": "The Halloween Hare"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 175,
+      "name": "The Mutated Pumpkin west of Darashia",
+      "area": "Northern Darama",
+      "subarea": "Northern Darama Desert",
+      "link": "https://tibia.fandom.com/wiki/The_Mutated_Pumpkin",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh noes! It's a mutated pumpkin!",
+          "creatures": [
+            {
+              "name": "The Mutated Pumpkin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 180,
+      "name": "Ghazbaran in the Formorgar Mines",
+      "area": "Hrodmir",
+      "subarea": "Formorgar Mines",
+      "link": "https://tibia.fandom.com/wiki/Svargrond_Raids#Ghazbaran_Raid_in_the_Formorgar_Mines",
+      "events": [
+        {
+          "millis": 0,
+          "message": "An ancient evil is awakening in the mines beneath Hrodmir."
+        },
+        {
+          "millis": 600000,
+          "message": "Demonic entities are entering the mortal realm in the Hrodmir mines."
+        },
+        {
+          "millis": 1200000,
+          "message": "The demonic master has revealed itself in the mines of Hrodmir.",
+          "creatures": [
+            {
+              "name": "Ghazbaran"
+            },
+            {
+              "name": "Demon"
+            },
+            {
+              "name": "Fury"
+            },
+            {
+              "name": "Juggernaut"
+            },
+            {
+              "name": "Deathslicer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 181,
+      "name": "Bats in Kazordoon mines",
+      "area": "Kazordoon",
+      "subarea": "Kazordoon Underground",
+      "link": "https://tibia.fandom.com/wiki/Kazordoon_Raids#Bat_Raid_in_Kazordoon",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There seems to be a bat problem in the Kazordoon mines.",
+          "creatures": [
+            {
+              "name": "Bat"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 182,
+      "name": "Goblins near Femor Hills",
+      "area": "Kazordoon",
+      "subarea": "Femor Hills",
+      "link": "https://tibia.fandom.com/wiki/Kazordoon_Raids#Goblin_Raid_from_Femor_Hills",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins are preparing to attack Kazordoon from Femor Hills!"
+        },
+        {
+          "millis": 210000,
+          "message": "Goblins attack from Femor Hills!",
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Assassin"
+            }
+          ]
+        },
+        {
+          "millis": 310000,
+          "message": "Goblins attack from Femor Hills!",
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Assassin"
+            }
+          ]
+        },
+        {
+          "millis": 410000,
+          "message": "Danger! Now the goblin leaders attack Kazordoon from Femor Hills!",
+          "creatures": [
+            {
+              "name": "Goblin",
+              "qualifier": "~20x total"
+            },
+            {
+              "name": "Goblin Assassin",
+              "qualifier": "~10x total"
+            },
+            {
+              "name": "Goblin Leader",
+              "qualifier": "~10x total"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 183,
+      "name": "Grynch Clan Goblins in Kazordoon",
+      "area": "Kazordoon",
+      "subarea": "Kazordoon City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Kazordoon to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 187,
+      "name": "Minotaurs in Kazordoon mines",
+      "area": "Kazordoon",
+      "subarea": "Horned Fox Lair",
+      "link": "https://tibia.fandom.com/wiki/Kazordoon_Raids#Minotaur_Raid_in_Kazordoon_Mines",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Kaplar! Flee before it is too late! Minos in the Kazordoon Mines!",
+          "creatures": [
+            {
+              "name": "Minotaur Archer"
+            }
+          ]
+        },
+        {
+          "millis": 480000,
+          "creatures": [
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 189,
+      "name": "Hunters north of Green Claw Swamp",
+      "area": "Kazordoon",
+      "subarea": "Kazordoon Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Kazordoon_Raids#Hunters_Raid_north_of_Green_Claw_Swamp",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Hunters on the hunt north of the Green Claw Swamp.",
+          "creatures": [
+            {
+              "name": "Bear",
+              "qualifier": "10x"
+            },
+            {
+              "name": "Hunter",
+              "qualifier": "15x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 193,
+      "name": "Grynch Clan Goblins in Liberty Bay",
+      "area": "Vandura",
+      "subarea": "Liberty Bay City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Liberty Bay to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 194,
+      "name": "Flamingos on the Laguna Islands",
+      "area": "Vandura",
+      "subarea": "Laguna Islands",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Flamingo_Raid_on_the_Laguna_Islands",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There has been an unnatural rise in Flamingo population on the Laguna Islands.",
+          "creatures": [
+            {
+              "name": "Flamingo"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "message": "Flamingocalypse on the Laguna Islands!",
+          "creatures": [
+            {
+              "name": "Flamingo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 195,
+      "name": "Pirate bosses near Liberty Bay",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Pirate_Boss_Raid_on_Liberty_Bay",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Pirates are launching a surprise attack on Liberty Bay! Take care, they seem to be everywhere.",
+          "creatures": [
+            {
+              "name": "Ron the Ripper"
+            },
+            {
+              "name": "Lethal Lissy"
+            },
+            {
+              "name": "Brutus Bloodbeard"
+            },
+            {
+              "name": "Deadeye Devious"
+            },
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "message": "Pirates have invaded the fortress.",
+          "creatures": [
+            {
+              "name": "Ron the Ripper"
+            },
+            {
+              "name": "Lethal Lissy"
+            },
+            {
+              "name": "Brutus Bloodbeard"
+            },
+            {
+              "name": "Deadeye Devious"
+            },
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 196,
+      "name": "Pirates near Liberty Bay",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Pirate_Raid_on_Liberty_Bay",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Unknown ships are sighted north of Liberty Bay."
+        },
+        {
+          "millis": 240000,
+          "message": "The ships that approach Liberty Bay from the north have raised the pirate flag! Hide or grab your weapons to fight."
+        },
+        {
+          "millis": 480000,
+          "message": "Pirates are launching an attack on Liberty Bay! Hide or fight.",
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        },
+        {
+          "millis": 720000,
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        },
+        {
+          "millis": 960000,
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        },
+        {
+          "millis": 1200000,
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        },
+        {
+          "millis": 1440000,
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        },
+        {
+          "millis": 1560000,
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 197,
+      "name": "Quaras near Liberty Bay",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Quara_Scout_Raid_on_Liberty_Bay",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Something is moving in the depths of the sea around Liberty Bay."
+        },
+        {
+          "millis": 60000,
+          "message": "Quaras emerged from the sea to attack Liberty Bay.",
+          "creatures": [
+            {
+              "name": "Quara Constrictor Scout"
+            },
+            {
+              "name": "Quara Mantassin Scout"
+            },
+            {
+              "name": "Quara Hydromancer Scout"
+            },
+            {
+              "name": "Quara Pincher Scout"
+            },
+            {
+              "name": "Quara Predator Scout"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "creatures": [
+            {
+              "name": "Quara Constrictor Scout"
+            },
+            {
+              "name": "Quara Mantassin Scout"
+            },
+            {
+              "name": "Quara Hydromancer Scout"
+            },
+            {
+              "name": "Quara Pincher Scout"
+            },
+            {
+              "name": "Quara Predator Scout"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "name": "Quaras in Liberty Bay plantations 1",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Quara_Scout_Raid_on_Liberty_Bay_Plantations",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Numerous Quara fins have been sighted in the seas around Liberty Bay.",
+          "creatures": [
+            {
+              "name": "Quara Constrictor Scout"
+            },
+            {
+              "name": "Quara Mantassin Scout"
+            },
+            {
+              "name": "Quara Hydromancer Scout"
+            },
+            {
+              "name": "Quara Pincher Scout"
+            },
+            {
+              "name": "Quara Predator Scout"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 199,
+      "name": "Quaras in Liberty Bay plantations 2",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Quara_Scout_Raid_on_Liberty_Bay_Plantations",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Numerous Quara fins have been sighted in the seas around Liberty Bay.",
+          "creatures": [
+            {
+              "name": "Quara Constrictor Scout"
+            },
+            {
+              "name": "Quara Mantassin Scout"
+            },
+            {
+              "name": "Quara Hydromancer Scout"
+            },
+            {
+              "name": "Quara Pincher Scout"
+            },
+            {
+              "name": "Quara Predator Scout"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 200,
+      "name": "Quaras in Liberty Bay plantations 3",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Quara_Scout_Raid_on_Liberty_Bay_Plantations",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Numerous Quara fins have been sighted in the seas around Liberty Bay.",
+          "creatures": [
+            {
+              "name": "Quara Constrictor Scout"
+            },
+            {
+              "name": "Quara Mantassin Scout"
+            },
+            {
+              "name": "Quara Hydromancer Scout"
+            },
+            {
+              "name": "Quara Pincher Scout"
+            },
+            {
+              "name": "Quara Predator Scout"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "name": "Pirates in Liberty Bay plantations",
+      "area": "Vandura",
+      "subarea": "Liberty Bay Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Pirate_Raid_on_the_Plantations_of_Liberty_Bay",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Sails sighted northwest of Liberty Bay."
+        },
+        {
+          "millis": 300000,
+          "message": "Pirates are attacking the plantations of Liberty Bay.",
+          "creatures": [
+            {
+              "name": "Pirate Corsair"
+            },
+            {
+              "name": "Pirate Buccaneer"
+            },
+            {
+              "name": "Pirate Cutthroat"
+            },
+            {
+              "name": "Pirate Marauder"
+            },
+            {
+              "name": "Smuggler"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 203,
+      "name": "Thornback Tortoises on Treasure Island",
+      "area": "Vandura",
+      "subarea": "Treasure Island",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Tortoise_Raid_on_Treasure_Island",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Slowly but steadily, the population of tortoises grows on Treasure Island.",
+          "creatures": [
+            {
+              "name": "Tortoise",
+              "qualifier": "~10x"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "creatures": [
+            {
+              "name": "Tortoise",
+              "qualifier": "~10x"
+            }
+          ]
+        },
+        {
+          "millis": 540000,
+          "creatures": [
+            {
+              "name": "Tortoise",
+              "qualifier": "~20x"
+            },
+            {
+              "name": "Thornback Tortoise",
+              "qualifier": "~5x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 207,
+      "name": "Tigers on Meriana",
+      "area": "Vandura",
+      "subarea": "Meriana",
+      "link": "https://tibia.fandom.com/wiki/Liberty_Bay_Raids#Tiger_raid_on_Meriana",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Majestic creatures with stripes roam the small desert at Meriana.",
+          "creatures": [
+            {
+              "name": "Tiger"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "creatures": [
+            {
+              "name": "Tiger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 229,
+      "name": "Giant Spiders on Plains of Havoc",
+      "area": "Venore",
+      "subarea": "Plains of Havoc",
+      "link": "https://tibia.fandom.com/wiki/Venore_Raids#Giant_Spider_Raid_on_Plains_of_Havoc",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The mating season of the giant spiders is at hand. Leave the plains of havoc as fast as you can."
+        },
+        {
+          "millis": 540000,
+          "message": "Giant spiders have gathered on the plains of havoc for their mating season. Beware!",
+          "creatures": [
+            {
+              "name": "Giant Spider"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 235,
+      "name": "Undead on Plains of Havoc",
+      "area": "Venore",
+      "subarea": "Plains of Havoc",
+      "link": "https://tibia.fandom.com/wiki/Venore_Raids#Undead_Army_in_Plains_of_Havoc",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The dead of the plains of havoc are becoming restless!"
+        },
+        {
+          "millis": 360000,
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Mummy"
+            },
+            {
+              "name": "Demon Skeleton"
+            },
+            {
+              "name": "Vampire"
+            }
+          ]
+        },
+        {
+          "millis": 480000,
+          "message": "A veritable army of undead is amassing in the plains of havoc, beware!",
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Mummy"
+            },
+            {
+              "name": "Demon Skeleton"
+            },
+            {
+              "name": "Vampire"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "message": "The dreaded banshees lead their undead minions to claim the plains of havoc!",
+          "creatures": [
+            {
+              "name": "Skeleton"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Mummy"
+            },
+            {
+              "name": "Demon Skeleton"
+            },
+            {
+              "name": "Vampire"
+            },
+            {
+              "name": "Banshee"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 237,
+      "name": "Kongras south of Banuta",
+      "area": "Tiquanda",
+      "subarea": "Banuta",
+      "link": "https://tibia.fandom.com/wiki/Port_Hope_Raids#Kongra_Raid_South_of_Banuta",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There are some kongras congregating south of Banuta.",
+          "creatures": [
+            {
+              "name": "Kongra"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "More furry primates in Banuta.",
+          "creatures": [
+            {
+              "name": "Kongra"
+            }
+          ]
+        },
+        {
+          "millis": 850000,
+          "message": "More ape and fur flurry south of Banuta!",
+          "creatures": [
+            {
+              "name": "Kongra"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 238,
+      "name": "Serpent Spawns in Deeper Banuta",
+      "area": "Tiquanda",
+      "subarea": "Banuta",
+      "link": "https://tibia.fandom.com/wiki/Port_Hope_Raids#Serpent_Spawn_Raid_in_Deeper_Banuta",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Something bad is happening deep, deep down under Banuta.",
+          "creatures": [
+            {
+              "name": "Serpent Spawn"
+            }
+          ]
+        },
+        {
+          "millis": 540000,
+          "message": "Something is sizzling deep under many sheets of soil in Banuta.",
+          "creatures": [
+            {
+              "name": "Serpent Spawn"
+            }
+          ]
+        },
+        {
+          "millis": 780000,
+          "message": "Hordes of slippery spawns slither in Deeper Banuta!",
+          "creatures": [
+            {
+              "name": "Serpent Spawn"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 239,
+      "name": "Lizards near Chor",
+      "area": "Tiquanda",
+      "subarea": "Port Hope Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Port_Hope_Raids#Lizard_Raid_on_Port_Hope_2",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Lizards seem to attack Port Hope from Chor."
+        },
+        {
+          "millis": 250000,
+          "message": "Lizards are advancing to Port Hope from Chor."
+        },
+        {
+          "millis": 600000,
+          "creatures": [
+            {
+              "name": "Lizard Sentinel"
+            },
+            {
+              "name": "Lizard Templar"
+            },
+            {
+              "name": "Lizard Snakecharmer"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Lizard Sentinel",
+              "qualifier": "~45x total"
+            },
+            {
+              "name": "Lizard Templar"
+            },
+            {
+              "name": "Lizard Snakecharmer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 240,
+      "name": "Grynch Clan Goblins in Port Hope",
+      "area": "Tiquanda",
+      "subarea": "Port Hope City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Port Hope to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 243,
+      "name": "Terror Birds in Trapwood",
+      "area": "Tiquanda",
+      "subarea": "Port Hope Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Port_Hope_Raids#Terror_Bird_Raid_in_Trapwood",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Terrorbirds have been sighted in Trapwood south-east of Port Hope!",
+          "creatures": [
+            {
+              "name": "Terror Bird"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "name": "Grynch Clan Goblins raid in Rathleton",
+      "area": "Oramond",
+      "subarea": "Rathleton City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Rathleton to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 281,
+      "name": "Spectral Scum in cities",
+      "area": "Carlin",
+      "subarea": "Carlin Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Spectral_Scum",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Spectral scum is invading the towns! Ask a fortune teller for help!",
+          "creatures": [
+            {
+              "name": "Spectral Scum"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 283,
+      "name": "Barbarians near Bittermor",
+      "area": "Hrodmir",
+      "subarea": "Bittermor",
+      "link": "https://tibia.fandom.com/wiki/Svargrond_Raids#Barbarian_Raid_near_Bittermor",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Barbarians are gathering at Bittermor. They seem to be up to something.",
+          "creatures": [
+            {
+              "name": "Barbarian Brutetamer"
+            },
+            {
+              "name": "Barbarian Bloodwalker"
+            },
+            {
+              "name": "Barbarian Skullhunter"
+            }
+          ]
+        },
+        {
+          "millis": 500000,
+          "message": "The barbarian pack is roaming around in Bittermor.",
+          "creatures": [
+            {
+              "name": "Barbarian Brutetamer"
+            },
+            {
+              "name": "Barbarian Bloodwalker"
+            },
+            {
+              "name": "Barbarian Skullhunter"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 284,
+      "name": "Grynch Clan Goblins in Svargrond",
+      "area": "Hrodmir",
+      "subarea": "Svargrond City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Svargrond to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 287,
+      "name": "Ice Golems in the Formorgar Mines",
+      "area": "Hrodmir",
+      "subarea": "Formorgar Mines",
+      "link": "https://tibia.fandom.com/wiki/Svargrond_Raids#Ice_Golem_Raid_in_the_Formorgar_Mines",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There is a sudden rise in the ice golem population in Formorgar Mines.",
+          "creatures": [
+            {
+              "name": "Ice Golem"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 289,
+      "name": "Winter Wolves near Krimhorn",
+      "area": "Hrodmir",
+      "subarea": "Krimhorn",
+      "link": "https://tibia.fandom.com/wiki/Svargrond_Raids#Winter_Wolf_Raid_near_Krimhorn",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Packs of winter wolves have been sighted roaming the area near the barbarian camps in Svargrond!",
+          "creatures": [
+            {
+              "name": "Winter Wolf"
+            }
+          ]
+        },
+        {
+          "millis": 220000,
+          "message": "The barbarian camp in Svargrond is being attacked by winter wolves!",
+          "creatures": [
+            {
+              "name": "Winter Wolf"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 293,
+      "name": "Rats in Thais",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Thais_Raids#Rat_Plague_in_Thais",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Rat plague in Thais!",
+          "creatures": [
+            {
+              "name": "Rat"
+            },
+            {
+              "name": "Cave Rat"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "message": "Rat plague in Thais!",
+          "creatures": [
+            {
+              "name": "Rat"
+            },
+            {
+              "name": "Cave Rat"
+            }
+          ]
+        },
+        {
+          "millis": 1920000,
+          "creatures": [
+            {
+              "name": "Rat"
+            },
+            {
+              "name": "Cave Rat"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 294,
+      "name": "Cyclops under Mount Sternum",
+      "area": "Thais",
+      "subarea": "Mount Sternum",
+      "link": "https://tibia.fandom.com/wiki/Thais_Raids#Cyclops_Raid_east_of_Thais",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Let da mashing begin! Cyclops riot east of Thais.",
+          "creatures": [
+            {
+              "name": "Cyclops"
+            },
+            {
+              "name": "Cyclops Drone"
+            },
+            {
+              "name": "Cyclops Smith"
+            }
+          ]
+        },
+        {
+          "millis": 240000,
+          "creatures": [
+            {
+              "name": "Cyclops"
+            },
+            {
+              "name": "Cyclops Drone"
+            },
+            {
+              "name": "Cyclops Smith"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 296,
+      "name": "Grynch Clan Goblins in Thais",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Thais to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 297,
+      "name": "Tomb creatures in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some creatures from the tombs in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Larva"
+            },
+            {
+              "name": "Scarab"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Mummy"
+            },
+            {
+              "name": "Crypt Shambler"
+            },
+            {
+              "name": "Gargoyle"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Larva"
+            },
+            {
+              "name": "Scarab"
+            },
+            {
+              "name": "Ghoul"
+            },
+            {
+              "name": "Mummy"
+            },
+            {
+              "name": "Crypt Shambler"
+            },
+            {
+              "name": "Gargoyle"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 298,
+      "name": "Dragon Lords in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some dragon lords in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Dragon Lord"
+            },
+            {
+              "name": "Dragon Lord Hatchling"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Dragon Lord"
+            },
+            {
+              "name": "Dragon Lord Hatchling"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 299,
+      "name": "Dragons in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some dragons in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Dragon"
+            },
+            {
+              "name": "Dragon Hatchling"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Dragon"
+            },
+            {
+              "name": "Dragon Hatchling"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 300,
+      "name": "Dworcs in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some dworcs in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Dworc Venomsniper"
+            },
+            {
+              "name": "Dworc Fleshhunter"
+            },
+            {
+              "name": "Dworc Voodoomaster"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Dworc Venomsniper"
+            },
+            {
+              "name": "Dworc Fleshhunter"
+            },
+            {
+              "name": "Dworc Voodoomaster"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 301,
+      "name": "Elementals in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some elementals in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Earth Elemental"
+            },
+            {
+              "name": "Energy Elemental"
+            },
+            {
+              "name": "Fire Elemental"
+            },
+            {
+              "name": "Water Elemental"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Earth Elemental"
+            },
+            {
+              "name": "Energy Elemental"
+            },
+            {
+              "name": "Fire Elemental"
+            },
+            {
+              "name": "Water Elemental"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 302,
+      "name": "Frost Dragons in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some frost dragons in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Frost Dragon"
+            },
+            {
+              "name": "Frost Dragon Hatchling"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Frost Dragon"
+            },
+            {
+              "name": "Frost Dragon Hatchling"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 303,
+      "name": "Goblins in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some goblins in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Scavenger"
+            },
+            {
+              "name": "Goblin Assassin"
+            },
+            {
+              "name": "Goblin Leader"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Goblin"
+            },
+            {
+              "name": "Goblin Scavenger"
+            },
+            {
+              "name": "Goblin Assassin"
+            },
+            {
+              "name": "Goblin Leader"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 304,
+      "name": "Tiquanda creatures in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some creatures from the Tiquanda jungle in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Terramite"
+            },
+            {
+              "name": "Wasp"
+            },
+            {
+              "name": "Centipede"
+            },
+            {
+              "name": "Carniphila"
+            },
+            {
+              "name": "Slime"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Terramite"
+            },
+            {
+              "name": "Wasp"
+            },
+            {
+              "name": "Centipede"
+            },
+            {
+              "name": "Carniphila"
+            },
+            {
+              "name": "Slime"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 305,
+      "name": "Lizards in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some lizards in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Lizard Sentinel"
+            },
+            {
+              "name": "Lizard Snakecharmer"
+            },
+            {
+              "name": "Lizard Templar"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Lizard Sentinel"
+            },
+            {
+              "name": "Lizard Snakecharmer"
+            },
+            {
+              "name": "Lizard Templar"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 306,
+      "name": "Minotaurs in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some minotaurs in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Minotaur"
+            },
+            {
+              "name": "Minotaur Archer"
+            },
+            {
+              "name": "Minotaur Mage"
+            },
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Minotaur"
+            },
+            {
+              "name": "Minotaur Archer"
+            },
+            {
+              "name": "Minotaur Mage"
+            },
+            {
+              "name": "Minotaur Guard"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "name": "Orcs in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some orcs in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Leader"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Leader"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 308,
+      "name": "Trolls in Thais Knight's Guild arena",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Kingsday_Mini_World_Change",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The King's mages have summoned some trolls in the knight's arena for your enjoyment.",
+          "creatures": [
+            {
+              "name": "Frost Troll"
+            },
+            {
+              "name": "Swamp Troll"
+            },
+            {
+              "name": "Troll Champion"
+            },
+            {
+              "name": "Troll Legionnaire"
+            },
+            {
+              "name": "Troll Guard"
+            },
+            {
+              "name": "Furious Troll"
+            },
+            {
+              "name": "Mechanical Fighter"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "creatures": [
+            {
+              "name": "Frost Troll"
+            },
+            {
+              "name": "Swamp Troll"
+            },
+            {
+              "name": "Troll Champion"
+            },
+            {
+              "name": "Troll Legionnaire"
+            },
+            {
+              "name": "Troll Guard"
+            },
+            {
+              "name": "Furious Troll"
+            },
+            {
+              "name": "Mechanical Fighter"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 310,
+      "name": "Orcs in Thais",
+      "area": "Thais",
+      "subarea": "Thais Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Thais_Raids#Orc_Raid_on_Thais",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Orc activity near Thais reported! Beware!",
+          "creatures": [
+            {
+              "name": "Orc"
+            },
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            }
+          ]
+        },
+        {
+          "millis": 240000,
+          "creatures": [
+            {
+              "name": "Orc"
+            },
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "War Wolf"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Shaman"
+            }
+          ]
+        },
+        {
+          "millis": 420000,
+          "message": "Thais is under attack!",
+          "creatures": [
+            {
+              "name": "Orc"
+            },
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "War Wolf"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Berserker"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Leader"
+            }
+          ]
+        },
+        {
+          "millis": 540000,
+          "creatures": [
+            {
+              "name": "Orc"
+            },
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "War Wolf"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Berserker"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Leader"
+            },
+            {
+              "name": "Orc Warlord"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 311,
+      "name": "Weak orcs north of Thais",
+      "area": "Thais",
+      "subarea": "Thais Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Thais_Raids#Orc_Raid_North_of_Thais",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Some orcs are assembling north of Thais.",
+          "creatures": [
+            {
+              "name": "Orc",
+              "qualifier": "~40x"
+            },
+            {
+              "name": "Orc Spearman",
+              "qualifier": "~15x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 312,
+      "name": "Wasps south of Thais",
+      "area": "Thais",
+      "subarea": "Thais Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Thais_Raids#Wasp_Raid_in_Thais",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Buzzing and humming! Wasps south of Thais. Be careful there!",
+          "creatures": [
+            {
+              "name": "Wasp"
+            }
+          ]
+        },
+        {
+          "millis": 250000,
+          "message": "Even more Wasps south of Thais. Be careful there!",
+          "creatures": [
+            {
+              "name": "Wasp",
+              "qualifier": "~20x total"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 313,
+      "name": "Lizards, Serpent Spawns and Hydras east of Port Hope",
+      "area": "Tiquanda",
+      "subarea": "Port Hope Surroundings",
+      "link": "https://tibia.fandom.com/wiki/Port_Hope_Raids#Lizard_Raid_on_Port_Hope",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The lizards of Chor are amassing an army to take over the southern Jungle!"
+        },
+        {
+          "millis": 600000,
+          "message": "The army of the lizardmen is growing!"
+        },
+        {
+          "millis": 900000,
+          "message": "The lizard army is on its march to Port Hope. The southern jungle is no longer safe!"
+        },
+        {
+          "millis": 1200000,
+          "message": "The lizard army is marching closer and closer to Port Hope! Beware!"
+        },
+        {
+          "millis": 1500000,
+          "message": "The army of the lizards is dangerously close to Port Hope! Fight them back for the sake of humanity!"
+        },
+        {
+          "millis": 1620000,
+          "message": "The serpent god may send one of his children to show his wrath!"
+        },
+        {
+          "millis": 1800000,
+          "message": "Beware of the serpent god's wrath!",
+          "creatures": [
+            {
+              "name": "Lizard Sentinel"
+            },
+            {
+              "name": "Lizard Templar"
+            },
+            {
+              "name": "Lizard Snakecharmer"
+            },
+            {
+              "name": "Serpent Spawn"
+            },
+            {
+              "name": "Hydra"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 322,
+      "name": "Undead Jesters in Ab'Dendriel",
+      "area": "Ab'Dendriel",
+      "subarea": "Ab'Dendriel City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Ab'Dendriel beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 323,
+      "name": "Undead Jesters in Ankrahmun",
+      "area": "Southern Darama",
+      "subarea": "Ankrahmun City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Ankrahmun beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 324,
+      "name": "Undead Jesters in Carlin",
+      "area": "Carlin",
+      "subarea": "Carlin City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Carlin beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 325,
+      "name": "Undead Jesters in Darashia",
+      "area": "Northern Darama",
+      "subarea": "Darashia City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Darashia beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 326,
+      "name": "Undead Jesters in Edron",
+      "area": "Edron",
+      "subarea": "Edron Castle",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Edron beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 327,
+      "name": "Undead Jesters in Kazordoon",
+      "area": "Kazordoon",
+      "subarea": "Kazordoon City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Kazordoon beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 328,
+      "name": "Undead Jesters in Liberty Bay",
+      "area": "Vandura",
+      "subarea": "Liberty Bay City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Liberty Bay beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 329,
+      "name": "Undead Jesters in Port Hope",
+      "area": "Tiquanda",
+      "subarea": "Port Hope City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Port Hope beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 330,
+      "name": "Undead Jesters in Svargrond",
+      "area": "Hrodmir",
+      "subarea": "Svargrond City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Svargrond beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 331,
+      "name": "Undead Jesters in Thais",
+      "area": "Thais",
+      "subarea": "Thais City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Thais beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 332,
+      "name": "Undead Jesters in Yalahar",
+      "area": "Yalahar",
+      "subarea": "Yalahar Centre",
+      "link": "https://tibia.fandom.com/wiki/Raid#Undead_Jester_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Oh no! Yalahar beware! All bad entertainers are returning from their graves to haunt their audience once again!",
+          "creatures": [
+            {
+              "name": "Undead Jester"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 334,
+      "name": "Elves near Venore",
+      "area": "Venore",
+      "subarea": "Venore City",
+      "link": "https://tibia.fandom.com/wiki/Venore_Raids#Elf_Raid_at_Venore",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Elven scouts from Shadowthorn have been spotted near Venore! Beware!",
+          "creatures": [
+            {
+              "name": "Elf"
+            },
+            {
+              "name": "Elf Scout"
+            },
+            {
+              "name": "Elf Arcanist"
+            }
+          ]
+        },
+        {
+          "millis": 220000,
+          "message": "Venore is under attack!",
+          "creatures": [
+            {
+              "name": "Elf"
+            },
+            {
+              "name": "Elf Scout"
+            },
+            {
+              "name": "Elf Arcanist"
+            }
+          ]
+        },
+        {
+          "millis": 480000,
+          "creatures": [
+            {
+              "name": "Elf"
+            },
+            {
+              "name": "Elf Scout"
+            },
+            {
+              "name": "Elf Arcanist"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 335,
+      "name": "Witches at Green Claw Swamp",
+      "area": "Venore",
+      "subarea": "Green Claw Swamp",
+      "link": "https://tibia.fandom.com/wiki/Venore_Raids#Witches_Raid_at_Green_Claw_Swamp",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Dark energy is concentrating in the Green Claw Swamp. Something is about to happen there."
+        },
+        {
+          "millis": 300000,
+          "creatures": [
+            {
+              "name": "Witch",
+              "qualifier": "~15x"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "message": "The wicked witches are invading the Green Claw Swamp! Get out of there! Or help to defeat them!",
+          "creatures": [
+            {
+              "name": "Witch",
+              "qualifier": "~15x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 336,
+      "name": "Grynch Clan Goblins in Venore",
+      "area": "Venore",
+      "subarea": "Venore City",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Venore to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 337,
+      "name": "Wyverns in Gnomebase Alpha",
+      "area": "Kazordoon",
+      "subarea": "Gnomegate Mushroom Gardens",
+      "link": "https://tibia.fandom.com/wiki/Kazordoon_Raids#Wyvern_Raid_in_Gnomebase_Alpha",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There is a sudden rise in wyvern population in the mushroom gardens beneath Gnomebase Alpha.",
+          "creatures": [
+            {
+              "name": "Wyvern"
+            }
+          ]
+        },
+        {
+          "millis": 400000,
+          "message": "Be prepared to fight the wyvern threat in the mushroom gardens!",
+          "creatures": [
+            {
+              "name": "Wyvern"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 346,
+      "name": "Grynch Clan Goblins in Yalahar",
+      "area": "Yalahar",
+      "subarea": "Yalahar Centre",
+      "link": "https://tibia.fandom.com/wiki/Raid#Grynch_Clan_Goblin_Invasion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Goblins of the infamous Grynch Clan are invading Yalahar to steal all presents, beware!",
+          "creatures": [
+            {
+              "name": "Grynch Clan Goblin"
+            }
+          ]
+        },
+        {
+          "millis": 2000,
+          "message": "The Goblins sometimes have stolen presents with them! Confiscate them!"
+        },
+        {
+          "millis": 3000,
+          "message": "Return the stolen presents to Ruprecht on Vega at Santa's home for a reward."
+        },
+        {
+          "millis": 3000,
+          "message": "Confiscate the stolen presents and return them to Ruprecht on Vega at Santa's home for a reward."
+        }
+      ]
+    },
+    {
+      "id": 347,
+      "name": "Vampires in Yalahar",
+      "area": "Yalahar",
+      "subarea": "Yalahar Centre",
+      "link": "https://tibia.fandom.com/wiki/Yalahar_Raids",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Citizens of Yalahar, beware! Harbingers of vampiric blood thirst are appearing in the city. Fight them or take your chance to flee while you still can.",
+          "creatures": [
+            {
+              "name": "Bat"
+            }
+          ]
+        },
+        {
+          "millis": 120000,
+          "message": "The sky over Yalahar is darkened by many little wings. Whoever isn't ready to fight the greater evil approaching, seek refuge inside the houses.",
+          "creatures": [
+            {
+              "name": "Bat"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "Vampires have arrived in Yalahar - looking for humans to feed on and quench their blood thirst.",
+          "creatures": [
+            {
+              "name": "Vampire"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 350,
+      "name": "Lancer Beetles in Muggy Plains",
+      "area": "Zao",
+      "subarea": "Muggy Plains",
+      "link": "https://tibia.fandom.com/wiki/Zao_Raids#Lancer_Beetles_raid_on_Muggy_Plains",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Like a swarm of locusts the dreaded lancer beetles are pouring over the fertile parts of Zao.",
+          "creatures": [
+            {
+              "name": "Lancer Beetle"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Lancer Beetle"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Lancer Beetle",
+              "qualifier": "~200x total"
+            },
+            {
+              "name": "The Blightfather"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 357,
+      "name": "Dragons and Draptors in Muggy Plains",
+      "area": "Zao",
+      "subarea": "Muggy Plains",
+      "link": "https://tibia.fandom.com/wiki/Zao_Raids#Dragons_raid_on_Muggy_Plains",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The dragons of the Dragonblaze Mountains have descended to Zao to protect the lizardkin!",
+          "creatures": [
+            {
+              "name": "Dragon"
+            }
+          ]
+        },
+        {
+          "millis": 900000,
+          "creatures": [
+            {
+              "name": "Dragon"
+            },
+            {
+              "name": "Draptor"
+            }
+          ]
+        },
+        {
+          "millis": 1200000,
+          "creatures": [
+            {
+              "name": "Dragon"
+            },
+            {
+              "name": "Draptor"
+            }
+          ]
+        },
+        {
+          "millis": 1500000,
+          "creatures": [
+            {
+              "name": "Dragon"
+            },
+            {
+              "name": "Draptor"
+            },
+            {
+              "name": "Grand Mother Foulscale"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 366,
+      "name": "Orcs on Zao Steppe",
+      "area": "Zao",
+      "subarea": "Zao Steppe",
+      "link": "https://tibia.fandom.com/wiki/Zao_Raids#Orcs_raid_on_Zao_Steppe",
+      "events": [
+        {
+          "millis": 0,
+          "message": "An orcish horde, ready for murder and plunder, is amassing to begin its travel through the steppes of Zao. Beware!",
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            },
+            {
+              "name": "Cublarc the Plunderer"
+            }
+          ]
+        },
+        {
+          "millis": 600000,
+          "message": "The great march of the orcish horde has begun!",
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            }
+          ]
+        },
+        {
+          "millis": 720000,
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            }
+          ]
+        },
+        {
+          "millis": 960000,
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            }
+          ]
+        },
+        {
+          "millis": 1080000,
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            },
+            {
+              "name": "Cublarc the Plunderer"
+            }
+          ]
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Rider"
+            },
+            {
+              "name": "Orc Marauder"
+            },
+            {
+              "name": "Cublarc the Plunderer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 367,
+      "name": "Gnarlhounds on Zao Steppe",
+      "area": "Zao",
+      "subarea": "Zao Steppe",
+      "link": "https://tibia.fandom.com/wiki/Zao_Raids#Gnarlhounds_raid_on_Zao_Steppes",
+      "events": [
+        {
+          "millis": 0,
+          "message": "There seems to be a big gnarlhound gang in Zao Steppe.",
+          "creatures": [
+            {
+              "name": "Gnarlhound"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "The gnarlhounds seem to multiply by the minute.",
+          "creatures": [
+            {
+              "name": "Gnarlhound"
+            }
+          ]
+        },
+        {
+          "millis": 700000,
+          "message": "The gnarlhounds roam free in the Zao Steppe. Watch out!",
+          "creatures": [
+            {
+              "name": "Gnarlhound"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 368,
+      "name": "Lancer Beetles on Zao Steppe",
+      "area": "Zao",
+      "subarea": "Zao Steppe",
+      "link": "https://tibia.fandom.com/wiki/Zao_Raids#Lancer_Beetle_Raid_on_the_Steppes",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Lancer beetles troop up in Farmine. Beware!",
+          "creatures": [
+            {
+              "name": "Lancer Beetle"
+            }
+          ]
+        },
+        {
+          "millis": 300000,
+          "message": "A pack of lancer beetles heads towards the coast!",
+          "creatures": [
+            {
+              "name": "Lancer Beetle"
+            }
+          ]
+        },
+        {
+          "millis": 850000,
+          "message": "The lancer beetles have reached the coast.",
+          "creatures": [
+            {
+              "name": "Lancer Beetle"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 369,
+      "name": "Orcs in Zzaion",
+      "area": "Zao",
+      "subarea": "Zao Steppe",
+      "link": "https://tibia.fandom.com/wiki/Zao_Raids#Orcs_raid_on_Zzaion",
+      "events": [
+        {
+          "millis": 0,
+          "message": "A massive orc force is gathering at the gates of Zzaion."
+        },
+        {
+          "millis": 180000,
+          "message": "Orc reinforcements have arrived at the gates of Zzaion! The gates are under heavy attack!",
+          "creatures": [
+            {
+              "name": "Orc"
+            },
+            {
+              "name": "Orc Spearman"
+            },
+            {
+              "name": "Orc Warrior"
+            },
+            {
+              "name": "Orc Shaman"
+            },
+            {
+              "name": "Orc Berserker"
+            },
+            {
+              "name": "Orc Marauder"
+            },
+            {
+              "name": "Orc Leader"
+            },
+            {
+              "name": "Orc Warlord"
+            }
+          ]
+        },
+        {
+          "millis": 300000
+        },
+        {
+          "millis": 420000
+        },
+        {
+          "millis": 600000,
+          "message": "More orc reinforcements have arrived at the gates of Zzaion! The gates are under heavy attack!"
+        },
+        {
+          "millis": 660000
+        },
+        {
+          "millis": 780000
+        },
+        {
+          "millis": 900000
+        },
+        {
+          "millis": 1020000
+        },
+        {
+          "millis": 1140000
+        },
+        {
+          "millis": 1200000,
+          "message": "The gates to Zzaion have been breached! Orcs are invading the city!"
+        },
+        {
+          "millis": 1800000,
+          "message": "More orcs have arrived in Zzaion! The city is under attack! Strong lizard leaders have come to defend the city.",
+          "creatures": [
+            {
+              "name": "Cublarc the Plunderer"
+            },
+            {
+              "name": "Chizzoron the Distorter"
+            },
+            {
+              "name": "Zulazza the Corruptor"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2241,
+      "name": "Nimmersatt",
+      "area": "Carlin",
+      "subarea": "Ice Islands",
+      "link": "https://tibia.fandom.com/wiki/Nimmersatt%27s_Lair",
+      "events": [
+        {
+          "millis": 0,
+          "message": "The dragon Nimmersatt is distracted! Help to breach its lair! Join the heist at the coast north of Carlin!"
+        }
+      ]
+    },
+    {
+      "id": 2253,
+      "name": "Rotrender",
+      "area": "Edron",
+      "link": "https://tibia.fandom.com/wiki/Rotrender",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Rotrender has risen again in the depths of Azzilon."
+        }
+      ]
+    },
+    {
+      "id": 2257,
+      "name": "Sir Leopold",
+      "area": "Edron",
+      "subarea": "Book World",
+      "link": "https://tibia.fandom.com/wiki/Sir_Leopold",
+      "events": [
+        {
+          "millis": 0,
+          "message": "Once more, the sinister Sir Leopold leads his henchmen out of the book pages to wreak havoc."
+        },
+        {
+          "millis": 600000
+        },
+        {
+          "millis": 1200000
+        },
+        {
+          "millis": 1800000,
+          "creatures": [
+            {
+              "name": "Sir Leopold"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

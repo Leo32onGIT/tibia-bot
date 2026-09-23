@@ -21,6 +21,9 @@ services:
         condition: service_healthy
         # Skipped, not an error, when the `local-cache` profile is inactive.
         required: false
+      observer-sidecar:
+        condition: service_started
+        required: false
     # With the bundled DB the bot may restart a couple of times while Postgres
     # initialises — expected and harmless. Deliberately NOT depends_on postgres,
     # so an external database works without starting the local one.
@@ -34,6 +37,17 @@ services:
       - sprite-cache:/opt/docker/cache/sprites
     # No `ports:` deliberately — the host reaches the bot only through Caddy,
     # which terminates TLS.
+
+  # The Observer sidecar: bridges the bot to CipSoft's Tibia Observer API (browser-
+  # TLS Cloudflare pass + request shapes). The bot reaches it at
+  # http://observer-sidecar:8787 (OBSERVER_SIDECAR_URL in .env). No host ports —
+  # only the bot on this network needs it.
+  observer-sidecar:
+    build: ./observer-sidecar
+    env_file: .env
+    networks:
+      - violentbot
+    restart: unless-stopped
 
   # Reverse proxy in front of STATUS_DOMAIN: automatic Let's Encrypt HTTPS,
   # /dashboard* and /status* proxied to the bot, everything else passed through

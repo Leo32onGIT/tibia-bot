@@ -73,6 +73,12 @@ object CommandSchemas {
 
   val patreonCommand: SlashCommandData = Commands.slash("patreon", "View or manage your own Patreon seats")
 
+  /** Personal, self-service: answers with the member's own Tibia Observer token panel
+   *  (Add/Remove buttons), replied ephemerally. The Add form asks for the world (so
+   *  its raids channel can be created) and the token together. Kept with the
+   *  world-config commands since it's only useful once a world is set up. */
+  val observerCommand: SlashCommandData = Commands.slash("observer", "Link your Tibia Observer token for raid & mini world change alerts")
+
   /** Opens the loot split form. No options: what it wants is a pasted analyser,
    *  which is a paragraph, and a command option is a single line.
    *
@@ -118,7 +124,7 @@ object CommandSchemas {
    *  on top of initialCommands once /setup first succeeds there. remove/
    *  repair move here too: both act on a world's channels, which don't
    *  exist until /setup has run at least once. */
-  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand)
+  val worldConfigCommands: List[SlashCommandData] = List(removeCommand, repairCommand, huntedCommand, alliesCommand, settingsCommand, staminaCommand, bookingsCommand, observerCommand)
 
   /** Commands registered in normal guilds once a world has been set up. */
   val commands: List[SlashCommandData] = initialCommands ++ worldConfigCommands

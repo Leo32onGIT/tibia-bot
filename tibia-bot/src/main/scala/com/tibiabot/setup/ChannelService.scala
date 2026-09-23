@@ -42,7 +42,7 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param forgetWorldSubscriptions drops the mass-log/bounty DM subscriptions for a removed world; a callback rather than the service itself, since this is the only thing here that needs it
  *  @param sharedConfigGuilds  guilds whose database is shared with another bot, so it must NOT be dropped on leave
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
- *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
+ *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Mini World Changes/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
  *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
  */
 final class ChannelService(
@@ -50,6 +50,7 @@ final class ChannelService(
   schemaInitializer: SchemaInitializer,
   worldConfigRepository: WorldConfigRepository,
   discordConfigRepository: DiscordConfigRepository,
+  observerRaidRepository: com.tibiabot.persistence.ObserverRaidRepository,
   streamState: StreamState,
   boostedService: BoostedService,
   paywallService: PaywallService,
@@ -88,6 +89,36 @@ final class ChannelService(
 
   private def worldRemoveConfig(guild: Guild, query: String): Unit =
     worldConfigRepository.removeWorld(guild.getId, query)
+
+  /** Create a world's raids channel if it has none and the guild tracks that world.
+   *  Called when a member runs `/observer <world>`. It sits in that world's category
+   *  beside its deaths/levels channels (members read, bot posts), and is removed with
+   *  the world in `/remove`. Returns true when a channel was actually created. */
+  def ensureRaidsChannel(guild: Guild, world: String): Boolean =
+    try {
+      val existing = observerRaidRepository.channelFor(guild.getId, world).flatMap(id => Option(guild.getTextChannelById(id)))
+      if (existing.nonEmpty) false
+      else worldRetrieveConfig(guild, world).get("category").map(guild.getCategoryById) match {
+        case Some(category) if category != null =>
+          val channel = guild.createTextChannel("📢・ʀᴀɪᴅs", category).complete()
+          grantWorldPerms(channel, guild.getBotRole, guild.getPublicRole)
+          postChannelIntro(channel, s":speech_balloon: This channel shows raids as they are announced and start on this world.\n\nRaids are pooled from every member who has linked their Tibia Observer with the **`/observer`** command.")
+          observerRaidRepository.setChannel(guild.getId, world, channel.getId)
+          true
+        case _ => false // the guild does not track this world
+      }
+    } catch {
+      case ex: Throwable =>
+        logger.warn(s"Could not create raids channel for '$world' in guild '${guild.getId}'", ex); false
+    }
+
+  /** Delete a world's raids channel and forget it — used in the `/remove <world>`
+   *  cleanup, alongside that world's other channels. */
+  private def removeRaidsChannel(guild: Guild, world: String): Unit =
+    observerRaidRepository.channelFor(guild.getId, world).foreach { channelId =>
+      Option(guild.getTextChannelById(channelId)).foreach(_.delete().complete())
+      observerRaidRepository.clearChannel(guild.getId, world)
+    }
 
   private def updateAdminChannel(inputId: String, channelId: String): Unit = {
     streamState.modifyDiscordsData(dd => dd.view.mapValues(_.map {
@@ -1422,6 +1453,9 @@ final class ChannelService(
             channel.delete().complete()
           }
         }
+        // The raids channel (if this world has one) lives in this category too —
+        // take it before the category so it isn't orphaned to the top of the server.
+        removeRaidsChannel(guild, world)
 
         val category = guild.getCategoryById(categoryId)
         if (category != null) {

@@ -176,6 +176,10 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcPatreonMemberRepository(connectionProvider)
   private val notifyRepository: persistence.NotifyRepository =
     new persistence.jdbc.JdbcNotifyRepository(connectionProvider)
+  private val observerRepository: persistence.ObserverRepository =
+    new persistence.jdbc.JdbcObserverRepository(connectionProvider)
+  val observerRaidRepository: persistence.ObserverRaidRepository =
+    new persistence.jdbc.JdbcObserverRaidRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -235,6 +239,29 @@ object BotApp extends App with StrictLogging {
   // autoroles. Its cache is filled after createCacheDatabase() below, which is
   // what creates the two tables — see notify.NotifyService for why it caches.
   val notifyService = new notifications.NotifyService(notifyRepository, discordGateway, outboundSender)
+
+  // Members' Tibia Observer links behind /observer. Cache filled after the cache
+  // database exists (below), like notifyService. Phase 1: stores encrypted tokens,
+  // no live linking (Config.Observer.enabled gates that).
+  val observerService = new observer.ObserverService(
+    observerRepository,
+    observer.TokenCrypto.fromSecret(Config.Observer.encryptionSecret),
+    new observer.ObserverApiClient(),
+    Config.Observer.enabled)
+
+  // Pools raids across every linked account and fans each new one out — rank-ordered
+  // — to the per-world raids channel of every guild that has one for that world.
+  val observerRaidPoller = new observer.ObserverRaidPoller(
+    observerService,
+    observerRaidRepository,
+    post = (guildId, channelId, embed) => outboundSender.enqueue("observer-raid") { () =>
+      Option(discordGateway.guildById(guildId))
+        .flatMap(g => Option(g.getTextChannelById(channelId)))
+        .foreach(_.sendMessageEmbeds(embed).queue(_ => (), _ => ()))
+    },
+    // Fire a raid's broadcast lines at their exact moment — the scheduler sleeps until
+    // each is due, so there is no polling and the line lands to the second.
+    schedule = (delay, task) => { actorSystem.scheduler.scheduleOnce(delay)(task())(ex); () })
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -779,6 +806,11 @@ object BotApp extends App with StrictLogging {
   def customSortData: Map[String, List[CustomSort]] = streamState.customSortData
   def discordsData: Map[String, List[Discords]] = streamState.discordsData
 
+  /** The worlds a guild currently tracks — the raids poller uses this to know which
+   *  worlds' pooled raids belong in a guild's raids channel. */
+  def worldsTrackedBy(guildId: String): Set[String] =
+    discordsData.collect { case (world, discords) if discords.exists(_.id == guildId) => world }.toSet
+
   /** Where a guild's command log currently goes, if that channel is still there.
    *
    *  Off the in-memory Discords record rather than `discordRetrieveConfig`, which
@@ -882,6 +914,7 @@ object BotApp extends App with StrictLogging {
     schemaInitializer,
     worldConfigRepository,
     discordConfigRepository,
+    observerRaidRepository,
     streamState,
     boostedService,
     paywallService,
@@ -900,6 +933,8 @@ object BotApp extends App with StrictLogging {
       // These live in the shared cache database, so dropping the guild's own
       // one leaves them behind.
       notifyService.forgetGuild(guildId)
+      observerService.forgetGuild(guildId)
+      observerRaidRepository.clearGuild(guildId)
     },
     forgetWorldSubscriptions = (guildId, world) => notifyService.forgetWorld(guildId, world),
     sharedConfigGuilds = Set("912739993015947324", "1176279097001918516", "1224670957466161234")
@@ -958,6 +993,26 @@ object BotApp extends App with StrictLogging {
   // Now that the tables exist. Before the world streams start below, so the
   // first online-list sweep already sees whatever is subscribed.
   notifyService.load()
+  observerService.load()
+  // Keep Observer credentials fresh: the JWT lasts ~90 days and /renew mints a new
+  // one from it, so a daily sweep means a link never lapses while it is in use. The
+  // sweep is a no-op when Observer is off or nothing is linked.
+  if (Config.Observer.enabled) {
+    actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
+    // Detect new raids from the pooled feeds and post each one's imminent heads-up,
+    // then schedule its broadcast lines. Raids are announced well ahead of starting,
+    // so a 15-minute sweep catches them in good time; the lines self-schedule to the
+    // second off the catalogue, so there is no fast drip loop.
+    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 15.minutes)(() => observerRaidPoller.poll())(ex)
+    // Amend the notifications message when a world's mini world changes move on
+    // after it posted: the feed may roll over later than the boosted boss does. The
+    // watcher decides for itself when a poll is due; this just gives it a pulse.
+    val mwcWatcher = new observer.MiniWorldChangeWatcher(
+      fetch = () => observerService.refreshPooledMwc(),
+      amend = worlds => amendMwcInBoostedMessages(worlds),
+      now = () => ZonedDateTime.now(domain.time.Clock.Berlin))
+    actorSystem.scheduler.scheduleWithFixedDelay(1.minute, 1.minute)(() => mwcWatcher.tick())(ex)
+  }
 
   // Register slash commands per guild: support servers get the admin set,
   // everyone else gets the full config set once they have a world tracked,
@@ -1920,7 +1975,7 @@ object BotApp extends App with StrictLogging {
                 boostedService.boostedMonsterUpdate(boostedBoss, "", "1", "")
               }
               (
-                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
                 boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
                 boostedBoss
               )
@@ -1937,7 +1992,7 @@ object BotApp extends App with StrictLogging {
                 boostedService.boostedMonsterUpdate("", boostedCreature, "", "1")
               }
               (
-                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
                 boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
                 boostedCreature
               )
@@ -1997,9 +2052,14 @@ object BotApp extends App with StrictLogging {
                           }
                         }
                       )
+                      // A member with a linked Observer token gets a Mini World Changes
+                      // section too. Per-recipient, so it can't be hoisted; the fetch is
+                      // a no-op (empty) when Observer is off or they have no link.
+                      val recipientEmbeds =
+                        (embeds ++ presentation.ObserverEmbeds.mwcEmbed(observerService.activeMwcForUser(recipientId)).toList).asJava
                       user.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
                         val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
+                        privateChannel.sendMessage(messageText).setEmbeds(recipientEmbeds).setComponents(ActionRow.of(
                           Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                         )).queue(
                           (_: Message) => {
@@ -2033,7 +2093,8 @@ object BotApp extends App with StrictLogging {
   /** Replace every guild's boosted message: delete the one currently posted in
    *  its boosted channel and send a fresh one carrying `boostedEmbeds` (the
    *  boosted boss and creature) plus Rashid, that guild's own Dream Courts
-   *  boss, and the Drome cycle when it's due. Returns how many guilds a send
+   *  boss and mini world changes, and the Drome cycle when it's due (see
+   *  serverSaveExtraEmbeds). Returns how many guilds a send
    *  was dispatched for — the send itself is queued, so a guild counted here
    *  can still fail asynchronously (logged per guild).
    *
@@ -2059,35 +2120,8 @@ object BotApp extends App with StrictLogging {
                 }
               }
 
-              val dreamScarDaily =
-                dreamScar
-                  .get(lastWorld)
-                  .orElse(dreamScar.get("Unknown"))
-                  .getOrElse("Unknown")
-
-              val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
-              val rashidEmbed = new EmbedBuilder()
-              rashidEmbed.setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
-              rashidEmbed.setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
-              rashidEmbed.setColor(BrandColor)
-
-              val now = Instant.now()
-              val dromeShow = ServerSaveSchedule.shouldShowDrome(now, dromeTime)
-              val dromeEmbed = new EmbedBuilder()
-                .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
-                .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
-                .setColor(BrandColor)
-
-              val dreamScarEmbed = new EmbedBuilder()
-              dreamScarEmbed.setDescription(s"The Dream Courts boss for **$lastWorld** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
-              dreamScarEmbed.setThumbnail(creatureImageUrl(dreamScarDaily))
-              dreamScarEmbed.setColor(BrandColor)
-
-              val embedsList = if (dromeShow) List(rashidEmbed.build(), dreamScarEmbed.build(), dromeEmbed.build()) else List(rashidEmbed.build(), dreamScarEmbed.build())
-              val addRashidDreamScarEmbeds: List[MessageEmbed] = boostedEmbeds ++ embedsList
-
               posted += 1
-              boostedChannel.sendMessageEmbeds(addRashidDreamScarEmbeds.asJava)
+              boostedChannel.sendMessageEmbeds((boostedEmbeds ++ serverSaveExtraEmbeds(lastWorld)).asJava)
                 .setComponents(ActionRow.of(
                   Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                 ))
@@ -2105,6 +2139,39 @@ object BotApp extends App with StrictLogging {
       }
     }
     posted
+  }
+
+  /** Amend the Mini World Changes embed in today's notifications message for every
+   *  guild on one of `worlds`, whose changes moved on after the message posted (see
+   *  observer.MiniWorldChangeWatcher). Edited in place — keeping the message's boosted
+   *  boss and creature embeds and rebuilding everything after them — so nobody is
+   *  pinged again. A message from before the latest server save is left alone: the
+   *  day's repost is about to replace it, and picks up the new changes itself. */
+  private def amendMwcInBoostedMessages(worlds: Set[String]): Unit = {
+    val lastSave = ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toInstant
+    discordGateway.guilds.foreach { guild =>
+      if (checkConfigDatabase(guild)) {
+        val discordInfo = discordRetrieveConfig(guild)
+        if (discordInfo.nonEmpty && worlds.contains(discordInfo("last_world").toLowerCase)) {
+          val world = discordInfo("last_world")
+          val messageId = discordInfo("boosted_messageid")
+          val postedToday = messageId.toLongOption.exists(id =>
+            net.dv8tion.jda.api.utils.TimeUtil.getTimeCreated(id).toInstant.isAfter(lastSave))
+          val boostedChannel = guild.getTextChannelById(discordInfo("boosted_channel"))
+          if (postedToday && boostedChannel != null && boostedChannel.canTalk()) {
+            val extras = serverSaveExtraEmbeds(world)
+            boostedChannel.retrieveMessageById(messageId).queue(
+              (message: Message) => {
+                val boosted = message.getEmbeds.asScala.take(2).toList
+                boostedChannel.editMessageEmbedsById(messageId, (boosted ++ extras).asJava).queue(
+                  (_: Message) => (),
+                  (e: Throwable) => logger.warn(s"Failed to amend the mini world changes for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
+              },
+              (e: Throwable) => logger.warn(s"Failed to fetch the boosted message to amend for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
+          }
+        }
+      }
+    }
   }
 
   /** `/admin`'s Repost boosted button: rebuild and repost every guild's boosted message right
@@ -2520,9 +2587,10 @@ object BotApp extends App with StrictLogging {
   }
 
 
-  /** The Rashid / Dream Courts / (Drome, when active) server-save embeds for a
-   *  world, appended after the boosted embeds in the notifications message.
-   *  Reads the live dreamScar map and dromeTime. */
+  /** The Rashid / Dream Courts / Mini World Changes / (Drome, when active)
+   *  server-save embeds for a world, appended after the boosted embeds in the
+   *  notifications message. Reads the live dreamScar map and dromeTime; the mini
+   *  world changes are left out when nothing is active on the world. */
   private def serverSaveExtraEmbeds(world: String): List[MessageEmbed] = {
     val dreamScarDaily =
       dreamScar
@@ -2531,22 +2599,23 @@ object BotApp extends App with StrictLogging {
         .getOrElse("Unknown")
     val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
     val rashidEmbed = new EmbedBuilder()
-      .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+      .setDescription(s"Today Rashid can be found in:\n### ${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
       .setColor(BrandColor)
       .build()
     val dreamScarEmbed = new EmbedBuilder()
-      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
       .setThumbnail(creatureImageUrl(dreamScarDaily))
       .setColor(BrandColor)
       .build()
+    val mwcEmbed = presentation.ObserverEmbeds.serverSaveMwcEmbed(world, observerService.pooledMwcForWorld(world))
     val dromeShow = ServerSaveSchedule.shouldShowDrome(Instant.now(), dromeTime)
     val dromeEmbed = new EmbedBuilder()
-      .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+      .setDescription(s"The current Drome cycle will end:\n### ${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
       .setColor(BrandColor)
       .build()
-    if (dromeShow) List(rashidEmbed, dreamScarEmbed, dromeEmbed) else List(rashidEmbed, dreamScarEmbed)
+    List(rashidEmbed, dreamScarEmbed) ++ mwcEmbed ++ (if (dromeShow) List(dromeEmbed) else Nil)
   }
 
   def charUrl(char: String): String = presentation.Urls.charUrl(char)
