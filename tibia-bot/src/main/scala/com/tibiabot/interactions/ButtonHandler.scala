@@ -88,16 +88,12 @@ object ButtonHandler extends StrictLogging {
         )).queue()
       }
     } else if (button == "observer add") {
-      val worldInput = TextInput.create(ObserverModals.WorldField, TextInputStyle.SHORT)
-        .setPlaceholder("Antica")
-        .setRequired(true)
-        .build()
       val tokenInput = TextInput.create(ObserverModals.TokenField, TextInputStyle.SHORT)
         .setPlaceholder("FNP68")
         .setRequired(true)
         .build()
       val modal = Modal.create(ObserverModals.ModalId, "Link your Tibia Observer token")
-        .addComponents(Label.of("World", worldInput), Label.of("Token from tibia.com", tokenInput)).build()
+        .addComponents(Label.of("Token from tibia.com", tokenInput)).build()
       event.replyModal(modal).queue()
     } else if (button == "observer remove") {
       event.deferEdit().queue()

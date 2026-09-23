@@ -19,9 +19,10 @@ object ObserverEmbeds {
       case None =>
         s"""${Config.noEmoji} You have no **Tibia Observer** token configured.
            |
-           |Press **Add**, choose a world, and paste the token from your [Tibia account]($tokenPage)
+           |Press **Add** and paste the token from your [Tibia account]($tokenPage)
            |(*Account Management → Tibia Observer → Connect*). You'll get mini world change
-           |alerts, and that world's raids channel will appear — pooled from every linked member.""".stripMargin
+           |alerts, and a raids channel for each world this server tracks — pooled from every
+           |linked member.""".stripMargin
       case Some(t) =>
         s"""${statusLine(t)}
            |

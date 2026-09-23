@@ -97,7 +97,9 @@ def health():
 @app.post("/link")
 def link():
     b = _json_body()
-    token = (b.get("accessToken") or "").strip()  # case-sensitive: never change case
+    # The account page presents the token in upper case, but the API only accepts it
+    # lower case — so normalise it here regardless of how the user typed it.
+    token = (b.get("accessToken") or "").strip().lower()
     device = b.get("deviceIdentification") or "Violent Bot"
     client_version = b.get("clientVersion") or CLIENT_VERSION
     if not token:
