@@ -135,25 +135,38 @@ final class ObserverService(
       val (fetchedAt, byWorld) = pooledMwc
       val current =
         if (fetchedAt.plus(MwcPoolTtl).isAfter(Instant.now())) byWorld
-        else {
-          val fresh = fetchPooledMwc()
-          pooledMwc = (Instant.now(), fresh)
-          fresh
-        }
+        else fetchPooledMwc()._1
       current.getOrElse(world.toLowerCase, Nil)
     }
 
-  private def fetchPooledMwc(): Map[String, List[MiniWorldChange]] =
-    tokens.values.toList.filter(_.status == ObserverStatus.Linked).flatMap { t =>
-      try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).map(apiClient.mwc).getOrElse(Nil)
+  /** Re-fetch the pooled mini world changes now, for the watcher that amends the
+   *  server-save message when they change. `None` when Observer is off or any linked
+   *  account's fetch failed: a partial pool would read as changes ending, so the
+   *  watcher sits that poll out rather than act on it. */
+  def refreshPooledMwc(): Option[Map[String, List[MiniWorldChange]]] =
+    if (!enabled) None
+    else {
+      val (byWorld, complete) = fetchPooledMwc()
+      if (complete) Some(byWorld) else None
+    }
+
+  /** Fetch and cache the pool; the flag is whether every linked account answered. */
+  private def fetchPooledMwc(): (Map[String, List[MiniWorldChange]], Boolean) = {
+    val results = tokens.values.toList.filter(_.status == ObserverStatus.Linked).map { t =>
+      try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).flatMap(apiClient.mwcResult)
       catch {
         case ex: Throwable =>
           logger.warn(s"Observer MWC poll failed for '${t.userId}' in guild '${t.guildId}'", ex)
-          Nil
+          None
       }
-    }.filter(c => c.world.nonEmpty && c.title.nonEmpty)
+    }
+    val byWorld = results.flatten.flatten
+      .filter(c => c.world.nonEmpty && c.title.nonEmpty)
       .groupBy(_.world.toLowerCase)
       .view.mapValues(_.distinctBy(_.title.toLowerCase).sortBy(_.title.toLowerCase)).toMap
+    pooledMwc = (Instant.now(), byWorld)
+    (byWorld, results.forall(_.isDefined))
+  }
 
   /** The currently-announced/active raids for a linked member, via the sidecar.
    *  Exploration-gated to that account's areas. Empty on any failure. */

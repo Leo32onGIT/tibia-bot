@@ -1004,6 +1004,14 @@ object BotApp extends App with StrictLogging {
     // so a 15-minute sweep catches them in good time; the lines self-schedule to the
     // second off the catalogue, so there is no fast drip loop.
     actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 15.minutes)(() => observerRaidPoller.poll())(ex)
+    // Amend the notifications message when a world's mini world changes move on
+    // after it posted: the feed may roll over later than the boosted boss does. The
+    // watcher decides for itself when a poll is due; this just gives it a pulse.
+    val mwcWatcher = new observer.MiniWorldChangeWatcher(
+      fetch = () => observerService.refreshPooledMwc(),
+      amend = worlds => amendMwcInBoostedMessages(worlds),
+      now = () => ZonedDateTime.now(domain.time.Clock.Berlin))
+    actorSystem.scheduler.scheduleWithFixedDelay(1.minute, 1.minute)(() => mwcWatcher.tick())(ex)
   }
 
   // Register slash commands per guild: support servers get the admin set,
@@ -2119,6 +2127,39 @@ object BotApp extends App with StrictLogging {
       }
     }
     posted
+  }
+
+  /** Amend the Mini World Changes embed in today's notifications message for every
+   *  guild on one of `worlds`, whose changes moved on after the message posted (see
+   *  observer.MiniWorldChangeWatcher). Edited in place — keeping the message's boosted
+   *  boss and creature embeds and rebuilding everything after them — so nobody is
+   *  pinged again. A message from before the latest server save is left alone: the
+   *  day's repost is about to replace it, and picks up the new changes itself. */
+  private def amendMwcInBoostedMessages(worlds: Set[String]): Unit = {
+    val lastSave = ServerSaveSchedule.lastServerSave(ZonedDateTime.now(domain.time.Clock.Berlin)).toInstant
+    discordGateway.guilds.foreach { guild =>
+      if (checkConfigDatabase(guild)) {
+        val discordInfo = discordRetrieveConfig(guild)
+        if (discordInfo.nonEmpty && worlds.contains(discordInfo("last_world").toLowerCase)) {
+          val world = discordInfo("last_world")
+          val messageId = discordInfo("boosted_messageid")
+          val postedToday = messageId.toLongOption.exists(id =>
+            net.dv8tion.jda.api.utils.TimeUtil.getTimeCreated(id).toInstant.isAfter(lastSave))
+          val boostedChannel = guild.getTextChannelById(discordInfo("boosted_channel"))
+          if (postedToday && boostedChannel != null && boostedChannel.canTalk()) {
+            val extras = serverSaveExtraEmbeds(world)
+            boostedChannel.retrieveMessageById(messageId).queue(
+              (message: Message) => {
+                val boosted = message.getEmbeds.asScala.take(2).toList
+                boostedChannel.editMessageEmbedsById(messageId, (boosted ++ extras).asJava).queue(
+                  (_: Message) => (),
+                  (e: Throwable) => logger.warn(s"Failed to amend the mini world changes for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
+              },
+              (e: Throwable) => logger.warn(s"Failed to fetch the boosted message to amend for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
+          }
+        }
+      }
+    }
   }
 
   /** `/admin`'s Repost boosted button: rebuild and repost every guild's boosted message right

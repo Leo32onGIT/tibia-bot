@@ -104,9 +104,13 @@ final class ObserverApiClient(
     }
 
   /** The currently-active mini world changes for this credential's enabled rules. */
-  def mwc(credential: String): List[MiniWorldChange] =
+  def mwc(credential: String): List[MiniWorldChange] = mwcResult(credential).getOrElse(Nil)
+
+  /** As [[mwc]], but `None` when the fetch failed — so a caller watching for changes
+   *  can tell a failure apart from nothing being active. */
+  def mwcResult(credential: String): Option[List[MiniWorldChange]] =
     post("/mwc", JsObject("bearerToken" -> JsString(credential))) match {
-      case Left(_) => Nil
+      case Left(_) => None
       case Right(o) =>
         o.fields.get("miniWorldChanges").collect { case JsArray(items) =>
           items.collect { case item: JsObject =>
@@ -115,7 +119,7 @@ final class ObserverApiClient(
               str(item, "title").getOrElse(""),
               str(item, "body").getOrElse(""))
           }.toList
-        }.getOrElse(Nil)
+        }
     }
 
   private def intOf(o: JsObject, key: String): Int =
