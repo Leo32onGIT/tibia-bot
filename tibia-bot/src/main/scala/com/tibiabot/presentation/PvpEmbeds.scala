@@ -39,6 +39,9 @@ object PvpEmbeds {
    *                   whatever the caller has already recorded about them; empty
    *                   for somebody nothing has, which renders as no icon rather
    *                   than a guessed one
+   *  @param levelOf   a Most Kills row's level, by lowercased name, from the same
+   *                   records; None for somebody nothing has, whose row then
+   *                   reads without one
    *  @param jumpUrl builds a link back to a death from its stored message id,
    *                 or None when the death was never posted — the channel can be
    *                 off, the level under `deaths_min`, or the send have failed
@@ -49,6 +52,7 @@ object PvpEmbeds {
       enemyLosses: List[ExperienceDelta],
       sideIcon: String => String,
       vocationOf: String => String,
+      levelOf: String => Option[Int],
       barEmoji: ((String, String)) => String,
       barScale: Bars.Scale,
       xpDown: String,
@@ -63,7 +67,7 @@ object PvpEmbeds {
           barEmoji, barScale.ceiling),
         s"**${frags.enemiesKilled}** enemies killed vs **${frags.alliesKilled}** allies killed").mkString("\n")),
       if (frags.fraggers.isEmpty) None
-      else Some(section("Most Kills", frags.fraggers.map(fraggerLine(_, sideIcon, vocationOf)))),
+      else Some(section("Most Kills", frags.fraggers.map(fraggerLine(_, sideIcon, vocationOf, levelOf)))),
       if (frags.mostWanted.isEmpty) None
       else Some(section("Most Deaths", frags.mostWanted.map(repeatLine(_, sideIcon, vocationOf)))),
       if (enemyLosses.isEmpty) None
@@ -80,21 +84,22 @@ object PvpEmbeds {
   private def section(title: String, rows: List[String]): String =
     (s"### $title" :: rows).mkString("\n")
 
-  private def fraggerLine(row: Fragger, sideIcon: String => String, vocationOf: String => String): String =
+  /** A killer's level is looked up rather than stored: the frag tally keeps a
+   *  name per kill and nothing else. */
+  private def fraggerLine(row: Fragger, sideIcon: String => String, vocationOf: String => String,
+                          levelOf: String => Option[Int]): String =
     StatLines.cells(
-      who(row.name, sideIcon, vocationOf),
+      who(row.name, sideIcon, vocationOf, levelOf(row.name.toLowerCase)),
       s"**${row.kills} ${plural(row.kills, "kill", "kills")}**")
 
   private def repeatLine(row: Repeat, sideIcon: String => String, vocationOf: String => String): String =
     StatLines.cells(
-      who(row.name, sideIcon, vocationOf),
-      StatLines.level(row.level),
+      who(row.name, sideIcon, vocationOf, Some(row.level)),
       s"**${row.deaths} ${plural(row.deaths, "death", "deaths")}**")
 
   private def lossLine(delta: ExperienceDelta, sideIcon: String => String, icon: String): String =
     StatLines.cells(
-      StatLines.who(delta.vocation, delta.displayName, sideIcon(delta.name)),
-      StatLines.level(delta.level),
+      StatLines.who(delta.vocation, delta.displayName, sideIcon(delta.name), Some(delta.level)),
       s"$icon **${StatLines.number(delta.gained)}**")
 
   /** The kill, closing with a link to the death it came from.
@@ -113,16 +118,16 @@ object PvpEmbeds {
   private def killLine(kill: TopKill, sideIcon: String => String, vocationOf: String => String,
                        jumpUrl: String => Option[String]): String =
     StatLines.cells(
-      who(kill.name, sideIcon, vocationOf),
-      StatLines.level(kill.level),
+      who(kill.name, sideIcon, vocationOf, Some(kill.level)),
       jumpUrl(kill.deathMessageId).map(url => s"[:link:]($url)").getOrElse(""))
 
   /** The frag tables keep names, not vocations — a killer is a name on a death
    *  message and nothing more — so both icons are looked up by that name here.
    *  Lowercased for the lookup, the same key every other name in this bot is
    *  matched on, while the row itself keeps the casing tibia.com showed. */
-  private def who(name: String, sideIcon: String => String, vocationOf: String => String): String =
-    StatLines.who(vocationOf(name.toLowerCase), name, sideIcon(name.toLowerCase))
+  private def who(name: String, sideIcon: String => String, vocationOf: String => String,
+                  level: Option[Int]): String =
+    StatLines.who(vocationOf(name.toLowerCase), name, sideIcon(name.toLowerCase), level)
 
   private def plural(count: Int, one: String, many: String): String = if (count == 1) one else many
 }

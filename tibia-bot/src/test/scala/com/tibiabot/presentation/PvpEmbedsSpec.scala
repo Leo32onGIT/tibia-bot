@@ -38,20 +38,25 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
    *  case. Keyed lowercase, which is what the embed is expected to look up by. */
   private val vocations: String => String = Map("bubble" -> "Master Sorcerer").withDefaultValue("")
 
+  /** Bubble's sheet has a level too, for the Most Kills rows that store none. */
+  private val levels: String => Option[Int] = Map("bubble" -> 766).get
+
   private def pages(
       frags: FragTally,
       losses: List[ExperienceDelta] = Nil,
       jump: String => Option[String] = id => if (id.isEmpty) None else Some(s"https://discord.com/x/$id"),
-      vocationOf: String => String = vocations
-  ) = PvpEmbeds.build("Antica", frags, losses, _ => "<:enemy:9>", vocationOf, ink, scale, down, jump)
+      vocationOf: String => String = vocations,
+      levelOf: String => Option[Int] = levels
+  ) = PvpEmbeds.build("Antica", frags, losses, _ => "<:enemy:9>", vocationOf, levelOf, ink, scale, down, jump)
 
   /** The one page an ordinary day produces. */
   private def build(
       frags: FragTally,
       losses: List[ExperienceDelta] = Nil,
       jump: String => Option[String] = id => if (id.isEmpty) None else Some(s"https://discord.com/x/$id"),
-      vocationOf: String => String = vocations
-  ) = pages(frags, losses, jump, vocationOf).head
+      vocationOf: String => String = vocations,
+      levelOf: String => Option[Int] = levels
+  ) = pages(frags, losses, jump, vocationOf, levelOf).head
 
   private def loss(name: String, gained: Long) =
     ExperienceDelta(name.toLowerCase, name, "Elite Knight", 402, 402, 1L, gained)
@@ -106,7 +111,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = build(frags)
     embed.getDescription should include("### Most Kills")
     embed.getDescription should include(
-      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · **4 kills**")
+      ":fire: **766** — **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · **4 kills**")
     embed.getDescription should include("Mateusz")
     // one heading over both sides, not one per side
     embed.getDescription.linesIterator.count(_.startsWith("### Most Kills")) shouldBe 1
@@ -122,7 +127,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = build(tally(mostWanted = List(Repeat("Grimjaw", 271, 4), Repeat("Draven", 355, 1))))
     embed.getDescription should include("### Most Deaths")
     embed.getDescription should include("**[Grimjaw](")
-    embed.getDescription should include("*271* · **4 deaths**")
+    embed.getDescription should include("**271** — **[Grimjaw](https://www.tibia.com/community/?name=Grimjaw)** <:enemy:9> · **4 deaths**")
     embed.getDescription should include("**1 death**")
   }
 
@@ -143,13 +148,13 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
     embed.getDescription should include("[:link:](https://discord.com/x/222)")
   }
 
-  test("the link closes the row, after the level") {
+  test("the link closes the row, after the name and side") {
     // A cell of its own at the end, not a line of subtext under the row and not
     // another marker beside the name — the markers say what the character is,
     // the link is somewhere to go.
     val embed = build(tally(topEnemy = Some(TopKill("Bubble", 402, FragSide.Enemy, "111"))))
     embed.getDescription.linesIterator.toList should contain(
-      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · *402* " +
+      ":fire: **402** — **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> " +
         "· [:link:](https://discord.com/x/111)")
     embed.getDescription should not include "-# "
   }
@@ -157,13 +162,13 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
   test("a row with no link does not end in a dangling separator") {
     val embed = build(tally(topAlly = Some(TopKill("Bubble", 402, FragSide.Ally, ""))))
     embed.getDescription.linesIterator.toList should contain(
-      ":fire: **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · *402*")
+      ":fire: **402** — **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9>")
   }
 
   test("a kill whose death was never posted still reads, without a dead link") {
     val embed = build(tally(topEnemy = Some(TopKill("Vestrik", 402, FragSide.Enemy, ""))))
     embed.getDescription should include("**[Vestrik](")
-    embed.getDescription should include("*402*")
+    embed.getDescription should include("**402** —")
     embed.getDescription should not include ":link:"
   }
 
@@ -185,7 +190,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
   test("a fragger carries the vocation from their cached sheet") {
     // Frag rows store a name and nothing else, so the icon has to be looked up.
     build(tally(fraggers = List(Fragger("Bubble", FragSide.Ally, 4)))).getDescription should
-      include(":fire: **[Bubble](")
+      include(":fire: **766** — **[Bubble](")
   }
 
   test("a name with no cached sheet opens with the name, not with a gap") {
@@ -196,10 +201,20 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
       "**[Nosheet](https://www.tibia.com/community/?name=Nosheet)** <:enemy:9> · **2 kills**")
   }
 
+  test("a fragger's level is looked up by lowercased name, and a killer nothing knows reads without one") {
+    val byLowercase: String => Option[Int] = name => if (name == "sirmax") Some(512) else None
+    val embed = build(tally(fraggers = List(Fragger("Sirmax", FragSide.Ally, 3), Fragger("Nobody", FragSide.Enemy, 1))),
+      levelOf = byLowercase)
+    embed.getDescription should include("**512** — **[Sirmax](")
+    // no level means no dash either: the row opens with the name
+    embed.getDescription.linesIterator.toList should contain(
+      "**[Nobody](https://www.tibia.com/community/?name=Nobody)** <:enemy:9> · **1 kill**")
+  }
+
   test("the lookup is by lowercased name, whatever casing the frag row kept") {
     val byLowercase: String => String = name => if (name == "bubble") "Elder Druid" else ""
     build(tally(fraggers = List(Fragger("Bubble", FragSide.Ally, 4))), vocationOf = byLowercase)
-      .getDescription should include(":snowflake: **[Bubble](")
+      .getDescription should include(":snowflake: **766** — **[Bubble](")
   }
 
   // --- limits --------------------------------------------------------------

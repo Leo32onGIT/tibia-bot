@@ -48,17 +48,17 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   // --- the shape of a row --------------------------------------------------
 
-  test("a row reads vocation, name, side, level, then the figure") {
+  test("a row reads like the online list — vocation, level, name, side — then the figure") {
     val embed = build(report(gains = List(delta("Arieswar", 182450912, level = 418))), _ => "<:ally:9>")
     embed.getDescription should include(
-      ":shield: **[Arieswar](https://www.tibia.com/community/?name=Arieswar)** <:ally:9> · *418* · " + up + " **182,450,912**")
+      ":shield: **418** — **[Arieswar](https://www.tibia.com/community/?name=Arieswar)** <:ally:9> · " + up + " **182,450,912**")
   }
 
   test("a character nobody tracks carries no side icon and the row closes up") {
     // GuildIcons renders an untracked, guildless character as an empty string,
     // so the row must not leave a gap where the icon would have been.
     val bare = build(report(gains = List(delta("Arieswar", 900)))).getDescription
-    bare should include("**[Arieswar](https://www.tibia.com/community/?name=Arieswar)** · *400*")
+    bare should include("**[Arieswar](https://www.tibia.com/community/?name=Arieswar)** · " + up)
     bare should not include "  ·"
   }
 

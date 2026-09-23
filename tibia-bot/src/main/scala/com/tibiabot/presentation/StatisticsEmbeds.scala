@@ -214,8 +214,7 @@ object StatisticsEmbeds {
 
   private def gainLine(delta: ExperienceDelta, sideIcon: String => String, icon: String): String =
     StatLines.cells(
-      StatLines.who(delta.vocation, delta.displayName, sideIcon(delta.name)),
-      StatLines.level(delta.level),
+      StatLines.who(delta.vocation, delta.displayName, sideIcon(delta.name), Some(delta.level)),
       s"$icon **${StatLines.number(delta.gained)}**")
 
   /** The day's best advance, named by what it was.
@@ -229,8 +228,7 @@ object StatisticsEmbeds {
     val icon = category.map(skillIcon).filter(_.nonEmpty).map(_ + " ").getOrElse("")
     val reached = category.map(_.advancement(event.score)).getOrElse(s"${event.category} **${event.score}**")
     StatLines.cells(
-      StatLines.who(event.vocation, event.displayName, sideIcon(event.name)),
-      StatLines.level(event.level),
+      StatLines.who(event.vocation, event.displayName, sideIcon(event.name), Some(event.level)),
       s"$icon$reached")
   }
 

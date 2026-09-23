@@ -1411,7 +1411,7 @@ object BotApp extends App with StrictLogging {
    *  Empty rather than fatal if a read fails: the post is worth more than its
    *  icons, and this runs with the whole day's figures already in hand.
    */
-  private final case class StatisticsSheet(guild: String, vocation: String)
+  private final case class StatisticsSheet(guild: String, vocation: String, level: Int)
 
   private def statisticsSheets(world: String): Map[String, StatisticsSheet] = {
     def read[A](what: String)(query: => Map[String, A]): Map[String, A] =
@@ -1422,19 +1422,30 @@ object BotApp extends App with StrictLogging {
       }
     val listed = read("cached list sheets")(
       cacheRepository.getList(world).map(row =>
-        row.name.toLowerCase -> StatisticsSheet(row.guild, row.vocation)).toMap)
+        row.name.toLowerCase -> StatisticsSheet(row.guild, row.vocation, row.level.toIntOption.getOrElse(0))).toMap)
     val seen = read("cached online sheets")(
       cacheRepository.getSheets(world).map { case (key, row) =>
-        key -> StatisticsSheet(row.guild, row.vocation) })
+        key -> StatisticsSheet(row.guild, row.vocation, row.level) })
     (listed.keySet ++ seen.keySet).iterator.map { key =>
       val fresh = seen.get(key)
       val older = listed.get(key)
       key -> StatisticsSheet(
         guild = fresh.map(_.guild).orElse(older.map(_.guild)).getOrElse(""),
         vocation = fresh.map(_.vocation).filter(_.nonEmpty)
-          .orElse(older.map(_.vocation)).getOrElse(""))
+          .orElse(older.map(_.vocation)).getOrElse(""),
+        // A level, like a vocation, is only ever a gap when it is missing.
+        level = fresh.map(_.level).filter(_ > 0)
+          .orElse(older.map(_.level).filter(_ > 0)).getOrElse(0))
     }.toMap
   }
+
+  /** A character's level on one world, by lowercased name, for the Most Kills
+   *  rows — the one list whose rows carry no level of their own, since the frag
+   *  tally stores only names. From the cached sheets, which know nearly everybody
+   *  who fought, having seen them online; None for anybody they do not, whose row
+   *  then reads without one. */
+  private def statisticsLevel(sheets: Map[String, StatisticsSheet]): String => Option[Int] =
+    name => sheets.get(name.toLowerCase).map(_.level).filter(_ > 0)
 
   /** The ally/enemy icon a character gets in one discord's statistics post.
    *
@@ -1636,7 +1647,7 @@ object BotApp extends App with StrictLogging {
               report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
               Config.levelUpEmoji, Config.levelDownEmoji) :::
             presentation.PvpEmbeds.build(
-              target.world, frags, enemyLosses, side, vocation,
+              target.world, frags, enemyLosses, side, vocation, statisticsLevel(sheets),
               Config.barEmoji,
               presentation.Bars.Scale.forWorld(report.averageOnline, report.averageLevel),
               Config.levelDownEmoji, jumpToDeath(target)) :::
