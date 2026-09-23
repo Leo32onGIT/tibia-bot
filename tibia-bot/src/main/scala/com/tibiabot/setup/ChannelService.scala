@@ -102,6 +102,7 @@ final class ChannelService(
         case Some(category) if category != null =>
           val channel = guild.createTextChannel("📢・ʀᴀɪᴅs", category).complete()
           grantWorldPerms(channel, guild.getBotRole, guild.getPublicRole)
+          postChannelIntro(channel, s":speech_balloon: This channel shows raids as they are announced and start on this world.\n\nRaids are pooled from every member who has linked their Tibia Observer with the **`/observer`** command.")
           observerRaidRepository.setChannel(guild.getId, world, channel.getId)
           true
         case _ => false // the guild does not track this world
