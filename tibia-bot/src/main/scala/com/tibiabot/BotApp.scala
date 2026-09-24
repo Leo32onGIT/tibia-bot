@@ -1061,11 +1061,13 @@ object BotApp extends App with StrictLogging {
         amend = worlds => amendMwcInBoostedMessages(worlds),
         now = () => ZonedDateTime.now(domain.time.Clock.Berlin),
         fastInterval = java.time.Duration.ofMinutes(1),
-        slowInterval = java.time.Duration.ofMinutes(2))
+        slowInterval = java.time.Duration.ofMinutes(2),
+        answeredWithout = () => observerFeed.takeAnsweredWithout())
       else new observer.MiniWorldChangeWatcher(
         fetch = () => observerFeed.refreshMwc(),
         amend = worlds => amendMwcInBoostedMessages(worlds),
-        now = () => ZonedDateTime.now(domain.time.Clock.Berlin))
+        now = () => ZonedDateTime.now(domain.time.Clock.Berlin),
+        answeredWithout = () => observerFeed.takeAnsweredWithout())
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, 1.minute)(() => mwcWatcher.tick())(ex)
   }
 

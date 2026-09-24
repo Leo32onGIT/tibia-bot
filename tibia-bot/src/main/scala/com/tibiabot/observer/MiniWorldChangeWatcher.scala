@@ -23,6 +23,12 @@ import java.time.{Duration, Instant, ZonedDateTime}
  *  (`fetch` returns `None`) is skipped without forgetting the last good set, so a
  *  sidecar hiccup never reads as every change ending.
  *
+ *  A message can also go out while there are no changes to be had at all — right
+ *  after server save, before a fresh pool is in, or while the feed is down.
+ *  `answeredWithout` says so (see ObserverFeed.takeAnsweredWithout), and the next
+ *  good poll amends every world it has changes for, not only those that moved on:
+ *  a world whose changes stayed the same would otherwise never get them.
+ *
  *  `tick` is meant to run once a minute; it decides for itself when a poll is due.
  *  A bot reading the primary's published copy rather than the API can pass shorter
  *  intervals: its polls are Redis reads, and the primary's own cadence already
@@ -32,7 +38,8 @@ final class MiniWorldChangeWatcher(
   amend: Set[String] => Unit,
   now: () => ZonedDateTime,
   fastInterval: Duration = MiniWorldChangeWatcher.FastInterval,
-  slowInterval: Duration = MiniWorldChangeWatcher.SlowInterval
+  slowInterval: Duration = MiniWorldChangeWatcher.SlowInterval,
+  answeredWithout: () => Boolean = () => false
 ) extends StrictLogging {
   import MiniWorldChangeWatcher._
 
@@ -54,15 +61,16 @@ final class MiniWorldChangeWatcher(
   private def poll(at: ZonedDateTime): Unit =
     fetch().foreach { byWorld =>
       val current = signatures(byWorld)
-      seen.foreach { previous =>
-        val worlds = changedWorlds(previous, current)
-        if (worlds.nonEmpty) {
-          val sinceSave = Duration.between(ServerSaveSchedule.lastServerSave(at), at).toMinutes
-          logger.info(s"Mini world changes updated ${sinceSave}m after server save on ${worlds.size} world(s): " +
-            worlds.toList.sorted.mkString(", "))
-          amend(worlds)
-        }
+      val moved = seen.map(changedWorlds(_, current)).getOrElse(Set.empty)
+      if (moved.nonEmpty) {
+        val sinceSave = Duration.between(ServerSaveSchedule.lastServerSave(at), at).toMinutes
+        logger.info(s"Mini world changes updated ${sinceSave}m after server save on ${moved.size} world(s): " +
+          moved.toList.sorted.mkString(", "))
       }
+      val missed = if (answeredWithout()) current.keySet -- moved else Set.empty[String]
+      if (missed.nonEmpty)
+        logger.info(s"Adding mini world changes to messages posted without them on ${missed.size} world(s)")
+      if (moved.nonEmpty || missed.nonEmpty) amend(moved ++ missed)
       seen = Some(current)
     }
 }

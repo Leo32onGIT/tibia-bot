@@ -259,9 +259,12 @@ observer_tokens
   shape as the fansite pipeline. The primary (or a lone bot) runs the sidecar
   (`observer` compose profile), fetches the pooled MWC and raid feeds for every
   linked account (read fresh from the shared table, so links made through any bot
-  are covered), runs the renewal sweep, and publishes the feeds to Redis with a TTL
-  (`ObserverFeed`). A secondary never calls the API: it reads the primary's copy,
-  treats a missing copy as a failed fetch, and hands `/observer` link and unlink to
+  are covered), runs the renewal sweep, and publishes the feeds to Redis
+  (`ObserverFeed`). The raids copy expires after 35 minutes; the MWC copy is
+  stamped with when it was fetched and used until the next server save, since the
+  changes are fixed for the day. A secondary never calls the API: it reads the
+  primary's copy, treats a missing or pre-server-save copy as a failed fetch (and
+  logs when that starts and stops), and hands `/observer` link and unlink to
   the primary over Redis (`ObserverRelay`) — so it never handles a credential and
   runs on `OBSERVER_API_MODE=on` alone, the encryption secret staying on the
   primary. The boosted DM's section is now the

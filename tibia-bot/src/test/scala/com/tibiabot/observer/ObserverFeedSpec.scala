@@ -84,16 +84,47 @@ class ObserverFeedSpec extends AnyFunSuite with Matchers {
     fetches shouldBe 2
   }
 
-  test("a failed refresh falls back to the last good changes while they are recent") {
-    val clock = new Clock
+  test("a failed refresh falls back to the last good changes until the next server save") {
+    val clock = new Clock // 12:00 in Berlin
     var answer: Option[Map[String, List[MiniWorldChange]]] = Some(antica)
     val feed = new ObserverFeed(ObserverFeed.Standalone, () => answer, () => Map.empty, new FakeRedis, () => clock.now())
     feed.mwcForWorld("Antica") should not be empty
     answer = None
-    clock.at = clock.at.plus(Duration.ofMinutes(10))
+    clock.at = clock.at.plus(Duration.ofHours(11)) // 23:00
     feed.mwcForWorld("Antica") should not be empty
-    clock.at = clock.at.plus(Duration.ofMinutes(30))
+    clock.at = Instant.parse("2026-09-25T08:01:00Z") // 10:01 the next day
     feed.mwcForWorld("Antica") shouldBe empty
+  }
+
+  test("a secondary goes on with the day's copy however old, and never uses yesterday's") {
+    val clock = new Clock
+    val redis = new FakeRedis
+    new ObserverFeed(ObserverFeed.Publisher, () => Some(antica), () => Map.empty, redis, () => clock.now()).refreshMwc()
+    val secondary = new ObserverFeed(ObserverFeed.Consumer, never, never, redis, () => clock.now())
+    clock.at = clock.at.plus(Duration.ofHours(11))
+    secondary.refreshMwc() shouldBe Some(antica)
+    clock.at = Instant.parse("2026-09-25T08:01:00Z")
+    secondary.refreshMwc() shouldBe None
+    secondary.mwcForWorld("Antica") shouldBe empty
+  }
+
+  test("a copy keeps when it was fetched, and one without a stamp is not trusted") {
+    val copy = ObserverFeed.MwcCopy(Instant.parse("2026-09-24T08:05:00Z"), antica)
+    FeedJson.parseMwc(FeedJson.mwc(copy)) shouldBe Some(copy)
+    FeedJson.parseMwc("""{"antica":[{"world":"Antica","title":"Fury Gate","body":"Near Venore."}]}""") shouldBe None
+  }
+
+  test("an answer with no changes to give is remembered once, for the watcher") {
+    var answer: Option[Map[String, List[MiniWorldChange]]] = None
+    val feed = new ObserverFeed(ObserverFeed.Standalone, () => answer, () => Map.empty, new FakeRedis)
+    feed.takeAnsweredWithout() shouldBe false
+    feed.mwcForWorld("Antica") shouldBe empty
+    feed.takeAnsweredWithout() shouldBe true
+    feed.takeAnsweredWithout() shouldBe false
+    // A world that simply has no changes today is an answer, not a gap.
+    answer = Some(antica)
+    feed.mwcForWorld("Secura") shouldBe empty
+    feed.takeAnsweredWithout() shouldBe false
   }
 
   test("an account's changes span its worlds") {

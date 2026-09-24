@@ -21,11 +21,13 @@ class MiniWorldChangeWatcherSpec extends AnyFunSuite with Matchers {
     var feed: Option[Map[String, List[MiniWorldChange]]] = Some(Map.empty)
     var clock: ZonedDateTime = at(9, 0)
     var fetches = 0
+    var answeredWithout = false
     val amended: ListBuffer[Set[String]] = ListBuffer.empty
     val watcher = new MiniWorldChangeWatcher(
       fetch = () => { fetches += 1; feed },
       amend = worlds => amended += worlds,
-      now = () => clock)
+      now = () => clock,
+      answeredWithout = () => { val was = answeredWithout; answeredWithout = false; was })
     def tickAt(hour: Int, minute: Int): Unit = { clock = at(hour, minute); watcher.tick() }
   }
 
@@ -52,6 +54,22 @@ class MiniWorldChangeWatcherSpec extends AnyFunSuite with Matchers {
     h.feed = Some(Map.empty)
     h.tickAt(10, 3)
     h.amended.toList shouldBe List(Set("antica"))
+  }
+
+  test("messages posted with no changes to be had get every world's at the next good poll") {
+    val h = new Harness
+    h.feed = Some(mwc("Antica", "Fury Gate") ++ mwc("Secura", "Nomads"))
+    h.tickAt(10, 1)
+    // A message went out while the feed was down; the changes themselves never moved.
+    h.feed = None
+    h.answeredWithout = true
+    h.tickAt(10, 3)
+    h.amended shouldBe empty
+    h.feed = Some(mwc("Antica", "Fury Gate") ++ mwc("Secura", "Nomads"))
+    h.tickAt(10, 5)
+    h.amended.toList shouldBe List(Set("antica", "secura"))
+    h.tickAt(10, 7)
+    h.amended should have size 1
   }
 
   test("a failed poll is skipped without forgetting the last good set") {
