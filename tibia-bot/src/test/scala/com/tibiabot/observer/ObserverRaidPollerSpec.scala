@@ -114,6 +114,23 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.scheduled.map(_._1.toMillis).toList shouldBe List(0L, 220000L - 60000L)
   }
 
+  test("a raid still running when the bot starts catches up everything it missed, however late") {
+    val h = new Harness
+    // Both lines are past, but the raid is not over: nothing is left out.
+    h.pollAt(70, entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    h.posts.toList shouldBe List("g1" -> "subarea:Winter Wolves near Krimhorn")
+    h.scheduled.map(_._1.toMillis).toList shouldBe List(0L, 0L)
+  }
+
+  test("a raid already over when the bot starts is not posted at all") {
+    val h = new Harness
+    // Three hours after the start: long past its last line, but still in the feed.
+    h.pollAt(240, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")),
+      entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    h.posts shouldBe empty
+    h.scheduled shouldBe empty
+  }
+
   test("a raid a better-explored account already names shows its name from the area stage") {
     val h = new Harness
     h.pollAt(0, entry("areaRevealed"), entry("areaRevealed", typeId = WinterWolves))

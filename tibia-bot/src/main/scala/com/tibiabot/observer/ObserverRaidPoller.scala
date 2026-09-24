@@ -33,7 +33,8 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *
  *  A raid first seen past its area stage gets only its latest stage's post, and one
  *  first seen already started gets the subarea post (saying when it started) ahead
- *  of its lines. What a post shows grows with what is known: when a better-explored
+ *  of its lines. A raid already over — its last broadcast `FinishedAfter` past —
+ *  gets nothing: it is still in the feed, but it is no longer news. What a post shows grows with what is known: when a better-explored
  *  account's feed already names the raid, its name, creatures and picture come too.
  *  Everything every linked account's feed says about a raid is combined — see
  *  [[ObserverRaidPoller.merge]].
@@ -49,7 +50,8 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *
  *  Dedup is durable, in the database, keyed on `(guild, raidId, key)` where `key`
  *  is `"imminent"`, `"subarea"` or `"line:i"`; the in-memory registry is only
- *  bookkeeping, so a restart re-hydrates from the next poll without re-posting.
+ *  bookkeeping, so a restart re-hydrates from the next poll without re-posting — and
+ *  without posting raids that finished while it was down.
  *
  *  `pooledRaids` is the feed — fetched on the bot that talks to the API, the
  *  primary's published copy on one that does not (see [[ObserverFeed]]). The raids
@@ -111,12 +113,17 @@ final class ObserverRaidPoller(
         val raids = entries.groupBy(_.raidId).values.map(merge(_, known)).toList
         RaidRanking.order(raids, typePriority).foreach { raid =>
           register(raid, world, at)
-          val raidType = RaidTypeCatalog.get(raid.raidTypeId)
-          channels.foreach { case (guildId, channelId) => announce(guildId, channelId, raid, raidType, at) }
-          wakeForNextStage(raid, at)
-          for (anchor <- tracked.get(raid.raidId).flatMap(_.anchor); rt <- raidType)
-            if (scheduledRaids.putIfAbsent(raid.raidId, ()).isEmpty)
-              scheduleLines(raid.raidId, world, rt, anchor, at)
+          // A raid already over is history, not news: raids stay in the feed for
+          // hours, so a restart (or dedup rows pruned) would otherwise announce and
+          // unfurl every one from earlier in the day.
+          if (!tracked.get(raid.raidId).exists(over(_, at))) {
+            val raidType = RaidTypeCatalog.get(raid.raidTypeId)
+            channels.foreach { case (guildId, channelId) => announce(guildId, channelId, raid, raidType, at) }
+            wakeForNextStage(raid, at)
+            for (anchor <- tracked.get(raid.raidId).flatMap(_.anchor); rt <- raidType)
+              if (scheduledRaids.putIfAbsent(raid.raidId, ()).isEmpty)
+                scheduleLines(raid.raidId, world, rt, anchor, at)
+          }
         }
       }
       pruneTracked(at)
@@ -214,15 +221,20 @@ final class ObserverRaidPoller(
     }
   }
 
-  /** Forget raids that have fully unfurled (last broadcast well past) or that were
-   *  never anchored and have sat unstarted too long. */
+  /** Whether a raid has fully unfurled: its last broadcast is more than
+   *  `FinishedAfter` past. */
+  private def over(t: TrackedRaid, at: Instant): Boolean = {
+    val lastMillis = RaidTypeCatalog.get(t.raidTypeId).map(_.broadcasts).filter(_.nonEmpty)
+      .map(_.last.millis).getOrElse(0L)
+    t.anchor.exists(a => at.isAfter(a.plusMillis(lastMillis).plus(FinishedAfter)))
+  }
+
+  /** Forget raids that have fully unfurled or that were never anchored and have
+   *  sat unstarted too long. */
   private def pruneTracked(at: Instant): Unit =
     tracked.foreach { case (raidId, t) =>
-      val lastMillis = RaidTypeCatalog.get(t.raidTypeId).map(_.broadcasts).filter(_.nonEmpty)
-        .map(_.last.millis).getOrElse(0L)
-      val done = t.anchor.exists(a => at.isAfter(a.plusMillis(lastMillis).plus(Duration.ofMinutes(30))))
       val stale = t.anchor.isEmpty && at.isAfter(t.firstSeen.plus(Duration.ofHours(2)))
-      if (done || stale) {
+      if (over(t, at) || stale) {
         tracked.remove(raidId)
         scheduledRaids.remove(raidId)
         wakes.keys.filter(_._1 == raidId).foreach(wakes.remove)
@@ -247,6 +259,10 @@ object ObserverRaidPoller {
   /** How long before a raid starts its subarea is revealed. Its area is revealed an
    *  hour before. */
   val SubareaLead: Duration = Duration.ofMinutes(30)
+
+  /** How long after its last broadcast a raid counts as over. Until then everything
+   *  it has is posted, however late — a restart mid-raid catches up; after, nothing. */
+  val FinishedAfter: Duration = Duration.ofMinutes(30)
 
   /** One view of a raid from every entry the feed has for it — one per stage, and
    *  one per linked account that can see it. Its stage is the furthest any entry
