@@ -127,12 +127,6 @@ class ObserverFeedSpec extends AnyFunSuite with Matchers {
     feed.takeAnsweredWithout() shouldBe false
   }
 
-  test("an account's changes span its worlds") {
-    val pool = antica ++ Map("secura" -> List(MiniWorldChange("Secura", "Nomads", "Camped.")))
-    val feed = new ObserverFeed(ObserverFeed.Standalone, () => Some(pool), () => Map.empty, new FakeRedis)
-    feed.mwcForWorlds(List("Antica", "Secura", "Celesta")).map(_.title) shouldBe List("Fury Gate", "Nomads")
-  }
-
   test("a raid's missing subarea and start survive the copy") {
     val bare = raid.copy(subarea = None, startDate = None)
     FeedJson.parseRaids(FeedJson.raids(Map("Antica" -> List(raid, bare)))) shouldBe Some(Map("Antica" -> List(raid, bare)))

@@ -120,13 +120,6 @@ final class ObserverFeed(
   def mwcForWorld(world: String): List[MiniWorldChange] =
     mwcNow().getOrElse(world.toLowerCase, Nil)
 
-  /** The active changes across several worlds — a linked account's, for the
-   *  boosted DM. */
-  def mwcForWorlds(worlds: Seq[String]): List[MiniWorldChange] = {
-    val pool = mwcNow()
-    worlds.map(_.toLowerCase).distinct.flatMap(w => pool.getOrElse(w, Nil)).toList
-  }
-
   /** The pool, reused for `ReuseFor` — the server-save repost asks once per
    *  guild — and refreshed after that. A refresh that fails falls back to the last
    *  good pool while it is from since the latest server save, so a failed fetch at

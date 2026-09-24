@@ -292,6 +292,11 @@ observer_tokens
   character worlds, most wanted first (the same order as MWC rules), and then to
   any other world it has explored, up to the 15-rule cap. Not yet seen: a raid
   from an unexplored region actually arriving in the feed.
+- **Mini world changes: notifications message only (24 Sep 2026).** No DM carries
+  them for now. The boosted DM's per-member MWC section from Phase 3 was taken out,
+  along with the helpers that existed only for it (`ObserverEmbeds.mwcEmbed`,
+  `ObserverFeed.mwcForWorlds`, `ObserverService.linkedWorldsByUser`). In the
+  notifications message the changes now sit first, above the boosted boss.
 - **Observer on the dashboard.** Every sidecar call is counted in
   `ApiMetrics.observer`, by sidecar endpoint and by the Observer API's own status,
   and shows as its own row in the dashboard's API throughput panel. Only the

@@ -50,24 +50,6 @@ object ObserverEmbeds {
       s"${Config.noEmoji} Something went wrong with your link — try **Add** again."
   }
 
-  /** The Mini World Changes section appended to the boosted server-save DM, for a
-   *  member with a linked Observer token. `None` when nothing is active, so the DM
-   *  is unchanged for a quiet day. */
-  def mwcEmbed(changes: List[MiniWorldChange]): Option[MessageEmbed] =
-    if (changes.isEmpty) None
-    else {
-      val body = changes
-        .take(12)
-        .map(c => s"### ${c.title} ${Config.indentEmoji}*${c.world}*\n${c.body}")
-        .mkString("\n\n")
-        .take(4000)
-      Some(new EmbedBuilder()
-        .setTitle("Mini World Changes")
-        .setColor(Embeds.BrandColor)
-        .setDescription(body)
-        .build())
-    }
-
   /** The bot's own mini world change art, hosted with its other Discord assets. */
   private val MwcThumbnail = "https://violentbot.xyz/discord/observer/miniworldchange.png"
 

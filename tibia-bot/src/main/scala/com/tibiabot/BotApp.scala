@@ -2090,10 +2090,6 @@ object BotApp extends App with StrictLogging {
                   boostedName.toLowerCase == entry.boostedName.toLowerCase || entry.boostedName.toLowerCase == "all"
                 } => entry.user
               }.distinct
-              // The worlds each recipient's linked Observer account covers, read once
-              // for the whole send rather than per DM.
-              val mwcWorlds: Map[String, List[String]] =
-                if (recipients.nonEmpty) observerService.linkedWorldsByUser() else Map.empty
 
               recipients.foreach { recipientId =>
                 // Low priority (per-user DM burst) — goes through the shared background
@@ -2125,15 +2121,12 @@ object BotApp extends App with StrictLogging {
                           }
                         }
                       )
-                      // A member with a linked Observer token gets a Mini World Changes
-                      // section too: the pooled changes on their account's worlds. Empty
-                      // when Observer is off or they have no link.
-                      val recipientMwc = observerFeed.mwcForWorlds(mwcWorlds.getOrElse(recipientId, Nil))
-                      val recipientEmbeds =
-                        (embeds ++ presentation.ObserverEmbeds.mwcEmbed(recipientMwc).toList).asJava
+                      // Just the boosted boss and creature: mini world changes are left
+                      // out of every DM for now (24 Sep 2026); they are in the
+                      // notifications message.
                       user.openPrivateChannel().queue((privateChannel: PrivateChannel) => {
                         val messageText = s"🔔 ${boostedInfoList.head._3} • ${boostedInfoList.last._3}"
-                        privateChannel.sendMessage(messageText).setEmbeds(recipientEmbeds).setComponents(ActionRow.of(
+                        privateChannel.sendMessage(messageText).setEmbeds(embeds.asJava).setComponents(ActionRow.of(
                           Button.primary("boosted list", " ").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                         )).queue(
                           (_: Message) => {
