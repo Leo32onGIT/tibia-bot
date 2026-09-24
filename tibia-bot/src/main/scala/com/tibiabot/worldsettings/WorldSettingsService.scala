@@ -49,6 +49,9 @@ final class WorldSettingsService(
   private def detectHuntedsToDatabase(guild: Guild, world: String, detectSetting: String): Unit =
     worldConfigRepository.updateWorldString(guild.getId, com.tibiabot.domain.WorldName.formal(world), "detect_hunteds", detectSetting)
 
+  private def huntGuildLeaversToDatabase(guild: Guild, world: String, setting: String): Unit =
+    worldConfigRepository.updateWorldString(guild.getId, com.tibiabot.domain.WorldName.formal(world), "hunt_guild_leavers", setting)
+
   private def deathsLevelsHideShowToDatabase(guild: Guild, world: String, setting: String, playerType: String, channelType: String): Unit = {
     val worldFormal = com.tibiabot.domain.WorldName.formal(world)
     val tablePrefix = playerType match {
@@ -134,6 +137,22 @@ final class WorldSettingsService(
       notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
       adminLogMessage = s"${Names.user(event.getUser.getName)} set **automatic enemy detection** to **$settingOption** for the world **$worldFormal**.",
       adminLogThumbnail = "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Armillary_Sphere_(TibiaMaps).gif"
+    )
+  }
+
+  def huntGuildLeavers(event: GenericInteractionCreateEvent, worldOption: String, settingOption: String): MessageEmbed = {
+    val worldFormal = com.tibiabot.domain.WorldName.formal(worldOption).trim
+    val guild = event.getGuild
+    updateWorldSetting[String](
+      guild, worldOption, settingOption,
+      currentValue = w => Some(w.huntGuildLeavers),
+      applyValue = (w, v) => w.copy(huntGuildLeavers = v),
+      persist = v => huntGuildLeaversToDatabase(guild, worldFormal, v),
+      alreadySetMessage = s"${Config.noEmoji} **Hunt guild leavers** is already set to **$settingOption** for the world **$worldFormal**.",
+      nowSetMessage = s":gear: **Hunt guild leavers** is now set to **$settingOption** for the world **$worldFormal**.",
+      notConfiguredMessage = s"${Config.noEmoji} You need to run `/setup` and add **$worldFormal** before you can configure this setting.",
+      adminLogMessage = s"${Names.user(event.getUser.getName)} set **hunt guild leavers** to **$settingOption** for the world **$worldFormal**.",
+      adminLogThumbnail = Config.guildLeaveThumbnail
     )
   }
 

@@ -34,6 +34,7 @@ object PanelForms {
   val LevelsField = "levels"
   val DeathsField = "deaths"
   val ActivityField = "activity"
+  val LeaversField = "leavers"
   val EnemiesField = "enemies"
   val AlliesField = "allies"
   val NeutralsField = "neutrals"
@@ -153,6 +154,10 @@ object PanelForms {
 
   /** "true"/"false" is how these are stored; the forms speak show/hide. */
   def showHideOf(stored: String): String = if (stored == "true") "show" else "hide"
+
+  /** The on/off settings are stored as "on"/"off" already, and the bot reads
+   *  anything other than "on" as off — so the form does too. */
+  def onOffOf(stored: String): String = if (stored == "on") "on" else "off"
 
   def build(id: String, title: String, parts: List[Label]): Modal =
     Modal.create(id, clamp(title, 45)).addComponents(parts.asJava).build()

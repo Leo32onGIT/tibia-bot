@@ -59,7 +59,15 @@ case class Worlds(name: String,
    *  45-minute window that the 30-second tick visits about ninety times: an
    *  in-memory guard answers all but the first of those, and answers nothing at
    *  all after a restart mid-window, which would post the same day twice. */
-  statisticsPosted: String = ""
+  statisticsPosted: String = "",
+  /** "on" or "off": whether a player who leaves a hunted guild on this world is
+   *  put on the hunted list by name.
+   *
+   *  Off is for a world whose hunted guilds are there to be watched rather than
+   *  fought — a guild followed from another world adds a stranger to the list
+   *  every time somebody quits it. The leave is still posted in the activity
+   *  channel either way. */
+  huntGuildLeavers: String = "on"
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

@@ -37,6 +37,12 @@ class WorldConfigRepositoryIntegrationSpec extends AnyFunSuite with Matchers wit
     repo.updateWorldInt(guildId, "Itestworld", "online_allies_min", 200)
     repo.listWorlds(guildId).find(_.name == world).map(_.onlineAlliesMin) shouldBe Some(200)
 
+    // hunt_guild_leavers is migrated the same way, and must land 'on' — what
+    // every world did before it was a setting.
+    repo.listWorlds(guildId).find(_.name == world).map(_.huntGuildLeavers) shouldBe Some("on")
+    repo.updateWorldString(guildId, "Itestworld", "hunt_guild_leavers", "off")
+    repo.listWorlds(guildId).find(_.name == world).map(_.huntGuildLeavers) shouldBe Some("off")
+
     // string + int field updates
     repo.updateWorldString(guildId, "Itestworld", "detect_hunteds", "off")
     repo.updateWorldInt(guildId, "Itestworld", "fullbless_level", 400)

@@ -229,16 +229,30 @@ object PanelModals extends StrictLogging {
       case None => reply(event, s"${Config.noEmoji} Pick a world first.")
       case Some(world) =>
         val service = BotApp.worldSettingsService
-        val side = if (panel == Panel.Hunted) "enemies" else "allies"
+        val hunted = panel == Panel.Hunted
+        val side = if (hunted) "enemies" else "allies"
+        // Only what differs from the world's current value, as on /settings: a
+        // single-world form opens filled in, so every box arrives whether or not
+        // it was touched.
         val embeds = List(
-          choice(event, PanelForms.LevelsField).map(v => service.deathsLevelsHideShow(event, world.name, v, side, "levels")),
-          choice(event, PanelForms.DeathsField).map(v => service.deathsLevelsHideShow(event, world.name, v, side, "deaths")),
-          // Hunted only; the allies form does not draw this box at all.
-          choice(event, PanelForms.ActivityField).filter(_ => panel == Panel.Hunted)
-            .map(v => service.detectHunted(event, world.name, v))
+          changed(choice(event, PanelForms.LevelsField),
+            PanelForms.showHideOf(if (hunted) world.showEnemiesLevels else world.showAlliesLevels))
+            .map(v => service.deathsLevelsHideShow(event, world.name, v, side, "levels")),
+          changed(choice(event, PanelForms.DeathsField),
+            PanelForms.showHideOf(if (hunted) world.showEnemiesDeaths else world.showAlliesDeaths))
+            .map(v => service.deathsLevelsHideShow(event, world.name, v, side, "deaths")),
+          // Hunted only; the allies form does not draw these boxes at all.
+          changed(choice(event, PanelForms.ActivityField).filter(_ => hunted), PanelForms.onOffOf(world.detectHunteds))
+            .map(v => service.detectHunted(event, world.name, v)),
+          changed(choice(event, PanelForms.LeaversField).filter(_ => hunted), PanelForms.onOffOf(world.huntGuildLeavers))
+            .map(v => service.huntGuildLeavers(event, world.name, v))
         ).flatten
-        if (embeds.isEmpty) reply(event, s"${Config.noEmoji} Nothing was changed - every box was left blank.")
-        else embeds.foreach(embed => event.getHook.sendMessageEmbeds(embed).setEphemeral(true).queue())
+        // One reply for the whole form, listing each change in turn.
+        embeds match {
+          case Nil => reply(event, s"${Config.noEmoji} Nothing was changed — every box was left as it was.")
+          case single :: Nil => event.getHook.sendMessageEmbeds(single).setEphemeral(true).queue()
+          case several => reply(event, several.map(_.getDescription).mkString("\n\n"))
+        }
     }
   }
 

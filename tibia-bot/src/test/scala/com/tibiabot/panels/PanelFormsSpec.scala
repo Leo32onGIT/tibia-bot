@@ -142,10 +142,34 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
     SettingsForms.modal(PanelIds.Fullbless, Nil) shouldBe empty
   }
 
-  /** Auto-detection is a hunted-only idea, so the allies form is one shorter. */
-  test("only the hunted display form carries auto-detect") {
-    sizeOf(ListForms.modal(Panel.Hunted, PanelIds.Config, one).get) shouldBe
-      sizeOf(ListForms.modal(Panel.Allies, PanelIds.Config, one).get) + 1
+  /** Auto-detection and hunting guild leavers are hunted-only ideas, so the
+   *  allies form is two shorter. */
+  test("only the hunted config form carries auto-detect and hunt guild leavers") {
+    fieldIds(ListForms.modal(Panel.Hunted, PanelIds.Config, one).get) shouldBe List(
+      PanelForms.LevelsField, PanelForms.DeathsField, PanelForms.ActivityField, PanelForms.LeaversField)
+    fieldIds(ListForms.modal(Panel.Allies, PanelIds.Config, one).get) shouldBe List(
+      PanelForms.LevelsField, PanelForms.DeathsField)
+  }
+
+  test("the hunted config form is exactly full on a guild tracking several worlds") {
+    sizeOf(ListForms.modal(Panel.Hunted, PanelIds.Config, several).get) shouldBe Modal.MAX_COMPONENTS
+  }
+
+  private def preselected(modal: Modal, id: String): List[String] =
+    modal.getComponents.asScala.toList.map(_.asInstanceOf[Label].getChild).collect {
+      case menu: net.dv8tion.jda.api.components.selections.StringSelectMenu if menu.getCustomId == id =>
+        menu.getOptions.asScala.toList.filter(_.isDefault).map(_.getValue)
+    }.flatten
+
+  /** Both are stored as "on"/"off". The form once compared auto-detect against
+   *  "true", which it never is, so it always opened on Off. */
+  test("the hunted config form opens on what the on/off settings are now") {
+    val on = List(world("Antica").copy(detectHunteds = "on", huntGuildLeavers = "on"))
+    val off = List(world("Antica").copy(detectHunteds = "off", huntGuildLeavers = "off"))
+    for ((worlds, expected) <- List(on -> "on", off -> "off"); field <- List(PanelForms.ActivityField, PanelForms.LeaversField))
+      withClue(s"$field stored $expected: ") {
+        preselected(ListForms.modal(Panel.Hunted, PanelIds.Config, worlds).get, field) shouldBe List(expected)
+      }
   }
 
   test("an unknown action produces no form rather than an empty one") {

@@ -611,8 +611,13 @@ class TibiaBot(
                           }
                         }
 
+                        // A world whose hunted guilds are only spectated turns this
+                        // off, so every leaver of a guild followed from elsewhere
+                        // is not added to the list by name.
+                        val huntGuildLeavers = worldData.headOption.map(_.huntGuildLeavers).getOrElse("on") == "on"
+
                         // if he was in hunted guild add to hunted players list
-                        if (wasInHuntedGuild) {
+                        if (wasInHuntedGuild && huntGuildLeavers) {
                           if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
                             BotApp.huntedAlliedService.modifyHuntedPlayersData(m => m + (guildId -> (BotApp.Players(charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser) :: m.getOrElse(guildId, List()))))
                             BotApp.huntedAlliedService.addHuntedToDatabase(guild, "player", charName.toLowerCase(), "false", s"was originally in hunted guild ${guildNameFromActivityData}", BotApp.botUser)
@@ -629,7 +634,9 @@ class TibiaBot(
                               }
                             }
                           }
-                        } else if (wasInAlliedGuild){
+                        } else if (wasInAlliedGuild || wasInHuntedGuild) {
+                          // Nothing is tracking them any more, so neither is the
+                          // activity list — the same as an ally who leaves.
                           if (!allyGuildCheck && !huntedGuildCheck && !huntedPlayerCheck && !allyPlayerCheck) {
                             // remove from activity
                             BotApp.modifyActivityData(m => m + (guildId -> m.getOrElse(guildId, List()).filterNot(_.name.equalsIgnoreCase(charName))))

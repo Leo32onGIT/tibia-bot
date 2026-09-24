@@ -99,6 +99,17 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       statement.execute("ALTER TABLE worlds ADD COLUMN statistics_posted VARCHAR(255) DEFAULT ''")
     }
 
+    // 'on', which is what every world did before this was a setting. createWorld
+    // leaves it to this DEFAULT, and its ON CONFLICT leaves it alone, so a world
+    // set up again keeps the choice it had.
+    val huntLeaversQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'hunt_guild_leavers'")
+    val huntLeaversExists = huntLeaversQuery.next()
+    huntLeaversQuery.close()
+
+    if (!huntLeaversExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN hunt_guild_leavers VARCHAR(255) DEFAULT 'on'")
+    }
+
     // statistics_kills_posted was migrated in here for one day, while the daily
     // post sent its creature figures as a second message. It does not any more —
     // tibia.com publishes kill statistics overnight, so there was never anything
@@ -115,7 +126,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       if (!exists) statement.execute(s"ALTER TABLE worlds ADD COLUMN $column INT DEFAULT 0")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted,hunt_guild_leavers FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -150,10 +161,11 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val onlineNeutralsMin = Option(result.getInt("online_neutrals_min")).getOrElse(0)
       val statisticsChannel = Option(result.getString("statistics_channel")).getOrElse("0")
       val statisticsPosted = Option(result.getString("statistics_posted")).getOrElse("")
+      val huntGuildLeavers = Option(result.getString("hunt_guild_leavers")).getOrElse("on")
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted, huntGuildLeavers)
       }
     }
 

@@ -109,12 +109,18 @@ object ListForms {
         val common = picker ++ List(
           choice(LevelsField, s"${side.capitalize} levels", s"Level-ups by $side players.", ShowHide, levels),
           choice(DeathsField, s"${side.capitalize} deaths", s"Deaths of $side players.", ShowHide, deaths))
-        // Auto-detection is a hunted-only idea: there is no equivalent for allies.
+        // Both hunted-only ideas: there is no equivalent for allies. With several
+        // worlds this is the five components Discord allows, so the hunted form
+        // has no room for another.
         val parts =
           if (panel == Panel.Hunted)
-            common :+ choice(ActivityField, "Auto-detect enemies",
-              "Add players who join a hunted guild automatically.",
-              OnOff, only.map(w => if (w.detectHunteds == "true") "on" else "off"))
+            common ++ List(
+              choice(ActivityField, "Auto-detect enemies",
+                "Add players who join a hunted guild automatically.",
+                OnOff, only.map(w => onOffOf(w.detectHunteds))),
+              choice(LeaversField, "Hunt guild leavers?",
+                "Add players who leave a hunted guild. Off for guilds you only spectate.",
+                OnOff, only.map(w => onOffOf(w.huntGuildLeavers))))
           else common
         Some(s"${panel.noun.capitalize} config", parts)
 

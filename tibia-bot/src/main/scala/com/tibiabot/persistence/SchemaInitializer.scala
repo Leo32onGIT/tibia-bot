@@ -610,6 +610,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |online_neutrals_min INT NOT NULL DEFAULT 0,
               |statistics_channel VARCHAR(255) NOT NULL DEFAULT '0',
               |statistics_posted VARCHAR(255) NOT NULL DEFAULT '',
+              |hunt_guild_leavers VARCHAR(255) NOT NULL DEFAULT 'on',
               |PRIMARY KEY (name)
               |);""".stripMargin
 
