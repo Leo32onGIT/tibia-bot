@@ -17,6 +17,9 @@ import net.dv8tion.jda.api.events.guild.{GuildJoinEvent, GuildLeaveEvent}
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
+import net.dv8tion.jda.api.components.textdisplay.TextDisplay
+import net.dv8tion.jda.api.components.thumbnail.Thumbnail
+import net.dv8tion.jda.api.components.tree.MessageComponentTree
 import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 
 import java.awt.Color
@@ -328,10 +331,27 @@ final class ChannelService(
   private def postCooldownTracker(channel: TextChannel): Unit =
     channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().queue()
 
+  /** Bring an existing notifications message up to date, for /repair: keep its
+   *  boosted boss and creature, and rebuild everything after them — Rashid, Dream
+   *  Courts, mini world changes, Drome — for the world being repaired, which
+   *  becomes the message's world, as it would on a fresh post. Whatever has come on
+   *  since the message posted shows up here: a linked Observer account now covering
+   *  the world is what adds its mini world changes. Edited in place, so nobody is
+   *  notified again. */
+  private def refreshServerSaveEmbeds(message: Message, guild: Guild, world: String): Unit = {
+    val boosted = message.getEmbeds.asScala.take(2).toList
+    message.editMessageEmbeds((boosted ++ serverSaveExtraEmbeds(world)).asJava).queue(
+      (_: Message) => discordUpdateConfig(guild, "", "", "", "", world),
+      (e: Throwable) => logger.warn(
+        s"Failed to refresh the boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
+  }
+
   /** Bring the cooldown tracker in an existing notifications channel up to date,
-   *  for /repair: post one when it is missing, and replace one still in the embed
-   *  layout it had before it moved to Discord's layout components (or any
-   *  duplicates). A single up-to-date tracker is left exactly where it is.
+   *  for /repair: post one when it is missing, and replace one that is no longer
+   *  what would be posted now — the embed it was before it moved to Discord's
+   *  layout components, or any version since whose text, buttons or pictures have
+   *  changed — and any duplicates. A single up-to-date tracker is left exactly
+   *  where it is.
    *
    *  Found among the bot's recent messages there by its buttons — every tracker,
    *  old or new, carries cooldown buttons, and nothing else in that channel does.
@@ -339,13 +359,22 @@ final class ChannelService(
   private def refreshCooldownTracker(channel: TextChannel, recent: List[Message]): Boolean = {
     val trackers = recent.filter(_.getComponentTree.findAll(classOf[Button]).asScala
       .exists(button => Option(button.getCustomId).exists(id => com.tibiabot.cooldowns.CooldownIds.parse(id).isDefined)))
-    if (trackers.sizeIs == 1 && trackers.head.isUsingComponentsV2) false
+    val current = trackerShape(MessageComponentTree.of(CooldownEmbeds.tracker()))
+    if (trackers.sizeIs == 1 && trackers.head.isUsingComponentsV2 &&
+        trackerShape(trackers.head.getComponentTree) == current) false
     else {
       trackers.foreach(_.delete().queue(_ => (), _ => ()))
       postCooldownTracker(channel)
       true
     }
   }
+
+  /** What makes a tracker the one that would be posted now: its text, its buttons
+   *  and how many pictures it carries. */
+  private def trackerShape(tree: MessageComponentTree): (List[String], List[String], Int) = (
+    tree.findAll(classOf[TextDisplay]).asScala.map(_.getContent).toList,
+    tree.findAll(classOf[Button]).asScala.map(_.getCustomId).toList,
+    tree.findAll(classOf[Thumbnail]).size)
 
   /** Build the boosted boss + creature + server-save embeds and post them to a
    *  guild's notifications channel with the server-save button, storing the
@@ -1050,12 +1079,9 @@ final class ChannelService(
             embedBuild.setDescription(s"${Config.yesEmoji} Missing notification message was recreated.")
           }
           if (boostedMessage != "0") {
-            val boostedMessageAction = boostedChannel.retrieveMessageById(boostedMessage)
-            try {
-              boostedMessageAction.complete()
-            } catch {
-              case _: Throwable =>
-                postBoostedNotifications(boostedChannel, guild, worldFormal)
+            Try(boostedChannel.retrieveMessageById(boostedMessage).complete()).toOption match {
+              case Some(existing) => refreshServerSaveEmbeds(existing, guild, worldFormal)
+              case None           => postBoostedNotifications(boostedChannel, guild, worldFormal)
             }
           }
           if (refreshCooldownTracker(boostedChannel, messages.toList)) {

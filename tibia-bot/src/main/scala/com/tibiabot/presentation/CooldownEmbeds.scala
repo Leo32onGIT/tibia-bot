@@ -67,11 +67,10 @@ object CooldownEmbeds {
     case CooldownKind.DragonHead => "Used"
   }
 
-  /** The heading both cooldown cards open with. Kooldown-Aid rather than either
-   *  tracked item, since the card belongs to neither. */
-  private def cardHeader: Section = Section.of(
-    Thumbnail.fromUrl(wikiFile("Kooldown-Aid")),
-    TextDisplay.of("### ⏳ Cooldown tracker\n-# Mark an item as collected/used and I'll message you when it's ready again."))
+  /** The heading both cooldown cards open with. No picture: each item below
+   *  carries its own. */
+  private def cardHeader: TextDisplay =
+    TextDisplay.of("### ⏳ Cooldown tracker\n-# Mark an item as collected/used and I'll message you when it's ready again.")
 
   private def divider: Separator = Separator.createDivider(Separator.Spacing.SMALL)
 

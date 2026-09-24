@@ -71,6 +71,14 @@ class CooldownCardsSpec extends AnyFunSuite with Matchers {
       "Remove" -> Some(CooldownIds.Action.RemoveForm), "Clear All" -> Some(CooldownIds.Action.RemoveAll))
   }
 
+  test("the cards have no picture of their own; each item on your card carries its own") {
+    import net.dv8tion.jda.api.components.thumbnail.Thumbnail
+    import net.dv8tion.jda.api.components.tree.MessageComponentTree
+    MessageComponentTree.of(CooldownEmbeds.tracker(emojiOf)).findAll(classOf[Thumbnail]) shouldBe empty
+    MessageComponentTree.of(CooldownEmbeds.personal(_ => Nil, "Beams", emojiOf = emojiOf))
+      .findAll(classOf[Thumbnail]).asScala.map(_.getUrl).toList shouldBe CooldownKind.all.map(CooldownEmbeds.thumbnail)
+  }
+
   test("what just changed leads the card") {
     val card = CooldownEmbeds.personal(_ => Nil, "Beams", note = "✅ Stopped tracking Jade Dragon Head.", emojiOf = emojiOf)
     texts(card).linesIterator.toList.drop(2).head shouldBe "✅ Stopped tracking Jade Dragon Head."
