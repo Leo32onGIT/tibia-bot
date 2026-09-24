@@ -185,9 +185,12 @@ final class ObserverService(
         .view.mapValues(_.distinctBy(_.title.toLowerCase).sortBy(_.title.toLowerCase)).toMap)
     }
 
-  /** All currently-announced raids pooled across every linked account, deduped by
-   *  (raidId, category) and grouped by world — any guild tracking a world benefits
-   *  from every member's exploration, in any Discord. The API side of
+  /** All currently-announced raids pooled across every linked account and grouped
+   *  by world — any guild tracking a world benefits from every member's
+   *  exploration, in any Discord. Every distinct entry is kept, one per stage and
+   *  per account that can see it: they do not all say the same, since an account
+   *  with limited discoveries is not told which raid it is until it starts, and the
+   *  raids poller combines them (see ObserverRaidPoller.merge). The API side of
    *  [[ObserverFeed]]. */
   def fetchPooledRaids(): Map[String, List[RaidAnnouncement]] =
     if (!enabled) Map.empty
@@ -200,7 +203,7 @@ final class ObserverService(
             Nil
         }
       }
-      all.groupBy(r => (r.raidId, r.category)).values.map(_.head).toList.groupBy(_.world)
+      all.distinct.groupBy(_.world)
     }
 
   /** Renew every linked credential, whichever bot it was linked through. The JWT

@@ -283,7 +283,16 @@ object BotApp extends App with StrictLogging {
     // Fire a raid's broadcast lines at their exact moment — the scheduler sleeps until
     // each is due, so there is no polling and the line lands to the second.
     schedule = (delay, task) => { actorSystem.scheduler.scheduleOnce(delay)(task())(ex); () },
-    servesGuild = guildId => discordGateway.guildById(guildId) != null)
+    servesGuild = guildId => discordGateway.guildById(guildId) != null,
+    // A secondary only reads the primary's published copy: it sweeps that more often,
+    // and looks a little later after each stage change, once the primary's own poll
+    // has had time to publish it.
+    sweepEvery = if (observerMode == observer.ObserverFeed.Consumer) java.time.Duration.ofMinutes(2)
+                 else java.time.Duration.ofMinutes(15),
+    wakeAfter =
+      if (observerMode == observer.ObserverFeed.Consumer)
+        List(java.time.Duration.ofSeconds(45), java.time.Duration.ofSeconds(150))
+      else List(java.time.Duration.ofSeconds(20), java.time.Duration.ofMinutes(2)))
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -1030,14 +1039,11 @@ object BotApp extends App with StrictLogging {
         logger.error("Could not listen for relayed Observer requests; secondaries cannot link or unlink", error)
       }(ex)
     }
-    // Detect new raids from the pooled feeds and post each one's imminent heads-up,
-    // then schedule its broadcast lines. Raids are announced well ahead of starting,
-    // so a 15-minute sweep catches them in good time; the lines self-schedule to the
-    // second off the catalogue, so there is no fast drip loop. A secondary's sweep
-    // only reads the primary's copy, so it looks more often to pick up each new
-    // copy promptly.
-    val raidSweep = if (consumer) 2.minutes else 15.minutes
-    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, raidSweep)(() => observerRaidPoller.poll())(ex)
+    // Post each stage of a raid as the feed reveals it, then its broadcast lines. The
+    // poller sweeps for new raids on its own cadence and polls again just after each
+    // stage change it can predict — see observer.ObserverRaidPoller; this gives it a
+    // pulse.
+    actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 1.minute)(() => observerRaidPoller.tick())(ex)
     // Amend the notifications message when a world's mini world changes move on
     // after it posted: the feed may roll over later than the boosted boss does. The
     // watcher decides for itself when a poll is due; this just gives it a pulse.

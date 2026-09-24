@@ -241,6 +241,20 @@ observer_tokens
     Discord mockup and signed off; compiles green; both embeds verified live against
     real ids; image rebuilt and the dev bot recreated on it.
 
+- **Stage posts: BUILT (replaces the single imminent heads-up above).** A live test
+  with an account of limited discoveries showed the feed does not say *which* raid
+  it is until the raid starts. Before then it gives only the area (revealed an hour
+  ahead), the subarea (half an hour ahead) and the start time, which the feed
+  carries at every stage. So each stage gets its own post, and nothing is edited.
+  The area stage posts the imminent raid and when its subarea reveals; the subarea
+  stage posts the subarea and when the raid starts; the start brings the raid type,
+  and so the broadcast lines. The raid's name, creatures and picture are added
+  whenever any linked account's feed already names it. Because every later stage
+  is at a known moment, the poller schedules a one-off poll just after each rather
+  than waiting for its 15-minute sweep. It also combines every entry the feed has
+  for a raid, one per stage and per account. Previously it kept one arbitrary
+  entry per stage. It also marked a raid's lines as scheduled before the raid type
+  was known, which left a raid revealed at its start with no lines until a restart.
 - **Fleet split: BUILT.** Every Observer request now leaves from one bot, the same
   shape as the fansite pipeline. The primary (or a lone bot) runs the sidecar
   (`observer` compose profile), fetches the pooled MWC and raid feeds for every
