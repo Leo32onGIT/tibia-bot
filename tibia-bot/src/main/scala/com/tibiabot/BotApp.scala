@@ -940,7 +940,7 @@ object BotApp extends App with StrictLogging {
   // Per-guild channel/role setup lifecycle (create/repair/remove, join/leave).
   // State mutation for join/leave stays in BotApp via the forgetGuild callback;
   // ChannelService reads/writes streamState directly for everything else.
-  val channelService = new setup.ChannelService(
+  val channelService: setup.ChannelService = new setup.ChannelService(
     streamSupervisor,
     schemaInitializer,
     worldConfigRepository,
@@ -954,6 +954,14 @@ object BotApp extends App with StrictLogging {
     startBot = (guild, world) => startBot(guild, world),
     serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
     syncPatreonBeforeCheck = () => syncPatreonMembersForSetup(),
+    // A world set up after a member linked their Observer token gets its raids
+    // channel here, when a token linked in this guild covers it — the same channel
+    // adding a token makes (see interactions.ObserverModals). Seeded, so it starts
+    // with the next raid rather than backfilling one in progress.
+    worldSetUp = (guild, world) => {
+      if (observerService.coversWorld(guild.getId, world) && channelService.ensureRaidsChannel(guild, world))
+        observerRaidPoller.seedPosted(guild.getId, world)
+    },
     forgetGuild = guildId => {
       if (worldsData.contains(guildId)) modifyWorldsData(_ - guildId)
       val updatedDiscordsData = discordsData.map { case (world, discordsList) =>

@@ -23,8 +23,8 @@ object ObserverEmbeds {
            |
            |Press **Add** and paste the token from your [Tibia account]($tokenPage)
            |(*Account Management → Tibia Observer → Connect*). You'll get mini world change
-           |alerts, and a raids channel for each world this server tracks — pooled from every
-           |linked member.""".stripMargin
+           |alerts, and a raids channel for each of your account's worlds this server tracks —
+           |pooled from every linked member.""".stripMargin
       case Some(t) =>
         s"""${statusLine(t)}
            |

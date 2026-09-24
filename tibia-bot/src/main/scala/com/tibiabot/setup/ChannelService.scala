@@ -47,6 +47,7 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
  *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Mini World Changes/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
  *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
+ *  @param worldSetUp          runs once a `/setup` has made a world's channels; BotApp gives the world its raids channel when a Tibia Observer token linked in the guild covers it
  */
 final class ChannelService(
   streamSupervisor: StreamSupervisor,
@@ -64,7 +65,8 @@ final class ChannelService(
   syncPatreonBeforeCheck: () => Unit,
   forgetGuild: String => Unit,
   forgetWorldSubscriptions: (String, String) => Unit,
-  sharedConfigGuilds: Set[String]
+  sharedConfigGuilds: Set[String],
+  worldSetUp: (Guild, String) => Unit = (_, _) => ()
 )(implicit ex: ExecutionContextExecutor) extends StrictLogging {
 
   private def createConfigDatabase(guild: Guild): Unit = schemaInitializer.initGuild(guild.getId, guild.getName)
@@ -847,6 +849,9 @@ final class ChannelService(
           guild.updateCommands().addCommands(com.tibiabot.commands.CommandSchemas.commandsFor(guild.getIdLong, hasWorldConfigured = true, excludeAll, Config.Respawn.enabled).asJava).queue()
         }
         startBot(Some(guild), Some(world))
+        // Never fail a /setup over this: the world's own channels are the point.
+        try worldSetUp(guild, world)
+        catch { case ex: Throwable => logger.warn(s"Post-setup step failed for '$world' in guild '${guild.getId}'", ex) }
 
         // The delegation role, so hunted/allies/respawn management can be handed
         // out without granting Manage Server. Idempotent — adopts an existing

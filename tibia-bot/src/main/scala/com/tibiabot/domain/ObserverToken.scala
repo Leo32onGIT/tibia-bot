@@ -17,7 +17,12 @@ final case class ObserverToken(
   status: ObserverStatus,
   createdAt: Instant,
   updatedAt: Instant
-)
+) {
+
+  /** The worlds the linked account has characters on — what its link covers. Kept
+   *  as the label it was linked with ("Antica, Secura"); empty until verified. */
+  def worlds: List[String] = world.toList.flatMap(_.split(",").map(_.trim).filter(_.nonEmpty))
+}
 
 /** Lifecycle of a stored link. Phase 1 (mode off) only ever produces `Pending`;
  *  live verification in a later phase moves it to `Linked` / `NeedsRelink`. */

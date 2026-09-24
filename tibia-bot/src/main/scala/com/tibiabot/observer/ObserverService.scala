@@ -152,6 +152,11 @@ final class ObserverService(
     all.filter(_.status == ObserverStatus.Linked)
   }
 
+  /** Whether any account linked in this guild has characters on `world` — what
+   *  earns the world a raids channel when it is set up after they linked. */
+  def coversWorld(guildId: String, world: String): Boolean =
+    enabled && linkedTokens().exists(t => t.guildId == guildId && t.worlds.exists(_.equalsIgnoreCase(world)))
+
   /** The worlds each member's linked account covers, by Discord user id — for the
    *  boosted DM's mini world changes, which are the pooled changes on those worlds.
    *  A token's worlds are stored as the label it was linked with ("Antica, Secura"). */
@@ -159,7 +164,7 @@ final class ObserverService(
     if (!enabled) Map.empty
     else linkedTokens()
       .groupBy(_.userId)
-      .view.mapValues(_.flatMap(_.world.toList.flatMap(_.split(",").map(_.trim).filter(_.nonEmpty))).distinct)
+      .view.mapValues(_.flatMap(_.worlds).distinct)
       .toMap
 
   /** The mini world changes pooled across every linked account, keyed by

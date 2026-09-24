@@ -41,7 +41,7 @@ object ObserverModals extends StrictLogging {
                     .setComponents(ObserverEmbeds.controls(Some(stored)))
                     .setEphemeral(true)
                     .queue(_ => (), _ => ())
-                  ensureRaidsChannels(guild)
+                  ensureRaidsChannels(guild, stored)
                 case LinkOutcome.InvalidToken =>
                   reply(event, s"${Config.noEmoji} That token was rejected — it's single-use, so generate a " +
                     "fresh one on tibia.com and paste it straight in.")
@@ -56,13 +56,18 @@ object ObserverModals extends StrictLogging {
         }
     }
 
-  /** Ensure a raids channel for every world the guild tracks, seeding each one's
-   *  dedup on first creation so it starts with raids going forward. */
-  private def ensureRaidsChannels(guild: net.dv8tion.jda.api.entities.Guild): Unit =
-    BotApp.worldsTrackedBy(guild.getId).foreach { world =>
+  /** Ensure a raids channel for every world the token just added covers and the
+   *  guild tracks — not every world the guild tracks: a world nobody linked here has
+   *  a character on would get a channel its raids never reach. Each one's dedup is
+   *  seeded on first creation, so it starts with raids going forward. */
+  private def ensureRaidsChannels(guild: net.dv8tion.jda.api.entities.Guild,
+                                  token: com.tibiabot.domain.ObserverToken): Unit = {
+    val covered = token.worlds.map(_.toLowerCase).toSet
+    BotApp.worldsTrackedBy(guild.getId).filter(w => covered.contains(w.toLowerCase)).foreach { world =>
       if (BotApp.channelService.ensureRaidsChannel(guild, world))
         BotApp.observerRaidPoller.seedPosted(guild.getId, world)
     }
+  }
 
   private def value(event: ModalInteractionEvent, field: String): String =
     Option(event.getValue(field)).map(_.getAsString.trim).getOrElse("")
