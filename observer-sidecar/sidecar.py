@@ -181,13 +181,56 @@ def _catalog_ids(credential):
     return [c["id"] for c in r.json()] if r.status_code == 200 else []
 
 
+RULE_NAME = "Violent Bot"
+
+# The limits /Status reported on 24 Sep 2026: 5 mini world change rules and 15 raid
+# rules per account. Used only when /Status can't be read.
+DEFAULT_LIMITS = {"maximumMiniWorldChangeNotificationRules": 5, "maximumRaidNotificationRules": 15}
+
+
+def _rule_limit(key):
+    """How many rules of one kind an account may hold, from the unauthenticated
+    /Status. A settings store with more is rejected whole, so every rule is lost."""
+    try:
+        r = _observer("GET", "/Status")
+        if r.status_code == 200:
+            value = (r.json().get("dynamicClientSettings") or {}).get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+    except Exception:  # noqa: BLE001 — fall back to the last known limit
+        pass
+    return DEFAULT_LIMITS[key]
+
+
+def _by_priority(worlds, priority):
+    """`worlds` ordered by their place in `priority` (case-insensitive), the rest
+    after it alphabetically."""
+    rank = {w.lower(): i for i, w in enumerate(priority)}
+    return sorted(worlds, key=lambda w: (rank.get(w.lower(), len(rank)), w.lower()))
+
+
+def _stored(r, applied, skipped, limit):
+    """The answer to a settings store: which worlds got a rule, which were left out
+    for want of room, and the upstream's own words when it refused."""
+    ok = r.status_code == 200
+    out = {"ok": ok, "status_code": r.status_code, "worlds": applied, "skipped": skipped, "limit": limit}
+    if not ok:
+        out["error"] = (r.text or "")[:300]
+    return jsonify(out)
+
+
 @app.post("/ensure-rules")
 def ensure_rules():
-    """Ensure an enabled MWC rule (all types) exists for each requested world.
+    """Ensure an enabled MWC rule (all types) exists for as many requested worlds
+    as the account has room for.
 
-    The bot 'owns' MWC rules named "Violent Bot": rules for other worlds and every
-    other notification category are preserved untouched. `notifications` is
-    in-app-only (no push), since the bot polls rather than receiving pushes.
+    The bot owns the MWC rules named "Violent Bot" and replaces all of them; every
+    other rule, and every other notification category, is kept untouched. The API
+    caps an account's MWC rules (`maximumMiniWorldChangeNotificationRules` in
+    /Status) and rejects a store over it outright, so `worlds` is taken in the
+    order given — the bot sends them most wanted first — up to the room the
+    account's own rules leave. `notifications` is in-app-only (no push), since the
+    bot polls rather than receiving pushes.
     """
     b = _json_body()
     credential = b.get("credential")
@@ -200,28 +243,36 @@ def ensure_rules():
         if settings is None:
             return jsonify({"ok": False, "error": "could not read settings"}), 502
         ids = _catalog_ids(credential)
+        limit = _rule_limit("maximumMiniWorldChangeNotificationRules")
         existing = settings.get("miniWorldChangeNotificationRules") or []
-        kept = [r for r in existing if r.get("world") not in worlds]  # leave other worlds alone
-        managed = [{"ruleName": "Violent Bot", "World": w, "miniWorldChanges": ids,
-                    "isEnabled": True, "notifications": "appNotifications"} for w in worlds]
+        kept = [r for r in existing if r.get("ruleName") != RULE_NAME]
+        room = max(0, limit - len(kept))
+        applied, skipped = worlds[:room], worlds[room:]
+        managed = [{"ruleName": RULE_NAME, "World": w, "miniWorldChanges": ids,
+                    "isEnabled": True, "notifications": "appNotifications"} for w in applied]
         settings["miniWorldChangeNotificationRules"] = kept + managed
         r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
-        return jsonify({"ok": r.status_code == 200, "status_code": r.status_code, "worlds": worlds})
+        return _stored(r, applied, skipped, limit)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 @app.post("/ensure-raid-rules")
 def ensure_raid_rules():
-    """Ensure enabled raid rules for every world the account has explored areas on.
+    """Ensure enabled raid rules for the worlds the account has explored areas on,
+    as many as it has room for.
 
     Raids are exploration-gated: a rule's RegionIds must be areas the account has
     unlocked, so the regions are derived from /Area/ExploredAreas rather than passed
     in. All three modes (area/subarea revealed, raid started) are on, so the /Raids
-    feed carries every stage; the bot filters by `category`.
+    feed carries every stage; the bot filters by `category`. Like MWC rules, raid
+    rules are capped (`maximumRaidNotificationRules`), so the explored worlds are
+    taken in the order of `worlds` — the bot's priority — then alphabetically, up to
+    the room the account's own rules leave.
     """
     b = _json_body()
     credential = b.get("credential")
+    priority = b.get("worlds") or []
     device = b.get("deviceIdentification") or "Violent Bot"
     if not credential:
         return jsonify({"ok": False, "error": "credential required"}), 400
@@ -231,18 +282,22 @@ def ensure_raid_rules():
             return jsonify({"ok": False, "error": "could not read settings"}), 502
         explored = _observer("GET", "/Area/ExploredAreas", bearer=credential)
         areas = explored.json() if explored.status_code == 200 else []
-        managed_worlds = {e["world"] for e in areas if e.get("exploredAreas")}
+        regions = {e["world"]: [a["areaId"] for a in e["exploredAreas"]]
+                   for e in areas if e.get("exploredAreas")}
+        limit = _rule_limit("maximumRaidNotificationRules")
         existing = settings.get("raidNotificationRules") or []
-        kept = [r for r in existing if r.get("world") not in managed_worlds]
+        kept = [r for r in existing if r.get("ruleName") != RULE_NAME]
+        room = max(0, limit - len(kept))
+        ordered = _by_priority(list(regions), priority)
+        applied, skipped = ordered[:room], ordered[room:]
         managed = [{
-            "ruleName": "Violent Bot", "World": e["world"],
-            "RegionIds": [a["areaId"] for a in e["exploredAreas"]],
+            "ruleName": RULE_NAME, "World": w, "RegionIds": regions[w],
             "isEnabled": True, "areaRevealed": "appNotifications",
             "subareaRevealed": "appNotifications", "raidStarted": "appNotifications",
-        } for e in areas if e.get("exploredAreas")]
+        } for w in applied]
         settings["raidNotificationRules"] = kept + managed
         r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
-        return jsonify({"ok": r.status_code == 200, "status_code": r.status_code, "worlds": sorted(managed_worlds)})
+        return _stored(r, applied, skipped, limit)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
 

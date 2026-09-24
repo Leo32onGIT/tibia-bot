@@ -1,6 +1,6 @@
 package com.tibiabot.observer
 
-import com.tibiabot.Config
+import com.tibiabot.{Config, tracking}
 import com.tibiabot.domain.{MiniWorldChange, RaidAnnouncement}
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
@@ -22,6 +22,13 @@ object LinkResult {
   final case class Failed(reason: String) extends LinkResult
 }
 
+/** What setting one kind of rule on an account came to. The API caps how many
+ *  rules an account holds, so `applied` can be fewer worlds than were asked for;
+ *  `skipped` are the ones left without a rule, and `limit` the cap. `detail` says
+ *  why it failed, when it did. */
+final case class RulesResult(ok: Boolean, applied: List[String], skipped: List[String],
+                             limit: Option[Int], detail: String)
+
 /** Talks to the local Observer sidecar (see `observer-sidecar/`), which owns the
  *  browser-TLS Cloudflare pass and the CipSoft request shapes. Everything here is a
  *  plain localhost HTTP call; the bot keeps all durable state itself. */
@@ -29,11 +36,15 @@ final class ObserverApiClient(
   sidecarUrl: String = Config.Observer.sidecarUrl,
   sharedToken: String = Config.Observer.sidecarToken,
   deviceIdentification: String = Config.Observer.deviceIdentification,
-  clientVersion: String = Config.Observer.clientVersion
+  clientVersion: String = Config.Observer.clientVersion,
+  metrics: tracking.ApiCallMetrics = tracking.ApiMetrics.observer
 ) extends StrictLogging {
 
   private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
+  /** Every Observer request goes through here, so this is where it is counted for
+   *  the dashboard: by sidecar endpoint, and by the status the Observer API itself
+   *  answered with where the sidecar passes it on (the sidecar's own otherwise). */
   private def post(path: String, body: JsObject): Either[String, JsObject] = {
     val builder = HttpRequest.newBuilder(URI.create(s"$sidecarUrl$path"))
       .timeout(Duration.ofSeconds(25))
@@ -42,12 +53,25 @@ final class ObserverApiClient(
     val request = builder.POST(HttpRequest.BodyPublishers.ofString(body.compactPrint)).build()
     try {
       val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-      Right(response.body.parseJson.asJsObject)
+      val parsed = response.body.parseJson.asJsObject
+      val status = parsed.fields.get("status_code").collect { case JsNumber(n) => n.toInt }.getOrElse(response.statusCode)
+      metrics.record("endpoint" -> path, "status" -> status.toString)
+      Right(parsed)
     } catch {
       case ex: Throwable =>
+        metrics.record("endpoint" -> path, "status" -> "failed")
         logger.warn(s"Observer sidecar call to $path failed", ex)
         Left(Option(ex.getMessage).getOrElse(ex.getClass.getSimpleName))
     }
+  }
+
+  private def rulesResult(answer: Either[String, JsObject]): RulesResult = answer match {
+    case Left(err) => RulesResult(ok = false, Nil, Nil, None, err)
+    case Right(o) =>
+      val code = o.fields.get("status_code").collect { case JsNumber(n) => s"status ${n.toInt}" }
+      RulesResult(bool(o, "ok"), strings(o, "worlds"), strings(o, "skipped"),
+        o.fields.get("limit").collect { case JsNumber(n) => n.toInt },
+        (code.toList ++ str(o, "error")).mkString(": "))
   }
 
   private def str(o: JsObject, key: String): Option[String] =
@@ -82,16 +106,15 @@ final class ObserverApiClient(
         else LinkResult.Failed(if (status.nonEmpty) status else "unknown sidecar response")
     }
 
-  /** Ensure enabled MWC rules exist for these worlds on the linked account. */
-  def ensureRules(credential: String, worlds: List[String]): Boolean =
-    worlds.nonEmpty && (post("/ensure-rules", JsObject(
+  /** Ensure enabled MWC rules exist on the linked account for these worlds, most
+   *  wanted first: the account has room for only a few (see [[RulesResult]]). */
+  def ensureRules(credential: String, worlds: List[String]): RulesResult =
+    if (worlds.isEmpty) RulesResult(ok = true, Nil, Nil, None, "")
+    else rulesResult(post("/ensure-rules", JsObject(
       "credential" -> JsString(credential),
       "deviceIdentification" -> JsString(deviceIdentification),
       "worlds" -> JsArray(worlds.map(JsString(_)).toVector)
-    )) match {
-      case Right(o) => bool(o, "ok")
-      case Left(_)  => false
-    })
+    )))
 
   /** Remove the bot's MWC rules from the account (on unlink). */
   def clearRules(credential: String): Boolean =
@@ -114,13 +137,25 @@ final class ObserverApiClient(
       case Right(o) =>
         o.fields.get("miniWorldChanges").collect { case JsArray(items) =>
           items.collect { case item: JsObject =>
-            MiniWorldChange(
-              str(item, "world").getOrElse(""),
+            // `world` is what the feed was seen to send; the raids feed calls the
+            // same thing `worldName`, so either is taken.
+            val change = MiniWorldChange(
+              str(item, "world").orElse(str(item, "worldName")).getOrElse(""),
               str(item, "title").getOrElse(""),
               str(item, "body").getOrElse(""))
+            if ((change.world.isEmpty || change.title.isEmpty) && !reportedShape) {
+              reportedShape = true
+              logger.warn("A mini world change arrived without a world or title, so it is dropped; " +
+                s"its fields were: ${item.fields.keys.toList.sorted.mkString(", ")}")
+            }
+            change
           }.toList
         }
     }
+
+  /** Whether a change the pool cannot use has been reported, so a feed whose shape
+   *  moved says so once rather than on every poll. */
+  @volatile private var reportedShape = false
 
   private def intOf(o: JsObject, key: String): Int =
     o.fields.get(key).collect { case JsNumber(n) => n.toInt }.getOrElse(0)
@@ -138,16 +173,15 @@ final class ObserverApiClient(
       case _                         => None
     }
 
-  /** Ensure enabled raid rules for every world the account has explored (regions
-   *  derived from ExploredAreas by the sidecar). */
-  def ensureRaidRules(credential: String): Boolean =
-    post("/ensure-raid-rules", JsObject(
+  /** Ensure enabled raid rules for the worlds the account has explored (regions
+   *  derived from ExploredAreas by the sidecar), taken in the order of `priority`
+   *  while the account has room. */
+  def ensureRaidRules(credential: String, priority: List[String]): RulesResult =
+    rulesResult(post("/ensure-raid-rules", JsObject(
       "credential" -> JsString(credential),
-      "deviceIdentification" -> JsString(deviceIdentification)
-    )) match {
-      case Right(o) => bool(o, "ok")
-      case Left(_)  => false
-    }
+      "deviceIdentification" -> JsString(deviceIdentification),
+      "worlds" -> JsArray(priority.map(JsString(_)).toVector)
+    )))
 
   /** The currently-announced/active raids for this credential's enabled rules. */
   def raids(credential: String): List[RaidAnnouncement] =

@@ -264,6 +264,26 @@ observer_tokens
   so a raid named earlier gets nothing new at the start. A raids channel created
   before a raid is identified is left that post, so the raid's lines never arrive
   alone.
+- **Rule caps: BUILT (24 Sep 2026).** The server-save message never showed mini
+  world changes because the pool was empty, and the pool was empty because the
+  linked account had **no MWC rules**. `/Status` caps an account at **5 MWC rules**
+  and **15 raid rules** (`maximumMiniWorldChangeNotificationRules`,
+  `maximumRaidNotificationRules`). Linking asked for one MWC rule per character
+  world, 11 for the account in question, and a settings store over the cap is
+  refused whole. The bot ignored the sidecar's `ok: false`, so nothing was logged.
+  Now the sidecar reads the caps from `/Status`, keeps every rule not named
+  "Violent Bot", and sets ours for as many worlds as the account has room for. The
+  bot sends the worlds most wanted first: the linking guild's `last_world`, then its
+  other tracked worlds, then any world some guild tracks, then the rest. Both
+  results are logged, including which worlds had no room. The primary re-applies
+  every link's rules two minutes after boot and daily after that, so existing links
+  are mended and the rules follow the worlds guilds track. The MWC parser also
+  takes `worldName` (the raids feed's name for it) and logs, once, the fields of a
+  change it has to drop.
+- **Observer on the dashboard.** Every sidecar call is counted in
+  `ApiMetrics.observer`, by sidecar endpoint and by the Observer API's own status,
+  and shows as its own row in the dashboard's API throughput panel. Only the
+  primary calls it, so a secondary's row reads zero.
 - **Stage post wording.** An unnamed raid's posts are titled "Imminent Raid" and
   "Subarea Revealed", and a named one's carry its name. Every stage post puts its
   location under the title as a grey `-#` line: the area at the area stage, and the

@@ -261,7 +261,15 @@ object BotApp extends App with StrictLogging {
     observer.TokenCrypto.fromSecret(Config.Observer.encryptionSecret),
     new observer.ObserverApiClient(),
     Config.Observer.enabled,
-    relay = Option.when(observerMode == observer.ObserverFeed.Consumer)(observerRelay))
+    relay = Option.when(observerMode == observer.ObserverFeed.Consumer)(observerRelay),
+    // An account gets only a few rules, so the linking guild's notifications world
+    // comes first, then the rest of what it tracks, then whatever any guild tracks
+    // (the pooled feeds serve every guild). Read from the shared databases, since a
+    // relayed link reaches the primary from a guild it does not run.
+    worldPriority = guildId =>
+      discordConfigRepository.getConfig(guildId).get("last_world").toList ++
+        worldConfigRepository.listWorlds(guildId).map(_.name) ++
+        worldConfigRepository.allTrackedWorldNames().sorted)
 
   val observerFeed = new observer.ObserverFeed(
     observerMode,
@@ -1040,6 +1048,10 @@ object BotApp extends App with StrictLogging {
       // new one from it, so a daily sweep means a link never lapses while it is in
       // use. Only where the API is called — the sweep covers every bot's links.
       actorSystem.scheduler.scheduleWithFixedDelay(1.hour, 24.hours)(() => observerService.renewAll())(ex)
+      // Set every linked account's rules again: soon after boot, so a link that got
+      // none is mended by the next deploy, and daily after that, so the rules follow
+      // the worlds guilds track as those change.
+      actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 24.hours)(() => observerService.reapplyRules())(ex)
     }
     if (observerMode == observer.ObserverFeed.Publisher) {
       // Link and unlink for members of the secondaries' servers.

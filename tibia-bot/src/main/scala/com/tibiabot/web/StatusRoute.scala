@@ -189,7 +189,10 @@ final class StatusRoute(
       // answer is which of the two is struggling, and one merged total cannot
       // say. Always published, so a row that reads zero is itself the answer
       // when the fansite source is off or failing.
-      "fansiteapi" -> apiThroughputJson(tracking.ApiMetrics.fansiteApi)
+      "fansiteapi" -> apiThroughputJson(tracking.ApiMetrics.fansiteApi),
+      // Always published too: only the primary calls the Observer API, so on a
+      // secondary this reads zero by design.
+      "observer" -> apiThroughputJson(tracking.ApiMetrics.observer)
     ),
     // The second source's own health, none of which appears above: that subtree
     // counts requests that actually left, and everything interesting about a

@@ -78,4 +78,18 @@ object ApiMetrics {
    *
    *  Dimension: `reason`. */
   val fansiteRefused = new ApiCallMetrics()
+
+  /** Every request to CipSoft's Tibia Observer API, counted where the bot calls
+   *  the sidecar that carries them ([[com.tibiabot.observer.ObserverApiClient]]).
+   *  Only the primary (or a lone bot) makes any: a secondary reads the feeds the
+   *  primary publishes, so its row reading zero is the design, not a fault.
+   *
+   *  One sidecar call can be a few Observer calls — setting rules reads the
+   *  account's settings first — so this counts what the bot asked for rather than
+   *  every request that reached observer.tibia.com.
+   *
+   *  Dimensions: `endpoint` (the sidecar path) and `status` (the Observer API's
+   *  own status where the sidecar passes it on, `failed` when the sidecar could
+   *  not be reached). */
+  val observer = new ApiCallMetrics()
 }
