@@ -147,8 +147,9 @@ object ObserverEmbeds {
     stageEmbed(title, raidType, lines)
   }
 
-  /** The post at the subarea stage — half an hour before the raid starts — or,
-   *  for a raid first seen once it has started, the only one before its lines.
+  /** The post at the subarea stage — half an hour before the raid starts. It goes
+   *  out again at the start, now naming the raid, when no earlier post could; and
+   *  for a raid first seen once it has started, it is the only one before its lines.
    *
    *  The subarea and its area, and when the raid starts (or started). Like the
    *  area post, it names the raid when the feed already does. */

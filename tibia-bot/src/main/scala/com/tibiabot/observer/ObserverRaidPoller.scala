@@ -29,7 +29,8 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *
  *   - area revealed: the imminent-raid post — the area, and when the subarea reveals;
  *   - subarea revealed: the subarea, and when the raid starts;
- *   - raid started: the broadcast lines, each timed from the start off the catalogue.
+ *   - raid started: the raid by name, when no earlier post could name it, then the
+ *     broadcast lines, each timed from the start off the catalogue.
  *
  *  A raid first seen past its area stage gets only its latest stage's post, and one
  *  first seen already started gets the subarea post (saying when it started) ahead
@@ -49,7 +50,8 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *  start and the raid are known. A line whose moment has passed fires at once.
  *
  *  Dedup is durable, in the database, keyed on `(guild, raidId, key)` where `key`
- *  is `"imminent"`, `"subarea"` or `"line:i"`; the in-memory registry is only
+ *  is `"imminent"`, `"subarea"`, `"named"` (set by whichever post first names the
+ *  raid) or `"line:i"`; the in-memory registry is only
  *  bookkeeping, so a restart re-hydrates from the next poll without re-posting — and
  *  without posting raids that finished while it was down.
  *
@@ -135,20 +137,35 @@ final class ObserverRaidPoller(
   }
 
   /** The post for the stage a raid has reached, once per guild. Past the area stage
-   *  the area post is marked done too, so an hour-old "imminent" never follows. */
+   *  the area post is marked done too, so an hour-old "imminent" never follows.
+   *
+   *  A post that names the raid marks it `named`. A raid only identified at its start
+   *  (an account with limited discoveries) was named by none of its stage posts, so
+   *  the start brings one more: the subarea post again, now with the raid's name,
+   *  creatures and picture, saying it has started. That start is noticed by the poll
+   *  just after it, and the same poll schedules the lines, so this post is queued
+   *  ahead of the first. A raid named in an earlier post gets nothing new here. */
   private def announce(guildId: String, channelId: String, raid: RaidAnnouncement,
-                       raidType: Option[RaidType], at: Instant): Unit =
+                       raidType: Option[RaidType], at: Instant): Unit = {
+    def markNamed(): Unit =
+      if (raidType.isDefined) raidRepository.markPostedIfNew(guildId, raid.raidId, "named")
     stage(raid.category) match {
       case AreaStage =>
-        if (raidRepository.markPostedIfNew(guildId, raid.raidId, "imminent"))
+        if (raidRepository.markPostedIfNew(guildId, raid.raidId, "imminent")) {
+          markNamed()
           post(guildId, channelId, areaPost(raid, raidType))
+        }
       case s if s >= SubareaStage =>
         if (raidRepository.markPostedIfNew(guildId, raid.raidId, "subarea")) {
           raidRepository.markPostedIfNew(guildId, raid.raidId, "imminent")
+          markNamed()
           post(guildId, channelId, subareaPost(raid, raidType, at))
-        }
+        } else if (s >= StartedStage && raidType.isDefined &&
+                   raidRepository.markPostedIfNew(guildId, raid.raidId, "named"))
+          post(guildId, channelId, subareaPost(raid, raidType, at))
       case _ => ()
     }
+  }
 
   /** Poll again just after the raid's next stage: its subarea reveal, or its start
    *  while the raid (and so its lines) is not yet known. Scheduled once per stage;
@@ -194,13 +211,18 @@ final class ObserverRaidPoller(
   /** Mark the currently-active raids on `world` as already posted for this guild —
    *  every stage post and every broadcast line — used when a guild's raids channel
    *  for that world is first created, so it starts with the next new raid rather
-   *  than backfilling raids already in progress. */
+   *  than backfilling raids already in progress.
+   *
+   *  A raid not yet identified can't have its lines marked, so they will still post
+   *  at its start. Its named post is left unmarked too, so it arrives with them rather
+   *  than the lines arriving alone. */
   def seedPosted(guildId: String, world: String): Unit =
     try pooledRaids().getOrElse(world, Nil)
       .groupBy(_.raidId).values.map(merge(_, known)).foreach { raid =>
-        List("imminent", "subarea").foreach(key => raidRepository.markPostedIfNew(guildId, raid.raidId, key))
-        val broadcasts = RaidTypeCatalog.get(raid.raidTypeId).map(_.broadcasts).getOrElse(Vector.empty)
-        broadcasts.indices.foreach(i => raidRepository.markPostedIfNew(guildId, raid.raidId, s"line:$i"))
+        val raidType = RaidTypeCatalog.get(raid.raidTypeId)
+        val keys = List("imminent", "subarea") ++ raidType.map(_ => "named") ++
+          raidType.toList.flatMap(_.broadcasts.indices.map(i => s"line:$i"))
+        keys.foreach(key => raidRepository.markPostedIfNew(guildId, raid.raidId, key))
       }
     catch {
       case ex: Throwable => logger.warn(s"Observer raid seed failed for guild '$guildId', world '$world'", ex)

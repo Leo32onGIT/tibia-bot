@@ -255,6 +255,15 @@ observer_tokens
   for a raid, one per stage and per account. Previously it kept one arbitrary
   entry per stage. It also marked a raid's lines as scheduled before the raid type
   was known, which left a raid revealed at its start with no lines until a restart.
+- **Named at the start: BUILT.** A raid only identified at its start was never
+  named in the channel: its area and subarea posts went out before the feed knew
+  it, and the lines carry only the in-game text. The start now posts the subarea
+  embed again, with the raid's name, creatures and picture, saying it has started.
+  It goes out ahead of the first line, because the poll that notices the start also
+  schedules the lines. Whichever post first names a raid sets a `named` dedup key,
+  so a raid named earlier gets nothing new at the start. A raids channel created
+  before a raid is identified is left that post, so the raid's lines never arrive
+  alone.
 - **Fleet split: BUILT.** Every Observer request now leaves from one bot, the same
   shape as the fansite pipeline. The primary (or a lone bot) runs the sidecar
   (`observer` compose profile), fetches the pooled MWC and raid feeds for every

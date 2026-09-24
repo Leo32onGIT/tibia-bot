@@ -114,6 +114,56 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.scheduled.map(_._1.toMillis).toList shouldBe List(0L, 220000L - 60000L)
   }
 
+  test("a raid only identified at its start gets a post naming it, ahead of its first line") {
+    val h = new Harness
+    h.pollAt(0, entry("areaRevealed"))
+    h.pollAt(30, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
+    h.scheduled.clear()
+    h.pollAt(60, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")),
+      entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    h.scheduled.foreach(_._2())
+    // A later poll does not name it again.
+    h.pollAt(62, entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    val said = h.posts.map(_._2).toList
+    said.take(3) shouldBe List("area:?", "subarea:?", "subarea:Winter Wolves near Krimhorn")
+    said.drop(3) should have size 2
+    all(said.drop(3)) should startWith("line:")
+    h.markedFor("g2") shouldBe empty
+  }
+
+  test("a raid named from the area stage gets nothing new at its start") {
+    val h = new Harness
+    val named = entry("areaRevealed", typeId = WinterWolves)
+    h.pollAt(0, entry("areaRevealed"), named)
+    h.pollAt(30, entry("areaRevealed"), named, entry("subareaRevealed", Some("Krimhorn")))
+    h.pollAt(60, entry("areaRevealed"), named, entry("subareaRevealed", Some("Krimhorn")),
+      entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    h.posts.map(_._2).toList shouldBe
+      List("area:Winter Wolves near Krimhorn", "subarea:Winter Wolves near Krimhorn")
+  }
+
+  test("a raids channel created before a raid is identified gets its named post along with its lines") {
+    val h = new Harness
+    h.feed = List(entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
+    h.poller.seedPosted("g1", "Antica")
+    h.pollAt(60, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")),
+      entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    h.scheduled.foreach(_._2())
+    val said = h.posts.map(_._2).toList
+    said.headOption shouldBe Some("subarea:Winter Wolves near Krimhorn")
+    said.drop(1) should have size 2
+    all(said.drop(1)) should startWith("line:")
+  }
+
+  test("a raids channel created once a raid is identified posts nothing more of it") {
+    val h = new Harness
+    h.feed = List(entry("subareaRevealed", Some("Krimhorn"), WinterWolves))
+    h.poller.seedPosted("g1", "Antica")
+    h.pollAt(60, entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    h.scheduled.foreach(_._2())
+    h.posts shouldBe empty
+  }
+
   test("a raid still running when the bot starts catches up everything it missed, however late") {
     val h = new Harness
     // Both lines are past, but the raid is not over: nothing is left out.
