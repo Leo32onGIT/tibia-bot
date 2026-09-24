@@ -102,6 +102,19 @@ object ObserverEmbeds {
         .build())
     }
 
+  /** Whether an embed is the notifications message's mini world changes, told
+   *  apart by its own thumbnail: it has moved within the message, so its place
+   *  says nothing. */
+  def isServerSaveMwcEmbed(embed: MessageEmbed): Boolean =
+    Option(embed.getThumbnail).exists(_.getUrl == MwcThumbnail)
+
+  /** The boosted boss and creature of a posted notifications message: its first
+   *  two embeds once any mini world changes are set aside. The changes sit first
+   *  since 24 Sep 2026 and after the Dream Courts before that, so a message posted
+   *  either way reads right. */
+  def boostedEmbedsOf(embeds: List[MessageEmbed]): List[MessageEmbed] =
+    embeds.filterNot(isServerSaveMwcEmbed).take(2)
+
   /** Guilded-neutral-death grey (`4540237`) — the raids channel reuses it for the
    *  drip lines so a broadcast reads as neutral, ambient news. */
   private val DripGrey = 4540237

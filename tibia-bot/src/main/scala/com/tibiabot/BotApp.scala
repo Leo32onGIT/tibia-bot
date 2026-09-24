@@ -960,7 +960,7 @@ object BotApp extends App with StrictLogging {
     respawnService,
     botUser,
     startBot = (guild, world) => startBot(guild, world),
-    serverSaveExtraEmbeds = world => serverSaveExtraEmbeds(world),
+    serverSaveEmbeds = (boosted, world) => serverSaveEmbeds(boosted, world),
     syncPatreonBeforeCheck = () => syncPatreonMembersForSetup(),
     // A world set up after a member linked their Observer token gets its raids
     // channel here, when a token linked in this guild covers it — the same channel
@@ -2166,9 +2166,9 @@ object BotApp extends App with StrictLogging {
 
   /** Replace every guild's boosted message: delete the one currently posted in
    *  its boosted channel and send a fresh one carrying `boostedEmbeds` (the
-   *  boosted boss and creature) plus Rashid, that guild's own Dream Courts
-   *  boss and mini world changes, and the Drome cycle when it's due (see
-   *  serverSaveExtraEmbeds). Returns how many guilds a send
+   *  boosted boss and creature), with that guild's mini world changes above them
+   *  and Rashid, its own Dream Courts boss and the Drome cycle when it's due
+   *  below (see serverSaveEmbeds). Returns how many guilds a send
    *  was dispatched for — the send itself is queued, so a guild counted here
    *  can still fail asynchronously (logged per guild).
    *
@@ -2195,7 +2195,7 @@ object BotApp extends App with StrictLogging {
               }
 
               posted += 1
-              boostedChannel.sendMessageEmbeds((boostedEmbeds ++ serverSaveExtraEmbeds(lastWorld)).asJava)
+              boostedChannel.sendMessageEmbeds(serverSaveEmbeds(boostedEmbeds, lastWorld).asJava)
                 .setComponents(ActionRow.of(
                   Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
                 ))
@@ -2218,7 +2218,7 @@ object BotApp extends App with StrictLogging {
   /** Amend the Mini World Changes embed in today's notifications message for every
    *  guild on one of `worlds`, whose changes moved on after the message posted (see
    *  observer.MiniWorldChangeWatcher). Edited in place — keeping the message's boosted
-   *  boss and creature embeds and rebuilding everything after them — so nobody is
+   *  boss and creature embeds and rebuilding everything around them — so nobody is
    *  pinged again. A message from before the latest server save is left alone: the
    *  day's repost is about to replace it, and picks up the new changes itself. */
   private def amendMwcInBoostedMessages(worlds: Set[String]): Unit = {
@@ -2233,11 +2233,12 @@ object BotApp extends App with StrictLogging {
             net.dv8tion.jda.api.utils.TimeUtil.getTimeCreated(id).toInstant.isAfter(lastSave))
           val boostedChannel = guild.getTextChannelById(discordInfo("boosted_channel"))
           if (postedToday && boostedChannel != null && boostedChannel.canTalk()) {
-            val extras = serverSaveExtraEmbeds(world)
+            // Built here, off JDA's callback thread: the changes may need a fetch.
+            val layout = serverSaveLayout(world)
             boostedChannel.retrieveMessageById(messageId).queue(
               (message: Message) => {
-                val boosted = message.getEmbeds.asScala.take(2).toList
-                boostedChannel.editMessageEmbedsById(messageId, (boosted ++ extras).asJava).queue(
+                val boosted = presentation.ObserverEmbeds.boostedEmbedsOf(message.getEmbeds.asScala.toList)
+                boostedChannel.editMessageEmbedsById(messageId, layout(boosted).asJava).queue(
                   (_: Message) => (),
                   (e: Throwable) => logger.warn(s"Failed to amend the mini world changes for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
               },
@@ -2661,11 +2662,16 @@ object BotApp extends App with StrictLogging {
   }
 
 
-  /** The Rashid / Dream Courts / Mini World Changes / (Drome, when active)
-   *  server-save embeds for a world, appended after the boosted embeds in the
-   *  notifications message. Reads the live dreamScar map and dromeTime; the mini
-   *  world changes are left out when nothing is active on the world. */
-  private def serverSaveExtraEmbeds(world: String): List[MessageEmbed] = {
+  /** The notifications message for a world, around its boosted boss and creature:
+   *  the mini world changes first, when any are active, then the boosted boss and
+   *  creature, Rashid, Dream Courts, and the Drome cycle when it's due. */
+  private def serverSaveEmbeds(boosted: List[MessageEmbed], world: String): List[MessageEmbed] =
+    serverSaveLayout(world)(boosted)
+
+  /** [[serverSaveEmbeds]] with everything but the boosted embeds built now — the
+   *  mini world changes may need a fetch — for a caller that only has those once a
+   *  message has been retrieved. Reads the live dreamScar map and dromeTime. */
+  private def serverSaveLayout(world: String): List[MessageEmbed] => List[MessageEmbed] = {
     val dreamScarDaily =
       dreamScar
         .get(world)
@@ -2689,7 +2695,8 @@ object BotApp extends App with StrictLogging {
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
       .setColor(BrandColor)
       .build()
-    List(rashidEmbed, dreamScarEmbed) ++ mwcEmbed ++ (if (dromeShow) List(dromeEmbed) else Nil)
+    val below = List(rashidEmbed, dreamScarEmbed) ++ (if (dromeShow) List(dromeEmbed) else Nil)
+    boosted => mwcEmbed.toList ++ boosted ++ below
   }
 
   def charUrl(char: String): String = presentation.Urls.charUrl(char)

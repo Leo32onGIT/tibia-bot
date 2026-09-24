@@ -45,7 +45,7 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param forgetWorldSubscriptions drops the mass-log/bounty DM subscriptions for a removed world; a callback rather than the service itself, since this is the only thing here that needs it
  *  @param sharedConfigGuilds  guilds whose database is shared with another bot, so it must NOT be dropped on leave
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
- *  @param serverSaveExtraEmbeds the Rashid/Dream Courts/Mini World Changes/Drome embeds appended after the boosted embeds; stays in BotApp (Dream Scar/Drome state), passed as a callback
+ *  @param serverSaveEmbeds    the whole notifications message around the boosted boss and creature for a world (Mini World Changes above them; Rashid, Dream Courts and Drome below); stays in BotApp (Dream Scar/Drome state), passed as a callback
  *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
  *  @param worldSetUp          runs once a `/setup` has made a world's channels; BotApp gives the world its raids channel when a Tibia Observer token linked in the guild covers it
  */
@@ -61,7 +61,7 @@ final class ChannelService(
   respawnService: com.tibiabot.respawn.RespawnService,
   botUser: String,
   startBot: (Option[Guild], Option[String]) => Unit,
-  serverSaveExtraEmbeds: String => List[MessageEmbed],
+  serverSaveEmbeds: (List[MessageEmbed], String) => List[MessageEmbed],
   syncPatreonBeforeCheck: () => Unit,
   forgetGuild: String => Unit,
   forgetWorldSubscriptions: (String, String) => Unit,
@@ -334,15 +334,15 @@ final class ChannelService(
     channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().queue()
 
   /** Bring an existing notifications message up to date, for /repair: keep its
-   *  boosted boss and creature, and rebuild everything after them — Rashid, Dream
-   *  Courts, mini world changes, Drome — for the world being repaired, which
-   *  becomes the message's world, as it would on a fresh post. Whatever has come on
-   *  since the message posted shows up here: a linked Observer account now covering
-   *  the world is what adds its mini world changes. Edited in place, so nobody is
-   *  notified again. */
+   *  boosted boss and creature, and rebuild everything around them — mini world
+   *  changes above, Rashid, Dream Courts and Drome below — for the world being
+   *  repaired, which becomes the message's world, as it would on a fresh post.
+   *  Whatever has come on since the message posted shows up here: a linked Observer
+   *  account now covering the world is what adds its mini world changes. Edited in
+   *  place, so nobody is notified again. */
   private def refreshServerSaveEmbeds(message: Message, guild: Guild, world: String): Unit = {
-    val boosted = message.getEmbeds.asScala.take(2).toList
-    message.editMessageEmbeds((boosted ++ serverSaveExtraEmbeds(world)).asJava).queue(
+    val boosted = com.tibiabot.presentation.ObserverEmbeds.boostedEmbedsOf(message.getEmbeds.asScala.toList)
+    message.editMessageEmbeds(serverSaveEmbeds(boosted, world).asJava).queue(
       (_: Message) => discordUpdateConfig(guild, "", "", "", "", world),
       (e: Throwable) => logger.warn(
         s"Failed to refresh the boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
@@ -390,7 +390,7 @@ final class ChannelService(
     } yield List(bossEmbed, creatureEmbed)
 
     combinedFutures.map { embeds =>
-      val allEmbeds = embeds ++ serverSaveExtraEmbeds(world)
+      val allEmbeds = serverSaveEmbeds(embeds, world)
       channel
         .sendMessageEmbeds(allEmbeds.asJava)
         .setComponents(ActionRow.of(Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))))

@@ -49,6 +49,19 @@ class ObserverMwcEmbedSpec extends AnyFunSuite with Matchers {
       "### <:raid:1> **[Nomads](https://tibia.fandom.com/wiki/Nomads_Mini_World_Change)**")
   }
 
+  private def plain(text: String) = new net.dv8tion.jda.api.EmbedBuilder().setDescription(text).build()
+
+  test("a posted message's boosted boss and creature are found wherever its changes sit") {
+    val mwc = ObserverEmbeds.serverSaveMwcEmbed("Antica", List(change("Warpath")), emoji).get
+    val (boss, creature, rashid, dream) = (plain("boss"), plain("creature"), plain("rashid"), plain("dream"))
+    ObserverEmbeds.isServerSaveMwcEmbed(mwc) shouldBe true
+    ObserverEmbeds.isServerSaveMwcEmbed(rashid) shouldBe false
+    // Changes first (since 24 Sep 2026), after the Dream Courts (before), or none at all.
+    ObserverEmbeds.boostedEmbedsOf(List(mwc, boss, creature, rashid, dream)) shouldBe List(boss, creature)
+    ObserverEmbeds.boostedEmbedsOf(List(boss, creature, rashid, dream, mwc)) shouldBe List(boss, creature)
+    ObserverEmbeds.boostedEmbedsOf(List(boss, creature, rashid, dream)) shouldBe List(boss, creature)
+  }
+
   test("drops whole changes rather than cutting one off when the description runs long") {
     val many = (1 to 40).toList.map(i => change(s"Change $i", "x" * 150))
     val d = ObserverEmbeds.serverSaveMwcEmbed("Antica", many, emoji).get.getDescription
