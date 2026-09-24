@@ -280,6 +280,18 @@ observer_tokens
   are mended and the rules follow the worlds guilds track. The MWC parser also
   takes `worldName` (the raids feed's name for it) and logs, once, the fields of a
   change it has to drop.
+- **Raid rules cover every region (24 Sep 2026).** A Drefia raid on Victoris never
+  reached the raids channel because the account had explored only Carlin (id 3)
+  and Hrodmir (id 23), and its raid rule held just those regions. The
+  "exploration-gated" note in Phase 4 turned out to be how the sidecar was built,
+  not an API rule: `StoreUserSettings` stored region ids 1–60 for that account
+  without complaint. It checks neither exploration nor whether an id exists, and
+  there is no endpoint that lists every region. The intent is to catch every raid,
+  so the sidecar now gives each rule every region (`ALL_REGION_IDS`, 1–60, plus
+  any explored id outside that range). Raid rules now go to the account's
+  character worlds, most wanted first (the same order as MWC rules), and then to
+  any other world it has explored, up to the 15-rule cap. Not yet seen: a raid
+  from an unexplored region actually arriving in the feed.
 - **Observer on the dashboard.** Every sidecar call is counted in
   `ApiMetrics.observer`, by sidecar endpoint and by the Observer API's own status,
   and shows as its own row in the dashboard's API throughput panel. Only the

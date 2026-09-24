@@ -233,9 +233,10 @@ final class ObserverService(
   }
 
   /** Set the rules that make an account's feeds populate: MWC rules for its
-   *  character-worlds, and raid rules for the worlds it has explored areas on. Best
-   *  effort, and logged either way — nothing else would show that a link is
-   *  quietly getting no changes.
+   *  character-worlds, and raid rules covering every region of them — every raid,
+   *  not only those in areas it has explored, which the API allows (confirmed 24 Sep
+   *  2026). Best effort, and logged either way — nothing else would show that a
+   *  link is quietly getting nothing.
    *
    *  The API caps how many rules an account holds (5 MWC and 15 raid rules as of
    *  24 Sep 2026) and refuses a store over the cap outright, which is how an
@@ -262,8 +263,9 @@ final class ObserverService(
       } catch {
         case ex: Throwable => logger.warn(s"Observer $kind rules failed for '$userId' in guild '$guildId'", ex)
       }
-    if (worlds.nonEmpty) report("MWC", apiClient.ensureRules(credential, ObserverService.prioritise(worlds, priority)))
-    report("raid", apiClient.ensureRaidRules(credential, priority))
+    val ordered = ObserverService.prioritise(worlds, priority)
+    if (ordered.nonEmpty) report("MWC", apiClient.ensureRules(credential, ordered))
+    report("raid", apiClient.ensureRaidRules(credential, ordered))
   }
 
   /** Set every linked account's rules again, against what the guilds track now.

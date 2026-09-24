@@ -202,13 +202,6 @@ def _rule_limit(key):
     return DEFAULT_LIMITS[key]
 
 
-def _by_priority(worlds, priority):
-    """`worlds` ordered by their place in `priority` (case-insensitive), the rest
-    after it alphabetically."""
-    rank = {w.lower(): i for i, w in enumerate(priority)}
-    return sorted(worlds, key=lambda w: (rank.get(w.lower(), len(rank)), w.lower()))
-
-
 def _stored(r, applied, skipped, limit):
     """The answer to a settings store: which worlds got a rule, which were left out
     for want of room, and the upstream's own words when it refused."""
@@ -257,22 +250,31 @@ def ensure_rules():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
+# Every region a raid rule covers. The API has no list of regions, and it does not
+# check a rule's RegionIds against the account's exploration or even against the
+# regions that exist: on 24 Sep 2026 it stored ids 1-60 for an account that had
+# explored only 3 (Carlin) and 23 (Hrodmir). Region ids are small integers, so this
+# range covers them all, and an explored id outside it is added anyway.
+ALL_REGION_IDS = list(range(1, 61))
+
+
 @app.post("/ensure-raid-rules")
 def ensure_raid_rules():
-    """Ensure enabled raid rules for the worlds the account has explored areas on,
-    as many as it has room for.
+    """Ensure an enabled raid rule covering every region on each of `worlds`, as
+    many worlds as the account has room for.
 
-    Raids are exploration-gated: a rule's RegionIds must be areas the account has
-    unlocked, so the regions are derived from /Area/ExploredAreas rather than passed
-    in. All three modes (area/subarea revealed, raid started) are on, so the /Raids
-    feed carries every stage; the bot filters by `category`. Like MWC rules, raid
-    rules are capped (`maximumRaidNotificationRules`), so the explored worlds are
-    taken in the order of `worlds` — the bot's priority — then alphabetically, up to
-    the room the account's own rules leave.
+    The intent is to catch every raid, so a rule covers every region
+    (ALL_REGION_IDS), not only the areas the account has explored. `worlds` is the
+    account's worlds most wanted first; a world it has explored areas on but did
+    not ask for comes after them. All three modes (area/subarea revealed, raid
+    started) are on, so the /Raids feed carries every stage; the bot filters by
+    `category`. Like MWC rules, raid rules are capped
+    (`maximumRaidNotificationRules`), so worlds are taken in order up to the room
+    the account's own rules leave.
     """
     b = _json_body()
     credential = b.get("credential")
-    priority = b.get("worlds") or []
+    requested = b.get("worlds") or []
     device = b.get("deviceIdentification") or "Violent Bot"
     if not credential:
         return jsonify({"ok": False, "error": "credential required"}), 400
@@ -282,16 +284,23 @@ def ensure_raid_rules():
             return jsonify({"ok": False, "error": "could not read settings"}), 502
         explored = _observer("GET", "/Area/ExploredAreas", bearer=credential)
         areas = explored.json() if explored.status_code == 200 else []
-        regions = {e["world"]: [a["areaId"] for a in e["exploredAreas"]]
-                   for e in areas if e.get("exploredAreas")}
+        explored_ids = {e["world"]: [a["areaId"] for a in e["exploredAreas"]]
+                        for e in areas if e.get("exploredAreas")}
+        asked = {w.lower() for w in requested}
+        worlds = list(requested) + sorted((w for w in explored_ids if w.lower() not in asked), key=str.lower)
         limit = _rule_limit("maximumRaidNotificationRules")
         existing = settings.get("raidNotificationRules") or []
         kept = [r for r in existing if r.get("ruleName") != RULE_NAME]
         room = max(0, limit - len(kept))
-        ordered = _by_priority(list(regions), priority)
-        applied, skipped = ordered[:room], ordered[room:]
+        applied, skipped = worlds[:room], worlds[room:]
+
+        explored_by_world = {w.lower(): ids for w, ids in explored_ids.items()}
+
+        def regions(world):
+            return sorted(set(ALL_REGION_IDS) | set(explored_by_world.get(world.lower(), [])))
+
         managed = [{
-            "ruleName": RULE_NAME, "World": w, "RegionIds": regions[w],
+            "ruleName": RULE_NAME, "World": w, "RegionIds": regions(w),
             "isEnabled": True, "areaRevealed": "appNotifications",
             "subareaRevealed": "appNotifications", "raidStarted": "appNotifications",
         } for w in applied]

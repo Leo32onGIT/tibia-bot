@@ -173,14 +173,15 @@ final class ObserverApiClient(
       case _                         => None
     }
 
-  /** Ensure enabled raid rules for the worlds the account has explored (regions
-   *  derived from ExploredAreas by the sidecar), taken in the order of `priority`
-   *  while the account has room. */
-  def ensureRaidRules(credential: String, priority: List[String]): RulesResult =
+  /** Ensure enabled raid rules covering every region of these worlds, most wanted
+   *  first while the account has room: the aim is every raid, not only those in
+   *  areas the account has explored. A world the account has explored areas on is
+   *  covered too, after these. */
+  def ensureRaidRules(credential: String, worlds: List[String]): RulesResult =
     rulesResult(post("/ensure-raid-rules", JsObject(
       "credential" -> JsString(credential),
       "deviceIdentification" -> JsString(deviceIdentification),
-      "worlds" -> JsArray(priority.map(JsString(_)).toVector)
+      "worlds" -> JsArray(worlds.map(JsString(_)).toVector)
     )))
 
   /** The currently-announced/active raids for this credential's enabled rules. */
