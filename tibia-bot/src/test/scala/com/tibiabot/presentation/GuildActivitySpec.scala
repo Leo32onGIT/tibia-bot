@@ -128,6 +128,27 @@ class GuildActivitySpec extends AnyFunSuite with Matchers {
     GuildActivity.renameFromFormerNames(activity, "Alice", List("Carol", "Bob"), nobodyOnline).map(_.oldName) shouldBe Some("Carol")
   }
 
+  test("a former name on the online list with this character's vocation and level is this character") {
+    // A stale copy of the list, just after the rename.
+    GuildActivity.onlineAsSomeoneElse(Some(505 -> "Elite Knight"), 505, "Elite Knight") shouldBe false
+    GuildActivity.onlineAsSomeoneElse(Some(504 -> "elite knight"), 506, "Elite Knight") shouldBe false
+    GuildActivity.onlineAsSomeoneElse(None, 505, "Elite Knight") shouldBe false
+  }
+
+  test("a former name online with another vocation or a level well apart is somebody else") {
+    GuildActivity.onlineAsSomeoneElse(Some(505 -> "Royal Paladin"), 505, "Elite Knight") shouldBe true
+    GuildActivity.onlineAsSomeoneElse(Some(8 -> "Knight"), 505, "Elite Knight") shouldBe true
+    GuildActivity.onlineAsSomeoneElse(Some(502 -> "Elite Knight"), 505, "Elite Knight") shouldBe true
+  }
+
+  test("a rename is found while a stale online list still shows the old name") {
+    // The Gazort renamed to Acnut; the list the bot holds still has The Gazort on it.
+    val stillListed = Map("The Gazort" -> (505 -> "Elite Knight"))
+    def asSomeoneElse(name: String) = GuildActivity.onlineAsSomeoneElse(stillListed.get(name), 505, "Elite Knight")
+    val found = GuildActivity.renameFromFormerNames(index(row("The Gazort", "Ruckus")), "Acnut", List("The Gazort"), asSomeoneElse)
+    found.map(r => r.oldName -> r.guild) shouldBe Some("The Gazort" -> "Ruckus")
+  }
+
   test("a former name somebody is online under is skipped, not the whole rename") {
     // Only the reclaimed name is disqualified: the other former name still
     // identifies the character's old row.

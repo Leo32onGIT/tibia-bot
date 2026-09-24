@@ -473,7 +473,9 @@ class TibiaBot(
                 activityRows,
                 charName,
                 formerNamesList,
-                formerName => onlineTracker.find(formerName).isDefined
+                formerName => presentation.GuildActivity.onlineAsSomeoneElse(
+                  onlineTracker.find(formerName).map(p => (p.level, p.vocation)),
+                  charLevel, char.character.character.vocation)
               )
 
               rename.foreach { renamed =>

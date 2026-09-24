@@ -45,8 +45,8 @@ object GuildActivity {
    *
    *   - the character is already tracked under their current name, so a row under
    *     a former name must belong to somebody else;
-   *   - the former name is online right now, which only a different living
-   *     character can be.
+   *   - the former name is online right now as somebody else (`onlineAsSomeoneElse`
+   *     decides that for the caller).
    *
    *  Also skips a character carrying their own current name in former_names (cause
    *  unclear, possibly a namelock), which is not a rename.
@@ -77,6 +77,26 @@ object GuildActivity {
         .nextOption()
         .map(row => Rename(row.name, row.updatedTime, row.guild))
   }
+
+  /** How far apart the online list's level and the sheet's may be and still be the
+   *  same character: the two are fetched separately and one can lag the other. */
+  private val SameCharacterLevelSlack = 2
+
+  /** Whether a former name on the online list is somebody else, rather than this
+   *  very character on a stale copy of the list — `online` is that entry's level
+   *  and vocation, `level`/`vocation` the character's sheet.
+   *
+   *  TibiaData serves cached copies of a world's online list, so for a few polls
+   *  after a rename it can still show the old name. Reading that as a different
+   *  character declined the rename, posted the character as joining under the new
+   *  name, and left the old row behind — to be renamed onto them later and post
+   *  their last guild move a second time (Acnut, formerly The Gazort, on Victoris,
+   *  24 Sep 2026). Somebody else who has just taken a freed name will all but never
+   *  share both the vocation and the level. */
+  def onlineAsSomeoneElse(online: Option[(Int, String)], level: Int, vocation: String): Boolean =
+    online.exists { case (onlineLevel, onlineVocation) =>
+      !onlineVocation.equalsIgnoreCase(vocation) || math.abs(onlineLevel - level) > SameCharacterLevelSlack
+    }
 
   /** Move the `oldName` row onto `newName`, applied to whatever the list looks
    *  like at write time rather than to the snapshot the decision was made from.
