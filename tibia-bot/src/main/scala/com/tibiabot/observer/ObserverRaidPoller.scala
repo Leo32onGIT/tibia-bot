@@ -70,8 +70,8 @@ final class ObserverRaidPoller(
   sweepEvery: Duration = Duration.ofMinutes(15),
   wakeAfter: List[Duration] = List(Duration.ofSeconds(20), Duration.ofMinutes(2)),
   known: Int => Boolean = id => RaidTypeCatalog.get(id).isDefined,
-  areaPost: (RaidAnnouncement, Option[RaidType]) => MessageEmbed = ObserverEmbeds.areaEmbed,
-  subareaPost: (RaidAnnouncement, Option[RaidType], Instant) => MessageEmbed = ObserverEmbeds.subareaEmbed,
+  areaPost: (RaidAnnouncement, Option[RaidType]) => MessageEmbed = ObserverEmbeds.areaEmbed(_, _),
+  subareaPost: (RaidAnnouncement, Option[RaidType], Instant) => MessageEmbed = ObserverEmbeds.subareaEmbed(_, _, _),
   linePost: String => MessageEmbed = ObserverEmbeds.raidLineEmbed,
   now: () => Instant = () => Instant.now()
 ) extends StrictLogging {

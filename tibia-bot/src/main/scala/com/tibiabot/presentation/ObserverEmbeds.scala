@@ -131,51 +131,47 @@ object ObserverEmbeds {
 
   /** The imminent-raid post, at the area stage — an hour before the raid starts.
    *
-   *  The area, and when its subarea is revealed: half an hour before the start.
-   *  An account with limited discoveries learns nothing more until the raid
-   *  starts, so this is usually all there is. When a better-explored account's
-   *  feed already names the raid, its name (linked to its wiki page), creatures
-   *  and picture come too. */
-  def areaEmbed(raid: RaidAnnouncement, raidType: Option[RaidType]): MessageEmbed = {
-    val area = areaOf(raid, raidType)
-    val title = raidType.map(_.name).getOrElse(s"Imminent raid: $area")
-    val lines = List(
-      Option.when(raidType.isDefined)(area),
-      raid.startDate.map(start =>
-        s"**Subarea reveals:** <t:${start.minus(com.tibiabot.observer.ObserverRaidPoller.SubareaLead).getEpochSecond}:R>")
-    ).flatten
-    stageEmbed(title, raidType, lines)
+   *  "Imminent Raid" over the area as a grey line, and when its subarea is
+   *  revealed: half an hour before the start. An account with limited discoveries
+   *  learns nothing more until the raid starts, so this is usually all there is.
+   *  When a better-explored account's feed already names the raid, its name
+   *  (linked to its wiki page) is the title, and its creatures and picture come too. */
+  def areaEmbed(raid: RaidAnnouncement, raidType: Option[RaidType],
+                emoji: String = Config.raidEmoji): MessageEmbed = {
+    val title = raidType.map(_.name).getOrElse("Imminent Raid")
+    val reveals = raid.startDate.map(start =>
+      s"**Subarea reveals:** <t:${start.minus(com.tibiabot.observer.ObserverRaidPoller.SubareaLead).getEpochSecond}:R>")
+    stageEmbed(title, raidType, s"-# ${areaOf(raid, raidType)}" :: reveals.toList, emoji)
   }
 
   /** The post at the subarea stage — half an hour before the raid starts. It goes
    *  out again at the start, now naming the raid, when no earlier post could; and
    *  for a raid first seen once it has started, it is the only one before its lines.
    *
-   *  The subarea and its area, and when the raid starts (or started). Like the
-   *  area post, it names the raid when the feed already does. */
-  def subareaEmbed(raid: RaidAnnouncement, raidType: Option[RaidType], at: java.time.Instant): MessageEmbed = {
-    val area = areaOf(raid, raidType)
+   *  "Subarea Revealed" over the subarea as a grey line (its area when there is
+   *  none), and when the raid starts (or started). Like the area post, the raid's
+   *  name is the title when the feed already gives it. */
+  def subareaEmbed(raid: RaidAnnouncement, raidType: Option[RaidType], at: java.time.Instant,
+                   emoji: String = Config.raidEmoji): MessageEmbed = {
     val subarea = raid.subarea.orElse(raidType.flatMap(_.subarea)).filter(_.nonEmpty)
-    val title = raidType.map(_.name).getOrElse(s"Raid in ${subarea.getOrElse(area)}")
-    val location =
-      if (raidType.isDefined) Some(subarea.fold(area)(s => s"$s, $area"))
-      else subarea.map(_ => area)
+    val title = raidType.map(_.name).getOrElse("Subarea Revealed")
     val when = raid.startDate.map { start =>
       if (start.isAfter(at)) s"**Raid starts:** <t:${start.getEpochSecond}:R>"
       else s"**Raid started:** <t:${start.getEpochSecond}:R>"
     }
-    stageEmbed(title, raidType, (location ++ when).toList)
+    stageEmbed(title, raidType, s"-# ${subarea.getOrElse(areaOf(raid, raidType))}" :: when.toList, emoji)
   }
 
   /** A stage post: the `:raid:` emoji and its title (the raid's name linked to its
    *  wiki page, when known), its lines, and — when the raid is known — its creatures
    *  as wiki-linked bullets with a thumbnail of its boss or lead creature. */
-  private def stageEmbed(title: String, raidType: Option[RaidType], lines: List[String]): MessageEmbed = {
+  private def stageEmbed(title: String, raidType: Option[RaidType], lines: List[String],
+                         emoji: String): MessageEmbed = {
     val creatures = raidType.map(_.creatures).getOrElse(Vector.empty)
     val creatureBlock = if (creatures.nonEmpty) s"\n\n**Creatures:**\n${creatures.map(creatureBullet).mkString("\n")}" else ""
     val builder = new EmbedBuilder()
       .setColor(Embeds.AutomaticColor)
-      .setTitle(s"${Config.raidEmoji} $title", raidType.flatMap(_.link).orNull)
+      .setTitle(s"$emoji $title", raidType.flatMap(_.link).orNull)
       .setDescription((lines.mkString("\n") + creatureBlock).take(4000))
     thumbnailUrl(creatures).foreach(builder.setThumbnail)
     builder.build()

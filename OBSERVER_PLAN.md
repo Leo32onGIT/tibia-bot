@@ -264,6 +264,10 @@ observer_tokens
   so a raid named earlier gets nothing new at the start. A raids channel created
   before a raid is identified is left that post, so the raid's lines never arrive
   alone.
+- **Stage post wording.** An unnamed raid's posts are titled "Imminent Raid" and
+  "Subarea Revealed", and a named one's carry its name. Every stage post puts its
+  location under the title as a grey `-#` line: the area at the area stage, and the
+  subarea alone from the subarea stage on (the area when there is no subarea).
 - **Fleet split: BUILT.** Every Observer request now leaves from one bot, the same
   shape as the fansite pipeline. The primary (or a lone bot) runs the sidecar
   (`observer` compose profile), fetches the pooled MWC and raid feeds for every
