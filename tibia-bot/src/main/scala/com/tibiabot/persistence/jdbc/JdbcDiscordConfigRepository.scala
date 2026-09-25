@@ -45,6 +45,16 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
         statement.execute("ALTER TABLE discord_info ADD COLUMN moderator_role VARCHAR(255) DEFAULT '0'")
       }
 
+      // '0' until /setup or /repair next posts the tracker: one posted before this
+      // column existed has no id on record.
+      val trackerExistsQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'discord_info' AND COLUMN_NAME = 'tracker_messageid'")
+      val trackerExists = trackerExistsQuery.next()
+      trackerExistsQuery.close()
+
+      if (!trackerExists) {
+        statement.execute("ALTER TABLE discord_info ADD COLUMN tracker_messageid VARCHAR(255) DEFAULT '0'")
+      }
+
       val result = statement.executeQuery(s"SELECT * FROM discord_info")
       var configMap = Map[String, String]()
       while (result.next()) {
@@ -56,6 +66,7 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
         configMap += ("boosted_messageid" -> result.getString("boosted_messageid"))
         configMap += ("last_world" -> result.getString("last_world"))
         configMap += ("moderator_role" -> Option(result.getString("moderator_role")).getOrElse("0"))
+        configMap += ("tracker_messageid" -> Option(result.getString("tracker_messageid")).getOrElse("0"))
         configMap += ("flags" -> result.getString("flags"))
         configMap += ("created" -> result.getString("created"))
       }
@@ -86,6 +97,15 @@ final class JdbcDiscordConfigRepository(connectionProvider: ConnectionProvider) 
       val statement = conn.prepareStatement("UPDATE discord_info SET moderator_role = ?;")
       try {
         statement.setString(1, roleId)
+        statement.executeUpdate()
+      } finally statement.close()
+    }
+
+  def setTrackerMessage(guildId: String, messageId: String): Unit =
+    JdbcSupport.withConnection(() => connectionProvider.guild(guildId)) { conn =>
+      val statement = conn.prepareStatement("UPDATE discord_info SET tracker_messageid = ?;")
+      try {
+        statement.setString(1, messageId)
         statement.executeUpdate()
       } finally statement.close()
     }

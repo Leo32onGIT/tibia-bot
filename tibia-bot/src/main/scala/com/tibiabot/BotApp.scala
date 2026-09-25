@@ -2044,7 +2044,7 @@ object BotApp extends App with StrictLogging {
                 boostedService.boostedMonsterUpdate(boostedBoss, "", "1", "")
               }
               (
-                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss),s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"),
                 boostedBoss.toLowerCase != currentBoss.toLowerCase && currentBoss.toLowerCase != "none",
                 boostedBoss
               )
@@ -2061,7 +2061,7 @@ object BotApp extends App with StrictLogging {
                 boostedService.boostedMonsterUpdate("", boostedCreature, "", "1")
               }
               (
-                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
+                presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature),s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"),
                 boostedCreature.toLowerCase != currentCreature.toLowerCase && currentCreature.toLowerCase != "none",
                 boostedCreature
               )
@@ -2188,10 +2188,8 @@ object BotApp extends App with StrictLogging {
               }
 
               posted += 1
-              boostedChannel.sendMessageEmbeds(serverSaveEmbeds(boostedEmbeds, lastWorld).asJava)
-                .setComponents(ActionRow.of(
-                  Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))
-                ))
+              boostedChannel.sendMessageComponents(presentation.ServerSaveCard.components(serverSaveEmbeds(boostedEmbeds, lastWorld)).asJava)
+                .useComponentsV2()
                 .queue((message: Message) => {
                   //updateBoostedMessage(guild.getId, message.getId)
                   discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
@@ -2230,8 +2228,14 @@ object BotApp extends App with StrictLogging {
             val layout = serverSaveLayout(world)
             boostedChannel.retrieveMessageById(messageId).queue(
               (message: Message) => {
-                val boosted = presentation.ObserverEmbeds.boostedEmbedsOf(message.getEmbeds.asScala.toList)
-                boostedChannel.editMessageEmbedsById(messageId, layout(boosted).asJava).queue(
+                val boosted = presentation.ObserverEmbeds.boostedEmbedsOf(presentation.ServerSaveCard.blocksOf(message))
+                // Edited the way it was posted: a card stays a card, and an embed
+                // message from before the cards is replaced at the next server save.
+                val edit =
+                  if (message.isUsingComponentsV2)
+                    message.editMessageComponents(presentation.ServerSaveCard.components(layout(boosted)).asJava).useComponentsV2()
+                  else message.editMessageEmbeds(layout(boosted).asJava)
+                edit.queue(
                   (_: Message) => (),
                   (e: Throwable) => logger.warn(s"Failed to amend the mini world changes for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
               },
@@ -2672,19 +2676,19 @@ object BotApp extends App with StrictLogging {
         .getOrElse("Unknown")
     val rashidLocation = ServerSaveSchedule.rashidLocation(ServerSaveSchedule.gameDayOfWeek(ZonedDateTime.now(domain.time.Clock.Berlin)))
     val rashidEmbed = new EmbedBuilder()
-      .setDescription(s"Today Rashid can be found in:\n### ${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
+      .setDescription(s"Today Rashid can be found in:\n### ${Config.indentEmoji}${Config.goldEmoji} **[${rashidLocation}](https://tibia.fandom.com/wiki/Rashid)**")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Rashid.gif")
       .setColor(BrandColor)
       .build()
     val dreamScarEmbed = new EmbedBuilder()
-      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
+      .setDescription(s"The Dream Courts boss for **$world** is:\n### ${Config.indentEmoji}${Config.dreamScarEmoji} **[${dreamScarDaily}](https://tibia.fandom.com/wiki/Dream_Scar/Boss_of_the_Day)**")
       .setThumbnail(creatureImageUrl(dreamScarDaily))
       .setColor(BrandColor)
       .build()
     val mwcEmbed = presentation.ObserverEmbeds.serverSaveMwcEmbed(world, observerFeed.mwcForWorld(world))
     val dromeShow = ServerSaveSchedule.shouldShowDrome(Instant.now(), dromeTime)
     val dromeEmbed = new EmbedBuilder()
-      .setDescription(s"The current Drome cycle will end:\n### ${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
+      .setDescription(s"The current Drome cycle will end:\n### ${Config.indentEmoji}${Config.dromeEmoji} ${TimeFormat.RELATIVE.format(dromeTime)}")
       .setThumbnail("https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Phant.gif")
       .setColor(BrandColor)
       .build()

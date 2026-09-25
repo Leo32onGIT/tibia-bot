@@ -24,11 +24,13 @@ import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 
 import java.awt.Color
 import java.time.ZonedDateTime
+import java.util.function.Consumer
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.Try
-import com.tibiabot.presentation.{AdminLog, CooldownEmbeds, Names}
+import com.tibiabot.presentation.{AdminLog, CooldownEmbeds, Names, ObserverEmbeds, RoleCard, ServerSaveCard}
+import net.dv8tion.jda.api.components.container.Container
 
 /** createChannels' result: an embed always, plus confirm/cancel buttons only
  *  when it's prompting to reassign a paused world's seat (see
@@ -329,9 +331,22 @@ final class ChannelService(
 
   /** Post the cooldown tracker into a guild's notifications channel (done on
    *  every /setup and /repair of that channel): each tracked collectible with a
-   *  button that opens the presser's own cooldowns. See CooldownEmbeds.tracker. */
-  private def postCooldownTracker(channel: TextChannel): Unit =
-    channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().queue()
+   *  button that opens the presser's own cooldowns. See CooldownEmbeds.tracker.
+   *  Its id is kept, and `/repair` fetches it by that. */
+  private def postCooldownTracker(channel: TextChannel, guild: Guild): Unit =
+    channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().queue(
+      (posted: Message) => discordConfigRepository.setTrackerMessage(guild.getId, posted.getId),
+      failedTo("post the cooldown tracker", guild))
+
+  /** A failure callback for JDA's `queue` that says what was being done. */
+  private def failedTo(doing: String, guild: Guild): Consumer[Throwable] =
+    e => logger.warn(s"Failed to $doing for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+
+  /** A message in `channel` by the id kept for it. None when no id is kept, or
+   *  the message has been deleted since. */
+  private def fetchById(channel: TextChannel, id: String): Option[Message] =
+    if (id == null || id.isEmpty || id == "0") None
+    else Try(channel.retrieveMessageById(id).complete()).toOption
 
   /** Bring an existing notifications message up to date, for /repair: keep its
    *  boosted boss and creature, and rebuild everything around them — mini world
@@ -339,37 +354,53 @@ final class ChannelService(
    *  repaired, which becomes the message's world, as it would on a fresh post.
    *  Whatever has come on since the message posted shows up here: a linked Observer
    *  account now covering the world is what adds its mini world changes. Edited in
-   *  place, so nobody is notified again. */
+   *  place, so nobody is notified again.
+   *
+   *  Except a message from before the server-save card (25 Sep 2026), which is
+   *  replaced by one carrying the same boss and creature, the way the tracker's
+   *  old embed is: `/repair` is how a guild gets the current look without waiting
+   *  for the next server save. */
   private def refreshServerSaveEmbeds(message: Message, guild: Guild, world: String): Unit = {
-    val boosted = com.tibiabot.presentation.ObserverEmbeds.boostedEmbedsOf(message.getEmbeds.asScala.toList)
-    message.editMessageEmbeds(serverSaveEmbeds(boosted, world).asJava).queue(
-      (_: Message) => discordUpdateConfig(guild, "", "", "", "", world),
-      (e: Throwable) => logger.warn(
-        s"Failed to refresh the boosted message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e))
+    val boosted = ObserverEmbeds.boostedEmbedsOf(ServerSaveCard.blocksOf(message))
+    val card = ServerSaveCard.components(serverSaveEmbeds(boosted, world)).asJava
+    val failed = failedTo("refresh the boosted message", guild)
+    if (message.isUsingComponentsV2)
+      message.editMessageComponents(card).useComponentsV2().queue(
+        (_: Message) => discordUpdateConfig(guild, "", "", "", "", world), failed)
+    else {
+      message.delete().queue(_ => (), _ => ())
+      message.getChannel.sendMessageComponents(card).useComponentsV2().queue(
+        (posted: Message) => discordUpdateConfig(guild, "", "", "", posted.getId, world), failed)
+    }
   }
 
   /** Bring the cooldown tracker in an existing notifications channel up to date,
-   *  for /repair: post one when it is missing, and replace one that is no longer
-   *  what would be posted now — the embed it was before it moved to Discord's
-   *  layout components, or any version since whose text, buttons or pictures have
-   *  changed — and any duplicates. A single up-to-date tracker is left exactly
-   *  where it is.
+   *  for /repair. It is fetched by the id kept when it was posted, and left
+   *  exactly where it is if it is still what would be posted now. Otherwise it is
+   *  replaced: when its text, buttons or pictures have changed, or when it has
+   *  been deleted. True when a tracker was posted.
    *
-   *  Found among the bot's recent messages there by its buttons — every tracker,
-   *  old or new, carries cooldown buttons, and nothing else in that channel does.
-   *  True when a tracker was posted. */
-  private def refreshCooldownTracker(channel: TextChannel, recent: List[Message]): Boolean = {
-    val trackers = recent.filter(_.getComponentTree.findAll(classOf[Button]).asScala
-      .exists(button => Option(button.getCustomId).exists(id => com.tibiabot.cooldowns.CooldownIds.parse(id).isDefined)))
+   *  A tracker posted before ids were kept (25 Sep 2026) has none on record.
+   *  Only then is `recent` looked through, once, for trackers by their cooldown
+   *  buttons, so they can be replaced; the new one's id is kept from then on. */
+  private def refreshCooldownTracker(channel: TextChannel, guild: Guild, recent: => List[Message]): Boolean = {
     val current = trackerShape(MessageComponentTree.of(CooldownEmbeds.tracker()))
-    if (trackers.sizeIs == 1 && trackers.head.isUsingComponentsV2 &&
-        trackerShape(trackers.head.getComponentTree) == current) false
+    val stored = discordRetrieveConfig(guild).getOrElse("tracker_messageid", "0")
+    val existing = fetchById(channel, stored)
+    if (existing.exists(t => t.isUsingComponentsV2 && trackerShape(t.getComponentTree) == current)) false
     else {
-      trackers.foreach(_.delete().queue(_ => (), _ => ()))
-      postCooldownTracker(channel)
+      val stale = if (stored == "0") recent.filter(isTracker) else existing.toList
+      stale.foreach(_.delete().queue(_ => (), _ => ()))
+      postCooldownTracker(channel, guild)
       true
     }
   }
+
+  /** A tracker from before ids were kept: every one, old or new, carries
+   *  cooldown buttons, and nothing else in that channel does. */
+  private def isTracker(message: Message): Boolean =
+    message.getComponentTree.findAll(classOf[Button]).asScala
+      .exists(button => Option(button.getCustomId).exists(id => com.tibiabot.cooldowns.CooldownIds.parse(id).isDefined))
 
   /** What makes a tracker the one that would be posted now: its text, its buttons
    *  and how many pictures it carries. */
@@ -390,10 +421,9 @@ final class ChannelService(
     } yield List(bossEmbed, creatureEmbed)
 
     combinedFutures.map { embeds =>
-      val allEmbeds = serverSaveEmbeds(embeds, world)
       channel
-        .sendMessageEmbeds(allEmbeds.asJava)
-        .setComponents(ActionRow.of(Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(Config.letterEmoji))))
+        .sendMessageComponents(ServerSaveCard.components(serverSaveEmbeds(embeds, world)).asJava)
+        .useComponentsV2()
         .queue(
           (message: Message) => discordUpdateConfig(guild, "", "", "", message.getId, world),
           (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
@@ -401,50 +431,34 @@ final class ChannelService(
     }
   }
 
-  /** The role-subscription buttons under the fullbless/notifications embed.
-   *
-   *  The first three toggle a role that gets pinged in a channel. The last two
-   *  stand for a standing DM subscription instead, so pressing them opens a form
-   *  (see interactions.NotifyButtons) rather than toggling anything on the spot
-   *  — the role follows whatever the form settles on. */
-  def fullblessRoleButtons: List[Button] = List(
-    Button.success("fullbless", " ").withEmoji(Emoji.fromFormatted(Config.inqEmoji)),
-    Button.primary("nemesis", " ").withEmoji(Emoji.fromFormatted(Config.bossEmoji)),
-    Button.danger("allypk", " ").withEmoji(Emoji.fromFormatted(Config.hazardEmoji)),
-    Button.secondary("masslog", " ").withEmoji(Emoji.fromFormatted(Config.masslogEmoji)),
-    Button.secondary("bounty", " ").withEmoji(Emoji.fromFormatted(Config.bountyEmoji))
-  )
+  /** Post a world's role card (see presentation.RoleCard) into the notifications
+   *  channel, and keep its id on the world, in the database and in the cache the
+   *  card's buttons read their world from. The world's row must exist already. */
+  private def postRoleCard(channel: TextChannel, guild: Guild, world: String, card: Container): Unit =
+    channel.sendMessageComponents(card).useComponentsV2().queue(
+      (posted: Message) => {
+        worldRepairConfig(guild, world, "role_card_message", posted.getId)
+        streamState.modifyWorldsData { data =>
+          data.get(guild.getId).fold(data)(worlds => data + (guild.getId -> worlds.map(w =>
+            if (w.name.equalsIgnoreCase(world)) w.copy(roleCardMessage = posted.getId) else w)))
+        }
+      },
+      failedTo(s"post the role card for $world", guild))
 
-  /** The "the bot will poke" role-notification embed for a world. Built by /setup,
-   *  /fullbless (which edits it) and /repair (which reposts it). `level` is a
-   *  String because /repair reads it straight out of the stored world config.
-   *
-   *  The last two lines describe a DM rather than a channel poke and say so: a
-   *  role that only messages you privately is a different promise from one that
-   *  mentions you, and that has to be readable before anyone presses. */
-  def fullblessRoleEmbed(world: String, fullblessRoleId: String, nemesisRoleId: String, allyPkRoleId: String, masslogRoleId: String, bountyRoleId: String, level: String): MessageEmbed = {
-    // A world configured before bounties existed carries '0' until /repair creates
-    // the role, and `<@&0>` renders as a deleted role — which reads as broken
-    // rather than as not set up yet.
-    val bountyMention = if (bountyRoleId == null || bountyRoleId == "0") "**Bounty**" else s"<@&$bountyRoleId>"
-    new EmbedBuilder()
-      .setTitle(s":crossed_swords: $world :crossed_swords:", com.tibiabot.presentation.Urls.worldUrl(world))
-      .setThumbnail("https://violentbot.xyz/discord/effects/Phantasmal_Ooze.gif")
-      .setColor(BrandColor)
-      // Not "add or remove yourself from the role": three of the five buttons do
-      // that, and the last two open a form that sets up a DM subscription (the
-      // role follows it). Saying the first thing for all five is what leaves
-      // somebody adding the Mass Log role by hand and waiting for a DM that is
-      // not coming — nothing reads the role, and without the privileged members
-      // intent nothing can.
-      .setFooter("Use the buttons below to set these up:")
-      .setDescription(
-        s"${Config.inqEmoji}<@&$fullblessRoleId> If an enemy fullblesses and is over level `$level`\n" +
-        s"${Config.bossEmoji}<@&$nemesisRoleId> If anyone dies to a rare boss\n" +
-        s"${Config.hazardEmoji}<@&$allyPkRoleId> If an ally gets pked\n" +
-        s"${Config.masslogEmoji}<@&$masslogRoleId> If enough enemies log in at once on **$world**\n" +
-        s"${Config.bountyEmoji}$bountyMention If a character you're watching `logs in` on **$world**")
-      .build()
+  /** Bring a world's role card up to date after `/fullbless` changes the level it
+   *  names, fetched by the id kept on the world and edited in place. Nothing
+   *  happens when no id is kept: that card is an embed from before the cards, and
+   *  `/repair` is what replaces it. */
+  def refreshRoleCard(guild: Guild, world: String, level: String): Unit = {
+    val config = worldRetrieveConfig(guild, world)
+    val channel = Try(guild.getTextChannelById(discordRetrieveConfig(guild)("boosted_channel"))).toOption.flatMap(Option(_))
+    val stored = config.getOrElse("role_card_message", "0")
+    if (stored != "0") channel.filter(_.canTalk()).foreach { notifications =>
+      val card = RoleCard.card(world, config("fullbless_role"), config("nemesis_role"), config("allypk_role"),
+        config("masslog_role"), config.getOrElse("bounty_role", "0"), level)
+      notifications.editMessageComponentsById(stored, card).useComponentsV2().queue(
+        (_: Message) => (), failedTo(s"update the role card for $world", guild))
+    }
   }
 
   /** What a seed sync did, in words. Silent when nothing changed, so a repair
@@ -755,7 +769,7 @@ final class ChannelService(
         boostedChannel.upsertPermissionOverride(guild.getPublicRole).grant(Permission.VIEW_CHANNEL).queue()
         discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
-        postCooldownTracker(boostedChannel)
+        postCooldownTracker(boostedChannel, guild)
 
         postBoostedNotifications(boostedChannel, guild, world)
       } else {
@@ -788,7 +802,7 @@ final class ChannelService(
           boostedChannel.upsertPermissionOverride(guild.getPublicRole).deny(Permission.VIEW_CHANNEL).queue()
           discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
-          postCooldownTracker(boostedChannel)
+          postCooldownTracker(boostedChannel, guild)
 
           postBoostedNotifications(boostedChannel, guild, world)
         }
@@ -812,18 +826,6 @@ final class ChannelService(
         val channelList = List(alliesChannel, levelsChannel, deathsChannel, activityChannel, statisticsChannel)
         channelList.foreach(grantWorldPerms(_, botRole, publicRole))
 
-        val notificationsConfig = discordRetrieveConfig(guild)
-        val notificationsChannel = guild.getTextChannelById(notificationsConfig("boosted_channel"))
-
-        if (notificationsChannel != null) {
-          if (notificationsChannel.canTalk()) {
-
-            notificationsChannel.sendMessageEmbeds(fullblessRoleEmbed(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "250"))
-              .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
-              .queue()
-            }
-        }
-
         val alliesId = alliesChannel.getId
         val enemiesId = "0" //enemiesChannel.getId
         val neutralsId = "0" //neutralsChannel.getId
@@ -843,6 +845,12 @@ final class ChannelService(
         // Written after the insert rather than threaded through worldCreateConfig,
         // whose positional signature is already sixteen arguments long.
         worldRepairConfig(guild, world, "statistics_channel", statisticsId)
+
+        // After the insert too: the card's id is kept on the world's row.
+        Option(guild.getTextChannelById(discordRetrieveConfig(guild)("boosted_channel"))).filter(_.canTalk()).foreach { notifications =>
+          postRoleCard(notifications, guild, world,
+            RoleCard.card(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "250"))
+        }
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
           val excludeAll = com.tibiabot.commands.CommandSchemas.excludedFromCommands(guild.getIdLong, guild.getJDA.getSelfUser.getId)
@@ -980,32 +988,22 @@ final class ChannelService(
       // check if any of the world channels need to be recreated
       if (boostedChannel != null) {
         if (boostedChannel.canTalk()) {
-          var fullblessMessage = false
-          var nemesisMessage = false
-          var allyPkMessage = false
-          val messages = boostedChannel.getHistory.retrievePast(100).complete().asScala.filter { m =>
+          val worldConfigData = worldRetrieveConfig(guild, world)
+          // The bot's recent messages in the channel, read only for what was posted
+          // before ids were kept (25 Sep 2026): a role card or tracker with no id on
+          // record is looked for here once, so it can be replaced by one that has.
+          lazy val recent = boostedChannel.getHistory.retrievePast(100).complete().asScala.toList.filter { m =>
             m.getAuthor.getId.equals(botUser) && !m.isEphemeral
           }
-
-          if (messages.nonEmpty) {
-            messages.foreach { message =>
-              val messageEmbeds = message.getEmbeds
-              if (messageEmbeds != null && !messageEmbeds.isEmpty){
-                val messageEmbed = messageEmbeds.get(0)
-                val messageTitle = messageEmbed.getTitle
-                if (messageTitle != null) {
-                  if (messageTitle.startsWith(s":crossed_swords: $worldFormal")) {
-                    fullblessMessage = true
-                  } else if (messageTitle.startsWith(s"${Config.nemesisEmoji} $worldFormal")) {
-                    nemesisMessage = true
-                  } else if (messageTitle.startsWith(s"${Config.hazardEmoji} $worldFormal")) {
-                    allyPkMessage = true
-                  }
-                }
-              }
-            }
-          }
-          val worldConfigData = worldRetrieveConfig(guild, world)
+          // The world's role card, by the id kept on the world. With none kept, any
+          // card there is an embed from before the cards, and is replaced.
+          val storedRoleCard = worldConfigData.getOrElse("role_card_message", "0")
+          val fullblessMessage = fetchById(boostedChannel, storedRoleCard).isDefined
+          val legacyRoleCard =
+            if (storedRoleCard != "0") None
+            else recent.find(m => RoleCard.legacyWorldOf(m).exists(_.equalsIgnoreCase(worldFormal)))
+          val replacingRoleCard = legacyRoleCard.isDefined
+          legacyRoleCard.foreach(_.delete().queue(_ => (), _ => ()))
           if (!fullblessMessage){
             val fullblessLevel = worldConfigData("fullbless_level")
             val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
@@ -1022,9 +1020,7 @@ final class ChannelService(
             val bountyRole = if (bountyRoleCheck == null) guild.createRole().setName(s"$worldFormal Bounty").setColor(new Color(139, 69, 19)).complete() else bountyRoleCheck
 
             // Fullbless Role
-            boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
-              .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
-              .queue()
+            postRoleCard(boostedChannel, guild, worldFormal, RoleCard.card(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
 
             // Update role id if it changed
             worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
@@ -1081,7 +1077,9 @@ final class ChannelService(
               }
               streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
             }
-            embedBuild.setDescription(s"${Config.yesEmoji} Missing notification message was recreated.")
+            embedBuild.setDescription(
+              if (replacingRoleCard) s"${Config.yesEmoji} The notification message was rebuilt."
+              else s"${Config.yesEmoji} Missing notification message was recreated.")
           }
           if (boostedMessage != "0") {
             Try(boostedChannel.retrieveMessageById(boostedMessage).complete()).toOption match {
@@ -1089,7 +1087,7 @@ final class ChannelService(
               case None           => postBoostedNotifications(boostedChannel, guild, worldFormal)
             }
           }
-          if (refreshCooldownTracker(boostedChannel, messages.toList)) {
+          if (refreshCooldownTracker(boostedChannel, guild, recent)) {
             val rebuilt = s"${Config.yesEmoji} The cooldown tracker in ${boostedChannel.getAsMention} was rebuilt."
             val said = embedBuild.getDescriptionBuilder.toString
             if (said.startsWith(Config.noEmoji)) embedBuild.setDescription(rebuilt)
@@ -1281,7 +1279,7 @@ final class ChannelService(
             .deny(Permission.MESSAGE_SEND)
             .complete()
 
-          postCooldownTracker(boostedChannel)
+          postCooldownTracker(boostedChannel, guild)
 
           // Boosted Boss + creature + server-save notifications (use the canonical
           // world name so the Dream Courts lookup resolves)
@@ -1301,9 +1299,7 @@ final class ChannelService(
           val bountyRole = if (bountyRoleCheck == null) guild.createRole().setName(s"$worldFormal Bounty").setColor(new Color(139, 69, 19)).complete() else bountyRoleCheck
 
           // Fullbless Role
-          boostedChannel.sendMessageEmbeds(fullblessRoleEmbed(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
-            .setComponents(ActionRow.of(fullblessRoleButtons.asJava))
-            .queue()
+          postRoleCard(boostedChannel, guild, worldFormal, RoleCard.card(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
           // Update role id if it changed
           worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
           // update the record in worldsData

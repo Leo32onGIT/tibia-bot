@@ -20,4 +20,8 @@ trait DiscordConfigRepository {
    *  already takes five interchangeable strings — a sixth would be one more thing
    *  for every existing call site to pass "" to and get wrong. */
   def setModeratorRole(guildId: String, roleId: String): Unit
+
+  /** Remember the cooldown tracker's message in the notifications channel, so
+   *  `/repair` fetches it by id rather than looking for it. */
+  def setTrackerMessage(guildId: String, messageId: String): Unit
 }

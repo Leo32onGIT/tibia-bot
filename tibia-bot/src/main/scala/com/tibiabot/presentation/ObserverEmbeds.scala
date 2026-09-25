@@ -53,8 +53,10 @@ object ObserverEmbeds {
   /** The bot's own mini world change art, hosted with its other Discord assets. */
   private val MwcThumbnail = "https://violentbot.xyz/discord/observer/miniworldchange.png"
 
-  /** Room for the changes, kept under Discord's 4096 description limit. */
-  private val MaxMwcDescription = 4000
+  /** Room for the changes. The server-save card (see ServerSaveCard) is one V2
+   *  message, and Discord allows 4,000 characters of text across the whole of
+   *  one. This leaves the other five blocks, about 150 each, a thousand. */
+  val MaxMwcDescription = 3000
 
   /** The Mini World Changes embed in a guild's server-save notifications message,
    *  for its world — the same world the Dream Courts embed names. Each change is its

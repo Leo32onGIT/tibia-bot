@@ -67,7 +67,12 @@ case class Worlds(name: String,
    *  fought — a guild followed from another world adds a stranger to the list
    *  every time somebody quits it. The leave is still posted in the activity
    *  channel either way. */
-  huntGuildLeavers: String = "on"
+  huntGuildLeavers: String = "on",
+  /** The id of this world's role card in the notifications channel, or "0" when
+   *  none has been posted since ids were kept (25 Sep 2026). Everything that
+   *  touches the card finds it by this: `/repair`, `/fullbless`, and the card's
+   *  own buttons, which read their world off it. */
+  roleCardMessage: String = "0"
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

@@ -65,7 +65,7 @@ class ObserverMwcEmbedSpec extends AnyFunSuite with Matchers {
   test("drops whole changes rather than cutting one off when the description runs long") {
     val many = (1 to 40).toList.map(i => change(s"Change $i", "x" * 150))
     val d = ObserverEmbeds.serverSaveMwcEmbed("Antica", many, emoji).get.getDescription
-    d.length should be <= 4000
+    d.length should be <= ObserverEmbeds.MaxMwcDescription
     val names = d.linesIterator.count(_.startsWith("### "))
     names should (be > 0 and be < 40)
     d.linesIterator.count(_.startsWith("-# ")) shouldBe names

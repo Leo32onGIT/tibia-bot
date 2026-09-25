@@ -103,7 +103,7 @@ object ButtonHandler extends StrictLogging {
         .setComponents(presentation.ObserverEmbeds.controls(token)).queue()
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
-        val world = title.replace(":crossed_swords:", "").trim()
+        val world = presentation.RoleCard.worldOf(event.getMessage, BotApp.worldsData.getOrElse(guild.getId, List())).getOrElse("")
         val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
         val role = guild.getRoleById(worldConfigData("fullbless_role"))
         if (role != null) {
@@ -129,7 +129,7 @@ object ButtonHandler extends StrictLogging {
         }
     } else if (button == "nemesis") {
       event.deferReply(true).queue()
-      val world = title.replace(":crossed_swords:", "").trim()
+      val world = presentation.RoleCard.worldOf(event.getMessage, BotApp.worldsData.getOrElse(guild.getId, List())).getOrElse("")
       val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
       val role = guild.getRoleById(worldConfigData("nemesis_role"))
       if (role != null) {
@@ -155,7 +155,7 @@ object ButtonHandler extends StrictLogging {
       }
     } else if (button == "allypk") {
       event.deferReply(true).queue()
-      val world = title.replace(":crossed_swords:", "").trim
+      val world = presentation.RoleCard.worldOf(event.getMessage, BotApp.worldsData.getOrElse(guild.getId, List())).getOrElse("")
       val worldConfigData = BotApp.worldRetrieveConfig(guild, world)
       val role = guild.getRoleById(worldConfigData("allypk_role"))
       if (role != null) {

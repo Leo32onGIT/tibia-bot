@@ -66,13 +66,12 @@ object NotifyButtons extends StrictLogging {
 
   // --- opening the forms -------------------------------------------------
 
-  /** The world these buttons belong to, read off the embed they sit under — the
+  /** The world these buttons belong to, read off the role card they sit on — the
    *  same trick the fullbless/nemesis/allypk toggles use, and the reason the two
-   *  autorole ids can stay bare and keep working on embeds already posted. */
+   *  autorole ids can stay bare and keep working on cards already posted. */
   private def worldOf(event: ButtonInteractionEvent): String = {
-    val embeds = event.getInteraction.getMessage.getEmbeds
-    val title = if (!embeds.isEmpty) Option(embeds.get(0).getTitle).getOrElse("") else ""
-    title.replace(":crossed_swords:", "").trim
+    val worlds = Option(event.getGuild).map(g => BotApp.worldsData.getOrElse(g.getId, List())).getOrElse(List())
+    com.tibiabot.presentation.RoleCard.worldOf(event.getInteraction.getMessage, worlds).getOrElse("")
   }
 
   /** The window the threshold counts over, in minutes — the same one the online

@@ -292,29 +292,12 @@ final class WorldSettingsService(
         streamState.modifyWorldsData(_ + (guild.getId -> modifiedWorlds))
         fullblessLevelToDatabase(guild, worldFormal, level)
 
-        // find and update the existing notification embed to reflect the new level
-        val worldConfigData = worldRetrieveConfig(guild, world)
+        // The world's role card names the level, so it follows. It used to be looked
+        // for in the world's own fullbless channel, which /setup has not made since
+        // the cards moved into the notifications channel, so it never updated.
         val discordConfig = discordRetrieveConfig(guild)
         val adminChannel = guild.getTextChannelById(discordConfig("admin_channel"))
-        if (worldConfigData.nonEmpty) {
-          val fullblessChannelId = worldConfigData("fullbless_channel")
-          val channel: TextChannel = guild.getTextChannelById(fullblessChannelId)
-          if (channel != null) {
-            val messages = channel.getHistory.retrievePast(100).complete().asScala.filter(m => m.getAuthor.getId.equals(botUser))
-            if (messages.nonEmpty) {
-              val message = messages.head
-              val fullblessRole = worldConfigData("fullbless_role")
-              val nemesisRole = worldConfigData("nemesis_role")
-              val allyPkRole = worldConfigData("allypk_role")
-              val masslogRole = worldConfigData("masslog_role")
-              val bountyRole = worldConfigData.getOrElse("bounty_role", "0")
-
-              message.editMessageEmbeds(channelService.fullblessRoleEmbed(worldFormal, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, level.toString))
-                .setComponents(ActionRow.of(channelService.fullblessRoleButtons.asJava))
-                .queue()
-            }
-          }
-        }
+        channelService.refreshRoleCard(guild, worldFormal, level.toString)
         AdminLog.post(adminChannel, s"${Names.user(event.getUser.getName)} changed the level to poke for **enemy fullblesses**\nto **$level** for the world **$worldFormal**.", "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Amulet_of_Loss.gif")
 
         embedBuild.setDescription(s":gear: The level to poke for **enemy fullblesses**\nis now set to **$level** for the world **$worldFormal**.")

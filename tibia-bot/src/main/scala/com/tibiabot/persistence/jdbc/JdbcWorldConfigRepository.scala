@@ -110,6 +110,16 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       statement.execute("ALTER TABLE worlds ADD COLUMN hunt_guild_leavers VARCHAR(255) DEFAULT 'on'")
     }
 
+    // '0' until the world's role card is next posted: a card from before this
+    // column existed has no id on record, and /repair replaces it.
+    val roleCardQuery = statement.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'worlds' AND COLUMN_NAME = 'role_card_message'")
+    val roleCardExists = roleCardQuery.next()
+    roleCardQuery.close()
+
+    if (!roleCardExists) {
+      statement.execute("ALTER TABLE worlds ADD COLUMN role_card_message VARCHAR(255) DEFAULT '0'")
+    }
+
     // statistics_kills_posted was migrated in here for one day, while the daily
     // post sent its creature figures as a second message. It does not any more —
     // tibia.com publishes kill statistics overnight, so there was never anything
@@ -126,7 +136,7 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       if (!exists) statement.execute(s"ALTER TABLE worlds ADD COLUMN $column INT DEFAULT 0")
     }
 
-    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted,hunt_guild_leavers FROM worlds")
+    val result = statement.executeQuery(s"SELECT name,allies_channel,enemies_channel,neutrals_channel,levels_channel,deaths_channel,category,fullbless_role,nemesis_role,allypk_role,masslog_role,bounty_role,fullbless_channel,nemesis_channel,fullbless_level,show_neutral_levels,show_neutral_deaths,show_allies_levels,show_allies_deaths,show_enemies_levels,show_enemies_deaths,detect_hunteds,levels_min,deaths_min,activity_channel,online_combined,online_allies_min,online_enemies_min,online_neutrals_min,statistics_channel,statistics_posted,hunt_guild_leavers,role_card_message FROM worlds")
 
     val results = new ListBuffer[Worlds]()
     while (result.next()) {
@@ -162,10 +172,11 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       val statisticsChannel = Option(result.getString("statistics_channel")).getOrElse("0")
       val statisticsPosted = Option(result.getString("statistics_posted")).getOrElse("")
       val huntGuildLeavers = Option(result.getString("hunt_guild_leavers")).getOrElse("on")
+      val roleCardMessage = Option(result.getString("role_card_message")).getOrElse("0")
 
       // Merged worlds' rows stay in the db but are filtered out here (effectively inactive)
       if (!mergedWorlds.exists(_.equalsIgnoreCase(name))) {
-        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted, huntGuildLeavers)
+        results += Worlds(name, alliesChannel, enemiesChannel, neutralsChannel, levelsChannel, deathsChannel, category, fullblessRole, nemesisRole, allyPkRole, masslogRole, bountyRole, fullblessChannel, nemesisChannel, fullblessLevel, showNeutralLevels, showNeutralDeaths, showAlliesLevels, showAlliesDeaths, showEnemiesLevels, showEnemiesDeaths, detectHunteds, levelsMin, deathsMin, activityChannel, onlineCombined, onlineAlliesMin, onlineEnemiesMin, onlineNeutralsMin, statisticsChannel, statisticsPosted, huntGuildLeavers, roleCardMessage)
       }
     }
 
@@ -282,6 +293,8 @@ final class JdbcWorldConfigRepository(connectionProvider: ConnectionProvider, me
       // been read yet this run would throw here rather than simply have no
       // statistics channel.
       configMap += ("statistics_channel" -> Try(Option(result.getString("statistics_channel")).getOrElse("0")).getOrElse("0"))
+      // Defensive for the same reason: listWorlds is what adds the column.
+      configMap += ("role_card_message" -> Try(Option(result.getString("role_card_message")).getOrElse("0")).getOrElse("0"))
 
       val combinedOnlineValue: String = Try(result.getString("combined_online")) match {
         case Success(value) => value

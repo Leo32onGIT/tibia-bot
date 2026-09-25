@@ -611,6 +611,7 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
               |statistics_channel VARCHAR(255) NOT NULL DEFAULT '0',
               |statistics_posted VARCHAR(255) NOT NULL DEFAULT '',
               |hunt_guild_leavers VARCHAR(255) NOT NULL DEFAULT 'on',
+              |role_card_message VARCHAR(255) NOT NULL DEFAULT '0',
               |PRIMARY KEY (name)
               |);""".stripMargin
 
