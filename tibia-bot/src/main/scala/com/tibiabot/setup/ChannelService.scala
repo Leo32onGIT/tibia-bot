@@ -336,7 +336,7 @@ final class ChannelService(
    *  button that opens the presser's own cooldowns. See CooldownEmbeds.tracker.
    *  Its id is kept, and `/repair` fetches it by that. */
   private def postCooldownTracker(channel: TextChannel, guild: Guild): Unit =
-    channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().queue(
+    channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().setSuppressedNotifications(true).queue(
       (posted: Message) => discordConfigRepository.setTrackerMessage(guild.getId, posted.getId),
       failedTo("post the cooldown tracker", guild))
 
@@ -371,7 +371,7 @@ final class ChannelService(
         (_: Message) => discordUpdateConfig(guild, "", "", "", "", world), failed)
     else {
       message.delete().queue(_ => (), _ => ())
-      message.getChannel.sendMessageComponents(card).useComponentsV2().queue(
+      message.getChannel.sendMessageComponents(card).useComponentsV2().setSuppressedNotifications(true).queue(
         (posted: Message) => discordUpdateConfig(guild, "", "", "", posted.getId, world), failed)
     }
   }
@@ -425,7 +425,7 @@ final class ChannelService(
     combinedFutures.map { embeds =>
       channel
         .sendMessageComponents(ServerSaveCard.components(serverSaveEmbeds(embeds, world)).asJava)
-        .useComponentsV2()
+        .useComponentsV2().setSuppressedNotifications(true)
         .queue(
           (message: Message) => discordUpdateConfig(guild, "", "", "", message.getId, world),
           (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
@@ -437,7 +437,7 @@ final class ChannelService(
    *  channel, and keep its id on the world, in the database and in the cache the
    *  card's buttons read their world from. The world's row must exist already. */
   private def postRoleCard(channel: TextChannel, guild: Guild, world: String, card: Container): Unit =
-    channel.sendMessageComponents(card).useComponentsV2().queue(
+    channel.sendMessageComponents(card).useComponentsV2().setSuppressedNotifications(true).queue(
       (posted: Message) => {
         worldRepairConfig(guild, world, "role_card_message", posted.getId)
         streamState.modifyWorldsData { data =>

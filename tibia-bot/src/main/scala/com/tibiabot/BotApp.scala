@@ -2198,7 +2198,7 @@ object BotApp extends App with StrictLogging {
 
               posted += 1
               boostedChannel.sendMessageComponents(presentation.ServerSaveCard.components(serverSaveEmbeds(boostedEmbeds, lastWorld)).asJava)
-                .useComponentsV2()
+                .useComponentsV2().setSuppressedNotifications(true)
                 .queue((message: Message) => {
                   //updateBoostedMessage(guild.getId, message.getId)
                   discordUpdateConfig(guild, "", "", "", message.getId, lastWorld)
