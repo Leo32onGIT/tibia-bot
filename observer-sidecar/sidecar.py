@@ -23,10 +23,12 @@ Env:  OBSERVER_API_BASE_URL (default https://observer.tibia.com/api/v1)
       OBSERVER_SIDECAR_TOKEN (optional shared secret; if set, callers must send
                               it as the X-Sidecar-Token header)
       OBSERVER_SIDECAR_HOST / OBSERVER_SIDECAR_PORT (default 127.0.0.1 / 8787)
+      OBSERVER_RAID_REGIONS  (explored | all; default explored) what a raid rule covers
 """
 import base64
 import json
 import os
+import uuid
 
 from curl_cffi import requests as cr
 from flask import Flask, jsonify, request
@@ -202,11 +204,14 @@ def _rule_limit(key):
     return DEFAULT_LIMITS[key]
 
 
-def _stored(r, applied, skipped, limit):
+def _stored(r, applied, skipped, limit, unexplored=None):
     """The answer to a settings store: which worlds got a rule, which were left out
-    for want of room, and the upstream's own words when it refused."""
+    for want of room, which (raids only) had nothing explored to cover, and the
+    upstream's own words when it refused."""
     ok = r.status_code == 200
     out = {"ok": ok, "status_code": r.status_code, "worlds": applied, "skipped": skipped, "limit": limit}
+    if unexplored:
+        out["unexplored"] = unexplored
     if not ok:
         out["error"] = (r.text or "")[:300]
     return jsonify(out)
@@ -250,22 +255,35 @@ def ensure_rules():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
-# Every region a raid rule covers. The API has no list of regions, and it does not
+# Every region, for OBSERVER_RAID_REGIONS=all. The API has no list of regions, and it does not
 # check a rule's RegionIds against the account's exploration or even against the
 # regions that exist: on 24 Sep 2026 it stored ids 1-60 for an account that had
 # explored only 3 (Carlin) and 23 (Hrodmir). Region ids are small integers, so this
 # range covers them all, and an explored id outside it is added anyway.
 ALL_REGION_IDS = list(range(1, 61))
 
+# Which regions a raid rule covers: "explored" (the default) or "all". A rule over
+# regions 1-60 was stored without complaint but never reported a single raid, not
+# even one in an explored area (25 Sep 2026), so rules are back to what the
+# account has explored, the shape the Observer app itself makes. "all" is kept to
+# test widening again once raids are seen arriving.
+RAID_REGIONS = os.environ.get("OBSERVER_RAID_REGIONS", "explored").strip().lower()
+
+# The id Observer stored for rules sent without one. Its own app gives each rule a
+# real id, and a rule with this one may never be checked against raids.
+NIL_RULE_ID = "00000000-0000-0000-0000-000000000000"
+
 
 @app.post("/ensure-raid-rules")
 def ensure_raid_rules():
-    """Ensure an enabled raid rule covering every region on each of `worlds`, as
-    many worlds as the account has room for.
+    """Ensure an enabled raid rule on each of `worlds`, as many worlds as the
+    account has room for.
 
-    The intent is to catch every raid, so a rule covers every region
-    (ALL_REGION_IDS), not only the areas the account has explored. `worlds` is
-    exactly what gets a rule, most wanted first: the bot sends only worlds the
+    A rule covers the regions the account has explored there, or every region
+    (ALL_REGION_IDS) with OBSERVER_RAID_REGIONS=all; see RAID_REGIONS for why the
+    default went back to explored. Each rule carries a real id (see NIL_RULE_ID).
+    A world with nothing explored gets no rule and is reported as `unexplored`.
+    `worlds` is exactly what gets a rule, most wanted first: the bot sends only worlds the
     account has characters on that the linking guild has set up, and nothing else
     is added here. An empty list leaves the account with none of the bot's raid
     rules. All three modes (area/subarea revealed, raid started) are on, so the
@@ -285,30 +303,42 @@ def ensure_raid_rules():
             return jsonify({"ok": False, "error": "could not read settings"}), 502
         explored = _observer("GET", "/Area/ExploredAreas", bearer=credential)
         areas = explored.json() if explored.status_code == 200 else []
-        # Only to add an explored id outside ALL_REGION_IDS to a rule; explored
-        # worlds no longer earn a rule of their own.
+        # What each world's rule covers; explored worlds don't earn a rule of
+        # their own.
         explored_ids = {e["world"]: [a["areaId"] for a in e["exploredAreas"]]
                         for e in areas if e.get("exploredAreas")}
-        worlds = list(requested)
+        explored_by_world = {w.lower(): ids for w, ids in explored_ids.items()}
+
+        def regions(world):
+            explored = set(explored_by_world.get(world.lower(), []))
+            return sorted(set(ALL_REGION_IDS) | explored) if RAID_REGIONS == "all" else sorted(explored)
+
+        # A world with no explored region has nothing for an explored-only rule
+        # to cover, so it is left out rather than given an empty rule.
+        worlds = [w for w in requested if regions(w)]
+        unexplored = [w for w in requested if not regions(w)]
         limit = _rule_limit("maximumRaidNotificationRules")
         existing = settings.get("raidNotificationRules") or []
         kept = [r for r in existing if r.get("ruleName") != RULE_NAME]
         room = max(0, limit - len(kept))
         applied, skipped = worlds[:room], worlds[room:]
 
-        explored_by_world = {w.lower(): ids for w, ids in explored_ids.items()}
+        # A world's rule keeps the id it already has, unless that is the blank one.
+        ids = {(r.get("world") or r.get("World") or "").lower(): r.get("ruleId")
+               for r in existing if r.get("ruleName") == RULE_NAME}
 
-        def regions(world):
-            return sorted(set(ALL_REGION_IDS) | set(explored_by_world.get(world.lower(), [])))
+        def rule_id(world):
+            known = ids.get(world.lower())
+            return known if known and known != NIL_RULE_ID else str(uuid.uuid4())
 
         managed = [{
-            "ruleName": RULE_NAME, "World": w, "RegionIds": regions(w),
+            "ruleId": rule_id(w), "ruleName": RULE_NAME, "World": w, "RegionIds": regions(w),
             "isEnabled": True, "areaRevealed": "appNotifications",
             "subareaRevealed": "appNotifications", "raidStarted": "appNotifications",
         } for w in applied]
         settings["raidNotificationRules"] = kept + managed
         r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
-        return _stored(r, applied, skipped, limit)
+        return _stored(r, applied, skipped, limit, unexplored)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
 

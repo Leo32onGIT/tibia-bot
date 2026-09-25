@@ -291,14 +291,18 @@ observer_tokens
   any explored id outside that range). Raid rules now go to the account's
   character worlds, most wanted first (the same order as MWC rules), and then to
   any other world it has explored, up to the 15-rule cap.
-  **Settled 25 Sep 2026: the feed is exploration-gated after all.** A goblin raid
-  on Victoris (Femor Hills, started 03:28 UTC) never reached the feed. The
-  account's Victoris rule covered every region, and four polls across its area,
-  subarea and start stages all answered 200 with no raids. The account had
-  explored only Carlin and Hrodmir there. So the API stores any region but only
-  reports raids in areas the account has explored. Coverage grows only with
-  members exploring in-game, and with more linked accounts, since the feed is
-  pooled.
+  **Revised 25 Sep 2026: the every-region rule never reported anything.** A goblin
+  raid on Victoris (Femor Hills, 03:28 UTC) and then an orc raid by Carlin (04:13
+  UTC) both never reached the feed, although Carlin is explored. A read-only probe
+  of the account showed the rule stored as sent (Victoris, regions 1–60, enabled)
+  but with `ruleId` all zeros, since the sidecar never sent one, and `/Raids`
+  answering `[]`. Nothing had ever been posted to the raids channel. So the rule
+  itself is suspect: the blank id, or region ids that don't exist. The sidecar
+  now gives each rule a real id (keeping an existing one) and covers only the
+  explored regions by default (`OBSERVER_RAID_REGIONS=explored`; `all` restores
+  1–60). A world with nothing explored gets no rule and is reported as
+  `unexplored`. Once raids are seen arriving, try `all` to learn whether
+  unexplored regions are reported.
 - **Rules only where account and guild meet (25 Sep 2026).** An account's MWC and
   raid rules now go only to worlds that are both the account's (it has characters
   there) and set up in the guild it was linked in, the guild's notifications world
