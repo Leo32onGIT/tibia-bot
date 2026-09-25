@@ -294,15 +294,16 @@ object BotApp extends App with StrictLogging {
     // each is due, so there is no polling and the line lands to the second.
     schedule = (delay, task) => { actorSystem.scheduler.scheduleOnce(delay)(task())(ex); () },
     servesGuild = guildId => discordGateway.guildById(guildId) != null,
-    // A secondary only reads the primary's published copy: it sweeps that more often,
-    // and looks a little later after each stage change, once the primary's own poll
-    // has had time to publish it.
+    // A secondary only reads the primary's published copy. It polls the moment the
+    // primary announces a new one (see onRaidsChanged below) rather than at guessed
+    // delays after each stage, which put its start posts 20-45s late; its own
+    // sweep, more often than the primary's, is the fallback if an announcement is
+    // missed.
     sweepEvery = if (observerMode == observer.ObserverFeed.Consumer) java.time.Duration.ofMinutes(2)
                  else java.time.Duration.ofMinutes(15),
     wakeAfter =
-      if (observerMode == observer.ObserverFeed.Consumer)
-        List(java.time.Duration.ofSeconds(45), java.time.Duration.ofSeconds(150))
-      else List(java.time.Duration.ofSeconds(20), java.time.Duration.ofMinutes(2)))
+      if (observerMode == observer.ObserverFeed.Consumer) Nil
+      else observer.ObserverRaidPoller.DefaultWakes)
 
   // Ties bot activity to a Patreon subscription via seats (see
   // paywall.PaywallService): /setup assigns one of the caller's seats to a
@@ -1071,6 +1072,12 @@ object BotApp extends App with StrictLogging {
     // stage change it can predict — see observer.ObserverRaidPoller; this gives it a
     // pulse.
     actorSystem.scheduler.scheduleWithFixedDelay(2.minutes, 1.minute)(() => observerRaidPoller.tick())(ex)
+    // A secondary polls the moment the primary announces a new raids copy — off the
+    // Redis connection's thread, since a poll reads Redis and the database.
+    if (consumer)
+      observerFeed.onRaidsChanged(() => { Future(observerRaidPoller.poll())(ex); () }).failed.foreach { error =>
+        logger.error("Could not listen for the primary's raid announcements; raids will post on the 2-minute sweep", error)
+      }(ex)
     // Amend the notifications message when a world's mini world changes move on
     // after it posted: the feed may roll over later than the boosted boss does. The
     // watcher decides for itself when a poll is due; this just gives it a pulse.

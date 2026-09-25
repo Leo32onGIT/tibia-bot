@@ -30,6 +30,8 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
   private class Harness {
     var clock: Instant = t0
     var feed: List[RaidAnnouncement] = Nil
+    /** How many times the feed was asked for — each is a request to the API. */
+    var fetches = 0
     val posts = mutable.ListBuffer.empty[(String, String)]
     val scheduled = mutable.ListBuffer.empty[(FiniteDuration, () => Unit)]
     private val posted = mutable.Set.empty[(String, String, String)]
@@ -49,7 +51,7 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     private def said(text: String): MessageEmbed = new EmbedBuilder().setDescription(text).build()
 
     val poller = new ObserverRaidPoller(
-      pooledRaids = () => feed.groupBy(_.world),
+      pooledRaids = () => { fetches += 1; feed.groupBy(_.world) },
       raidRepository = repo,
       post = (guildId, _, embed) => posts += (guildId -> embed.getDescription),
       schedule = (delay, task) => scheduled += (delay -> task),
@@ -76,10 +78,39 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.markedFor("g2") shouldBe empty
   }
 
-  test("a one-off poll is scheduled just after the subarea reveals, 15 minutes before the start") {
+  test("one-off polls are scheduled from two seconds after the subarea reveals, 15 minutes before the start") {
     val h = new Harness
     h.pollAt(0, entry("areaRevealed"))
-    h.scheduled.map(_._1.toSeconds).toList shouldBe List(45 * 60 + 20, 45 * 60 + 120)
+    h.scheduled.map(_._1.toSeconds).toList shouldBe List(2, 5, 10, 20, 120).map(45 * 60 + _)
+  }
+
+  test("once the stage has been seen, the later one-off polls don't ask the feed again") {
+    val h = new Harness
+    h.pollAt(0, entry("areaRevealed"))
+    val wakes = h.scheduled.map(_._2).toList
+    h.clock = t0.plus(Duration.ofMinutes(45)).plusSeconds(2)
+    h.feed = List(entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
+    val before = h.fetches
+    wakes.head()                       // the first wake finds the subarea
+    wakes.tail.foreach(_())            // the rest see it was found and skip
+    h.fetches shouldBe before + 1
+    h.posts.toList shouldBe List("g1" -> "area:?", "g1" -> "subarea:?")
+  }
+
+  test("a start wake keeps looking until the feed says which raid it is") {
+    val h = new Harness
+    h.pollAt(0, entry("areaRevealed"))
+    h.pollAt(45, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
+    val startWakes = h.scheduled.filter(_._1.toSeconds < 20 * 60).map(_._2).toList
+    h.clock = start.plusSeconds(2)
+    // Started, but not yet identified: the next wake must still look.
+    h.feed = List(entry("subareaRevealed", Some("Krimhorn")), entry("raidStarted", Some("Krimhorn")))
+    val before = h.fetches
+    startWakes(0)()
+    h.feed = List(entry("subareaRevealed", Some("Krimhorn")), entry("raidStarted", Some("Krimhorn"), WinterWolves))
+    startWakes(1)()
+    startWakes.drop(2).foreach(_())
+    h.fetches shouldBe before + 2
   }
 
   test("the subarea stage is a new post, and the area post never follows it") {

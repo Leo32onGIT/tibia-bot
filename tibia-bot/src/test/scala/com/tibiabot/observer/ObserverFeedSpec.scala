@@ -23,7 +23,30 @@ class ObserverFeedSpec extends AnyFunSuite with Matchers {
       Future.successful(store.putIfAbsent(key, value).isEmpty)
     def delete(key: String): Future[Unit] = Future.successful { store.remove(key); () }
     def keysMatching(pattern: String): Future[List[String]] = Future.successful(Nil)
+    val listeners = TrieMap.empty[String, List[String => Unit]]
+    override def publish(channel: String, message: String): Future[Long] = {
+      val reached = listeners.getOrElse(channel, Nil)
+      reached.foreach(_(message))
+      Future.successful(reached.size.toLong)
+    }
+    override def subscribe(channel: String)(onMessage: String => Unit): Future[Unit] =
+      Future.successful { listeners.put(channel, onMessage :: listeners.getOrElse(channel, Nil)); () }
     def close(): Unit = ()
+  }
+
+  test("the primary announces a changed raids copy once, and a secondary reacts to it") {
+    val redis = new FakeRedis
+    var pool = Map("Antica" -> List(raid))
+    val primary = new ObserverFeed(ObserverFeed.Publisher, () => Some(antica), () => pool, redis)
+    val secondary = new ObserverFeed(ObserverFeed.Consumer, never, never, redis)
+    var seen = List.empty[Map[String, List[RaidAnnouncement]]]
+    secondary.onRaidsChanged(() => seen = seen :+ secondary.raidsByWorld())
+
+    primary.raidsByWorld()
+    primary.raidsByWorld()            // unchanged: no second announcement
+    pool = Map("Antica" -> List(raid, raid.copy(category = "subareaRevealed")))
+    primary.raidsByWorld()
+    seen shouldBe List(Map("Antica" -> List(raid)), pool)
   }
 
   private val antica = Map("antica" -> List(MiniWorldChange("Antica", "Fury Gate", "Near Venore.")))

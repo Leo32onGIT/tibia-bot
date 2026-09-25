@@ -68,7 +68,7 @@ final class ObserverRaidPoller(
   schedule: (FiniteDuration, () => Unit) => Unit,
   servesGuild: String => Boolean,
   sweepEvery: Duration = Duration.ofMinutes(15),
-  wakeAfter: List[Duration] = List(Duration.ofSeconds(20), Duration.ofMinutes(2)),
+  wakeAfter: List[Duration] = ObserverRaidPoller.DefaultWakes,
   known: Int => Boolean = id => RaidTypeCatalog.get(id).isDefined,
   areaPost: (RaidAnnouncement, Option[RaidType]) => MessageEmbed = ObserverEmbeds.areaEmbed(_, _),
   subareaPost: (RaidAnnouncement, Option[RaidType], Instant) => MessageEmbed = ObserverEmbeds.subareaEmbed(_, _, _),
@@ -90,6 +90,9 @@ final class ObserverRaidPoller(
   private val scheduledRaids = TrieMap.empty[String, Unit]
   // The one-off polls already scheduled, by raid and the stage they wait for.
   private val wakes = TrieMap.empty[(String, Int), Unit]
+  // The furthest stage the feed has shown for each raid, so a one-off poll whose
+  // stage has already been seen is skipped rather than asking the API again.
+  private val reached = TrieMap.empty[String, Int]
 
   @volatile private var lastSweep: Instant = Instant.EPOCH
 
@@ -115,6 +118,7 @@ final class ObserverRaidPoller(
         val raids = entries.groupBy(_.raidId).values.map(merge(_, known)).toList
         RaidRanking.order(raids, typePriority).foreach { raid =>
           register(raid, world, at)
+          reached.update(raid.raidId, math.max(reached.getOrElse(raid.raidId, 0), stage(raid.category)))
           // A raid already over is history, not news: raids stay in the feed for
           // hours, so a restart (or dedup rows pruned) would otherwise announce and
           // unfurl every one from earlier in the day.
@@ -168,23 +172,34 @@ final class ObserverRaidPoller(
   }
 
   /** Poll again just after the raid's next stage: its subarea reveal, or its start
-   *  while the raid (and so its lines) is not yet known. Scheduled once per stage;
-   *  a moment already past schedules nothing — the sweep covers that. */
+   *  while the raid (and so its lines) is not yet known. Scheduled once per stage,
+   *  at each of `wakeAfter`; a moment already past schedules nothing — the sweep
+   *  covers that. Each wake first checks whether the stage has been seen since,
+   *  by an earlier wake or anything else, and does nothing if so: the wakes are
+   *  close together so the stage is caught within seconds, and the ones after it
+   *  shows up cost nothing. */
   private def wakeForNextStage(raid: RaidAnnouncement, at: Instant): Unit =
     raid.startDate.foreach { start =>
-      val reached = stage(raid.category)
+      val now = stage(raid.category)
       val next: Option[(Int, Instant)] =
-        if (reached < SubareaStage) Some(SubareaStage -> start.minus(SubareaLead))
-        else if (reached < StartedStage || !known(raid.raidTypeId)) Some(StartedStage -> start)
+        if (now < SubareaStage) Some(SubareaStage -> start.minus(SubareaLead))
+        else if (now < StartedStage || !known(raid.raidTypeId)) Some(StartedStage -> start)
         else None
       next.foreach { case (waitingFor, moment) =>
         if (wakes.putIfAbsent((raid.raidId, waitingFor), ()).isEmpty)
           wakeAfter.foreach { offset =>
             val delay = Duration.between(at, moment.plus(offset))
-            if (!delay.isNegative) schedule(delay.toMillis.millis, () => poll())
+            if (!delay.isNegative)
+              schedule(delay.toMillis.millis, () => if (stillWaiting(raid.raidId, waitingFor)) poll())
           }
       }
     }
+
+  /** Whether a raid has yet to show `waitingFor` in the feed — and, for its start,
+   *  which raid it is, since that is what the start's poll is for. */
+  private def stillWaiting(raidId: String, waitingFor: Int): Boolean =
+    reached.getOrElse(raidId, 0) < waitingFor ||
+      (waitingFor == StartedStage && !tracked.get(raidId).exists(t => known(t.raidTypeId)))
 
   /** Schedule each of a raid's broadcasts to post at its exact moment. A line whose
    *  moment has already passed (a raid caught late, or already in progress) is given a
@@ -259,12 +274,20 @@ final class ObserverRaidPoller(
       if (over(t, at) || stale) {
         tracked.remove(raidId)
         scheduledRaids.remove(raidId)
+        reached.remove(raidId)
         wakes.keys.filter(_._1 == raidId).foreach(wakes.remove)
       }
     }
 }
 
 object ObserverRaidPoller {
+
+  /** When to look again after a raid's next stage is due. The first look is two
+   *  seconds after, in case the feed already has it; the later ones catch it
+   *  running late, and are skipped once it has been seen. 20 seconds was the first
+   *  look until 26 Sep 2026, which put every start post at least that late. */
+  val DefaultWakes: List[Duration] =
+    List(Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(10), Duration.ofSeconds(20), Duration.ofMinutes(2))
 
   val AreaStage = 1
   val SubareaStage = 2

@@ -144,9 +144,31 @@ final class ObserverFeed(
     case Consumer => read(RaidsKey).flatMap(FeedJson.parseRaids).getOrElse(Map.empty)
     case Standalone | Publisher =>
       val fetched = fetchRaids()
-      if (mode == Publisher) write(RaidsKey, FeedJson.raids(fetched), PublishedFor)
+      if (mode == Publisher) {
+        val copy = FeedJson.raids(fetched)
+        write(RaidsKey, copy, PublishedFor)
+        // After the write, so a secondary that reacts reads the new copy. Only on a
+        // change: every poll would otherwise send every secondary polling too.
+        if (!lastRaidsCopy.contains(copy)) {
+          lastRaidsCopy = Some(copy)
+          Try(Await.result(cache.publish(RaidsChangedChannel, now().toString), 5.seconds)).failed.foreach { ex =>
+            logger.warn(s"Could not announce the new Observer raids copy: ${ex.getMessage}")
+          }
+        }
+      }
       fetched
   }
+
+  /** The raids copy this bot last published, to announce only real changes. */
+  @volatile private var lastRaidsCopy: Option[String] = None
+
+  /** On a secondary: run `react` whenever the primary announces a new raids copy,
+   *  so the raids channels follow the primary within moments instead of on a
+   *  guessed delay. `react` is handed the work to run elsewhere — it is called on
+   *  the Redis connection's thread. The returned Future fails when the subscription
+   *  could not be set up; the secondary's own sweep still runs either way. */
+  def onRaidsChanged(react: () => Unit): scala.concurrent.Future[Unit] =
+    cache.subscribe(RaidsChangedChannel)(_ => react())
 
   private def read(key: String): Option[String] =
     Try(Await.result(cache.get(key), 5.seconds)).toOption.flatten
@@ -172,6 +194,9 @@ object ObserverFeed {
 
   val MwcKey = "tibia:observer:mwc"
   val RaidsKey = "tibia:observer:raids"
+
+  /** Where the primary announces that the raids copy changed. */
+  val RaidsChangedChannel = "tibia:observer:raids-changed"
 
   /** How long the raids copy lives: a little over two of the primary's slowest
    *  polls (every 15 minutes outside the server-save window), so one slow or failed
