@@ -262,14 +262,16 @@ object BotApp extends App with StrictLogging {
     new observer.ObserverApiClient(),
     Config.Observer.enabled,
     relay = Option.when(observerMode == observer.ObserverFeed.Consumer)(observerRelay),
-    // An account gets only a few rules, so the linking guild's notifications world
-    // comes first, then the rest of what it tracks, then whatever any guild tracks
-    // (the pooled feeds serve every guild). Read from the shared databases, since a
-    // relayed link reaches the primary from a guild it does not run.
-    worldPriority = guildId =>
-      discordConfigRepository.getConfig(guildId).get("last_world").toList ++
-        worldConfigRepository.listWorlds(guildId).map(_.name) ++
-        worldConfigRepository.allTrackedWorldNames().sorted)
+    // The worlds the linking guild has set up — an account linked there gets rules
+    // for no others — with its notifications world first, since an account holds
+    // only a few rules. Read from the shared databases, since a relayed link reaches
+    // the primary from a guild it does not run.
+    guildWorlds = guildId => {
+      val setUp = worldConfigRepository.listWorlds(guildId).map(_.name)
+      val main = discordConfigRepository.getConfig(guildId).get("last_world")
+        .filter(w => setUp.exists(_.equalsIgnoreCase(w)))
+      main.toList ++ setUp
+    })
 
   val observerFeed = new observer.ObserverFeed(
     observerMode,
@@ -965,11 +967,16 @@ object BotApp extends App with StrictLogging {
     // A world set up after a member linked their Observer token gets its raids
     // channel here, when a token linked in this guild covers it — the same channel
     // adding a token makes (see interactions.ObserverModals). Seeded, so it starts
-    // with the next raid rather than backfilling one in progress.
+    // with the next raid rather than backfilling one in progress. The links here
+    // then get their rules again, which now cover this world too.
     worldSetUp = (guild, world) => {
       if (observerService.coversWorld(guild.getId, world) && channelService.ensureRaidsChannel(guild, world))
         observerRaidPoller.seedPosted(guild.getId, world)
+      observerService.reapplyRulesFor(guild.getId)
     },
+    // And after a /remove, the rules drop the world, and come off an account
+    // entirely when it was the last world it had in common with the guild.
+    worldRemoved = (guild, _) => observerService.reapplyRulesFor(guild.getId),
     forgetGuild = guildId => {
       if (worldsData.contains(guildId)) modifyWorldsData(_ - guildId)
       val updatedDiscordsData = discordsData.map { case (world, discordsList) =>

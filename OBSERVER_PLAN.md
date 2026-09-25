@@ -292,6 +292,19 @@ observer_tokens
   character worlds, most wanted first (the same order as MWC rules), and then to
   any other world it has explored, up to the 15-rule cap. Not yet seen: a raid
   from an unexplored region actually arriving in the feed.
+- **Rules only where account and guild meet (25 Sep 2026).** An account's MWC and
+  raid rules now go only to worlds that are both the account's (it has characters
+  there) and set up in the guild it was linked in, the guild's notifications world
+  first (`ObserverService.ruleWorlds`). The pooled-for-everyone ordering, and the
+  sidecar adding worlds the account had merely explored, are gone. A world the
+  guild doesn't track has nowhere to post. When no world is both, the bot's rules
+  come off the account (`/clear-rules`); if the guild's worlds can't be read, the
+  rules are left alone. `/setup` and `/remove` re-apply the rules of every link in
+  the guild at once, after the world's row is written or deleted. On a secondary
+  that request goes to the primary over `ObserverRelay` (`reapply-rules`), not
+  waited on; the daily re-apply still mends anything missed. Confirmed before the
+  change from blue's logs: user 313911524475535364 in guild 1224670957466161234
+  had raid rules on all 11 of the account's worlds, Victoris first.
 - **Mini world changes: notifications message only (24 Sep 2026).** No DM carries
   them for now. The boosted DM's per-member MWC section from Phase 3 was taken out,
   along with the helpers that existed only for it (`ObserverEmbeds.mwcEmbed`,

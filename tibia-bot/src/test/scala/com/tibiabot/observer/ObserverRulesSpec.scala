@@ -42,14 +42,16 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
     new ObserverApiClient(url, sharedToken = "", deviceIdentification = "Violent Bot",
       clientVersion = "1.1.6", metrics = metrics)
 
-  test("an account's worlds go the guild's first, in its order, then the rest alphabetically") {
-    val worlds = List("Xyla", "Cantabra", "Victoris", "Ombra", "Honbra")
-    ObserverService.prioritise(worlds, List("victoris", "Antica", "OMBRA", "Victoris")) shouldBe
-      List("Victoris", "Ombra", "Cantabra", "Honbra", "Xyla")
+  test("rules go only to worlds that are both the account's and set up in the guild, in the guild's order") {
+    val account = List("Xyla", "Cantabra", "Victoris", "Ombra", "Honbra")
+    ObserverService.ruleWorlds(account, List("victoris", "Antica", "OMBRA", "Victoris")) shouldBe
+      List("Victoris", "Ombra")
   }
 
-  test("with nothing to go by, an account's worlds go alphabetically, each once") {
-    ObserverService.prioritise(List("Ombra", "cantabra", "Ombra"), Nil) shouldBe List("cantabra", "Ombra")
+  test("no world in common means no rules") {
+    ObserverService.ruleWorlds(List("Victoris"), List("Antica")) shouldBe Nil
+    ObserverService.ruleWorlds(Nil, List("Antica")) shouldBe Nil
+    ObserverService.ruleWorlds(List("Victoris"), Nil) shouldBe Nil
   }
 
   test("setting rules says which worlds got one and which there was no room for") {

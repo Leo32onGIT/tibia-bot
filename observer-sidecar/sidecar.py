@@ -264,13 +264,14 @@ def ensure_raid_rules():
     many worlds as the account has room for.
 
     The intent is to catch every raid, so a rule covers every region
-    (ALL_REGION_IDS), not only the areas the account has explored. `worlds` is the
-    account's worlds most wanted first; a world it has explored areas on but did
-    not ask for comes after them. All three modes (area/subarea revealed, raid
-    started) are on, so the /Raids feed carries every stage; the bot filters by
-    `category`. Like MWC rules, raid rules are capped
-    (`maximumRaidNotificationRules`), so worlds are taken in order up to the room
-    the account's own rules leave.
+    (ALL_REGION_IDS), not only the areas the account has explored. `worlds` is
+    exactly what gets a rule, most wanted first: the bot sends only worlds the
+    account has characters on that the linking guild has set up, and nothing else
+    is added here. An empty list leaves the account with none of the bot's raid
+    rules. All three modes (area/subarea revealed, raid started) are on, so the
+    /Raids feed carries every stage; the bot filters by `category`. Like MWC
+    rules, raid rules are capped (`maximumRaidNotificationRules`), so worlds are
+    taken in order up to the room the account's own rules leave.
     """
     b = _json_body()
     credential = b.get("credential")
@@ -284,10 +285,11 @@ def ensure_raid_rules():
             return jsonify({"ok": False, "error": "could not read settings"}), 502
         explored = _observer("GET", "/Area/ExploredAreas", bearer=credential)
         areas = explored.json() if explored.status_code == 200 else []
+        # Only to add an explored id outside ALL_REGION_IDS to a rule; explored
+        # worlds no longer earn a rule of their own.
         explored_ids = {e["world"]: [a["areaId"] for a in e["exploredAreas"]]
                         for e in areas if e.get("exploredAreas")}
-        asked = {w.lower() for w in requested}
-        worlds = list(requested) + sorted((w for w in explored_ids if w.lower() not in asked), key=str.lower)
+        worlds = list(requested)
         limit = _rule_limit("maximumRaidNotificationRules")
         existing = settings.get("raidNotificationRules") or []
         kept = [r for r in existing if r.get("ruleName") != RULE_NAME]

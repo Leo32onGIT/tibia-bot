@@ -49,7 +49,8 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
  *  @param serverSaveEmbeds    the whole notifications message around the boosted boss and creature for a world (Mini World Changes above them; Rashid, Dream Courts and Drome below); stays in BotApp (Dream Scar/Drome state), passed as a callback
  *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
- *  @param worldSetUp          runs once a `/setup` has made a world's channels; BotApp gives the world its raids channel when a Tibia Observer token linked in the guild covers it
+ *  @param worldSetUp          runs once a `/setup` has made a world's channels; BotApp gives the world its raids channel when a Tibia Observer token linked in the guild covers it, and sets the guild's Observer links' rules again
+ *  @param worldRemoved        runs once a `/remove` has deleted a world's row; BotApp sets the guild's Observer links' rules again, without that world
  */
 final class ChannelService(
   streamSupervisor: StreamSupervisor,
@@ -68,7 +69,8 @@ final class ChannelService(
   forgetGuild: String => Unit,
   forgetWorldSubscriptions: (String, String) => Unit,
   sharedConfigGuilds: Set[String],
-  worldSetUp: (Guild, String) => Unit = (_, _) => ()
+  worldSetUp: (Guild, String) => Unit = (_, _) => (),
+  worldRemoved: (Guild, String) => Unit = (_, _) => ()
 )(implicit ex: ExecutionContextExecutor) extends StrictLogging {
 
   private def createConfigDatabase(guild: Guild): Unit = schemaInitializer.initGuild(guild.getId, guild.getName)
@@ -1530,6 +1532,10 @@ final class ChannelService(
         // update the database
         worldRemoveConfig(guild, world)
         paywallService.releaseSeat(guild.getId, world)
+        // After the row is gone, so what follows no longer counts this world. Never
+        // fail a /remove over it.
+        try worldRemoved(guild, world)
+        catch { case ex: Throwable => logger.warn(s"Post-remove step failed for '$world' in guild '${guild.getId}'", ex) }
 
         // If that was the guild's last world, the guild-level command-log and
         // notifications channels (and the "Violent Bot" category) would be left

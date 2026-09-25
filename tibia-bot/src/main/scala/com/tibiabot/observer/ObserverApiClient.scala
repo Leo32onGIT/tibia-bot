@@ -116,7 +116,8 @@ final class ObserverApiClient(
       "worlds" -> JsArray(worlds.map(JsString(_)).toVector)
     )))
 
-  /** Remove the bot's MWC rules from the account (on unlink). */
+  /** Remove the bot's rules, MWC and raid, from the account: on unlink, and when
+   *  no world is both the account's and set up in the guild it was linked in. */
   def clearRules(credential: String): Boolean =
     post("/clear-rules", JsObject(
       "credential" -> JsString(credential),

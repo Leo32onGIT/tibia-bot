@@ -11,8 +11,9 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.Try
 import scala.util.control.NonFatal
 
-/** Hands the Observer account operations — linking a token, and clearing the bot's
- *  rules from an account on unlink — from a bot that does not talk to the Observer
+/** Hands the Observer account operations — linking a token, clearing the bot's
+ *  rules from an account on unlink, and setting a guild's links' rules again when
+ *  it sets up or removes a world — from a bot that does not talk to the Observer
  *  API to the one that does.
  *
  *  Every Observer request leaves from one place: the primary, which runs the
@@ -49,6 +50,18 @@ final class ObserverRelay(
    *  link is deleted — the primary needs the stored credential to do it. */
   def clearRules(guildId: String, userId: String): Reply =
     ask(Request(newId(), OpClearRules, guildId, userId, None), clearTimeout)
+
+  /** Ask the primary to set the rules again for every account linked in a guild,
+   *  after the guild set up or removed a world. Not waited on: `/setup` and
+   *  `/remove` have their own answers to give, and the primary re-applies every
+   *  link daily anyway, which catches a request that went astray. True when the
+   *  primary heard it. */
+  def reapplyRules(guildId: String): Boolean = {
+    val reached = Try(Await.result(cache.publish(Channel, encode(Request(newId(), OpReapplyRules, guildId, "", None))), 5.seconds))
+      .getOrElse(0L)
+    if (reached == 0L) logger.warn(s"No bot heard the request to re-apply the Observer rules for guild '$guildId'")
+    reached > 0L
+  }
 
   private def ask(request: Request, timeout: FiniteDuration): Reply = {
     val reached = Try(Await.result(cache.publish(Channel, encode(request)), 5.seconds)).getOrElse(0L)
@@ -109,6 +122,8 @@ object ObserverRelay {
 
   val OpLink = "link"
   val OpClearRules = "clear-rules"
+  /** Every link in `guildId`; the request's `userId` is empty. */
+  val OpReapplyRules = "reapply-rules"
 
   /** `token` is the member's single-use access code, present only for a link. */
   final case class Request(id: String, op: String, guildId: String, userId: String, token: Option[String])

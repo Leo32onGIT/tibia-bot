@@ -65,6 +65,27 @@ class ObserverRelaySpec extends AnyFunSuite with Matchers {
     seen.map(r => (r.op, r.token)) shouldBe List((ObserverRelay.OpClearRules, None))
   }
 
+  test("re-applying a guild's rules names the guild, not a member, and is not waited on") {
+    val redis = new FakeRedis
+    val seen = ListBuffer.empty[ObserverRelay.Request]
+    serving(redis) { request => seen.synchronized(seen += request); ObserverRelay.Done }
+    relay(redis).reapplyRules("g1") shouldBe true
+    eventually(seen.synchronized(seen.toList)).map(r => (r.op, r.guildId, r.userId, r.token)) shouldBe
+      List((ObserverRelay.OpReapplyRules, "g1", "", None))
+  }
+
+  test("re-applying with no primary listening says so") {
+    relay(new FakeRedis).reapplyRules("g1") shouldBe false
+  }
+
+  /** The request is handled after the publish returns, so wait briefly for it. */
+  private def eventually[A](read: => List[A]): List[A] = {
+    val deadline = System.nanoTime() + 2.seconds.toNanos
+    var seen = read
+    while (seen.isEmpty && System.nanoTime() < deadline) { Thread.sleep(10); seen = read }
+    seen
+  }
+
   test("nobody listening fails at once rather than waiting out the timeout") {
     val started = System.nanoTime()
     relay(new FakeRedis, timeout = 10.seconds).link("g1", "u1", "ABCDE") shouldBe a[ObserverRelay.Failed]

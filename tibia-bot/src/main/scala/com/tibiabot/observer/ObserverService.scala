@@ -5,6 +5,7 @@ import com.tibiabot.persistence.ObserverRepository
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 /** The members' Tibia Observer links: what is stored, and the add/remove
  *  operations behind the `/observer` panel.
@@ -39,9 +40,10 @@ final class ObserverService(
    *  clearing rules are handed to the primary through it (see [[ObserverRelay]]),
    *  and the feeds come from the primary's published copy (see [[ObserverFeed]]). */
   relay: Option[ObserverRelay] = None,
-  /** The worlds that matter most to a guild, most first — what an account linked
-   *  there gets its few rules for (see [[applyRules]]). */
-  worldPriority: String => List[String] = _ => Nil
+  /** The worlds a guild has set up, its main one first. An account linked there
+   *  gets rules only for these, and only those it has characters on (see
+   *  [[applyRules]]). */
+  guildWorlds: String => List[String] = _ => Nil
 ) extends StrictLogging {
 
   private val tokens = TrieMap.empty[(String, String), ObserverToken]
@@ -132,6 +134,9 @@ final class ObserverService(
       case ObserverRelay.OpClearRules =>
         if (clearRulesDirect(request.guildId, request.userId)) ObserverRelay.Done
         else ObserverRelay.Failed("the rules could not be cleared")
+      case ObserverRelay.OpReapplyRules =>
+        reapplyRulesDirect(request.guildId)
+        ObserverRelay.Done
       case other => ObserverRelay.Failed(s"unknown request '$other'")
     }
 
@@ -222,27 +227,29 @@ final class ObserverService(
     if (linked.nonEmpty) logger.info(s"Observer credential renewal: $renewed/${linked.size} renewed")
   }
 
-  /** Set the rules that make an account's feeds populate: MWC rules for its
-   *  character-worlds, and raid rules covering every region of them — every raid,
-   *  not only those in areas it has explored, which the API allows (confirmed 24 Sep
-   *  2026). Best effort, and logged either way — nothing else would show that a
-   *  link is quietly getting nothing.
+  /** Set the rules that make an account's feeds populate: MWC rules, and raid
+   *  rules covering every region — every raid, not only those in areas it has
+   *  explored, which the API allows (confirmed 24 Sep 2026). Best effort, and
+   *  logged either way — nothing else would show that a link is quietly getting
+   *  nothing.
+   *
+   *  Only for worlds that are both the account's (it has characters there) and
+   *  set up in the guild it was linked in — see [[ObserverService.ruleWorlds]].
+   *  A world the guild doesn't track has nowhere to post, and one the account has
+   *  no character on was never what linking offered. When no world is both, the
+   *  bot's rules come off the account altogether, so a removed world doesn't keep
+   *  a rule. If the guild's worlds can't be read, the rules are left as they are
+   *  rather than cleared on a hiccup.
    *
    *  The API caps how many rules an account holds (5 MWC and 15 raid rules as of
-   *  24 Sep 2026) and refuses a store over the cap outright, which is how an
-   *  account with characters on 11 worlds once got no MWC rules at all. So the
-   *  worlds go most wanted first — see [[ObserverService.prioritise]] — and the
-   *  sidecar sets as many as the account has room for. */
+   *  24 Sep 2026) and refuses a store over the cap outright, so the worlds go in
+   *  the guild's order, its main world first, and the sidecar sets as many as the
+   *  account has room for. */
   private def applyRules(guildId: String, userId: String, credential: String, worlds: List[String]): Unit = {
-    val priority = try worldPriority(guildId) catch {
-      case ex: Throwable =>
-        logger.warn(s"Could not read which worlds guild '$guildId' tracks; setting Observer rules unordered", ex)
-        Nil
-    }
+    val who = s"'$userId' in guild '$guildId'"
     def report(kind: String, attempt: => RulesResult): Unit =
       try {
         val result = attempt
-        val who = s"'$userId' in guild '$guildId'"
         if (!result.ok) logger.warn(s"Observer $kind rules were not set for $who: ${result.detail}")
         else {
           val left = if (result.skipped.isEmpty) ""
@@ -251,26 +258,55 @@ final class ObserverService(
             s"${result.applied.mkString(", ")}$left")
         }
       } catch {
-        case ex: Throwable => logger.warn(s"Observer $kind rules failed for '$userId' in guild '$guildId'", ex)
+        case ex: Throwable => logger.warn(s"Observer $kind rules failed for $who", ex)
       }
-    val ordered = ObserverService.prioritise(worlds, priority)
-    if (ordered.nonEmpty) report("MWC", apiClient.ensureRules(credential, ordered))
-    report("raid", apiClient.ensureRaidRules(credential, ordered))
-  }
-
-  /** Set every linked account's rules again, against what the guilds track now.
-   *  Accounts linked before the cap was respected got none, and a guild that
-   *  changes its worlds changes which of an account's worlds should have the few
-   *  rules it can hold. Run only by a bot that talks to the API. */
-  def reapplyRules(): Unit = if (enabled) {
-    linkedTokens().foreach { t =>
-      try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).foreach { credential =>
-        applyRules(t.guildId, t.userId, credential, t.worlds)
-      } catch {
-        case ex: Throwable => logger.warn(s"Observer rules could not be re-applied for '${t.userId}' in guild '${t.guildId}'", ex)
+    val setUp =
+      try Some(guildWorlds(guildId))
+      catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not read which worlds guild '$guildId' has set up; leaving the Observer rules for $who as they are", ex)
+          None
+      }
+    setUp.foreach { tracked =>
+      val wanted = ObserverService.ruleWorlds(worlds, tracked)
+      if (wanted.nonEmpty) {
+        report("MWC", apiClient.ensureRules(credential, wanted))
+        report("raid", apiClient.ensureRaidRules(credential, wanted))
+      } else {
+        val cleared = try apiClient.clearRules(credential) catch {
+          case ex: Throwable =>
+            logger.warn(s"Observer rules could not be cleared for $who", ex)
+            false
+        }
+        if (cleared) logger.info(s"Observer rules cleared for $who: none of the account's worlds " +
+          s"(${if (worlds.isEmpty) "none known" else worlds.mkString(", ")}) is set up in the guild")
       }
     }
   }
+
+  /** Set every linked account's rules again, against what the guilds track now.
+   *  Run daily and shortly after boot, so the rules mend themselves whatever was
+   *  missed. Run only by a bot that talks to the API. */
+  def reapplyRules(): Unit = if (enabled) linkedTokens().foreach(reapply)
+
+  /** Set the rules again for every account linked in one guild, after it set up or
+   *  removed a world — which changes which worlds they should cover. On a
+   *  secondary the primary is asked to. Not waited on: it is a few sidecar calls
+   *  per link, and `/setup` and `/remove` shouldn't sit behind them. */
+  def reapplyRulesFor(guildId: String): Unit = if (enabled) relay match {
+    case Some(primary) => primary.reapplyRules(guildId)
+    case None => Future(blocking(reapplyRulesDirect(guildId)))(ExecutionContext.global)
+  }
+
+  /** [[reapplyRulesFor]] against the API here — the primary's side. */
+  def reapplyRulesDirect(guildId: String): Unit = linkedTokens().filter(_.guildId == guildId).foreach(reapply)
+
+  private def reapply(t: ObserverToken): Unit =
+    try repository.tokenEncFor(t.guildId, t.userId).map(crypto.decrypt).foreach { credential =>
+      applyRules(t.guildId, t.userId, credential, t.worlds)
+    } catch {
+      case ex: Throwable => logger.warn(s"Observer rules could not be re-applied for '${t.userId}' in guild '${t.guildId}'", ex)
+    }
 
   /** Drop the bot's rules from a member's account against the API — the primary's
    *  side of an unlink. True when they were cleared. */
@@ -329,11 +365,12 @@ final class ObserverService(
 
 object ObserverService {
 
-  /** An account's worlds in the order they should get its few rules: those in
-   *  `priority` first (compared ignoring case), in its order, then the rest
-   *  alphabetically. Each world keeps the spelling the account gave it. */
-  def prioritise(worlds: List[String], priority: List[String]): List[String] = {
-    val rank = priority.map(_.toLowerCase).distinct.zipWithIndex.toMap
-    worlds.distinctBy(_.toLowerCase).sortBy(w => (rank.getOrElse(w.toLowerCase, rank.size), w.toLowerCase))
+  /** The worlds an account linked in a guild gets rules for: those the guild has
+   *  set up (`guildWorlds`, its main world first) that the account also has
+   *  characters on (`accountWorlds`), in the guild's order. Compared ignoring
+   *  case; each keeps the spelling the account gave it. */
+  def ruleWorlds(accountWorlds: List[String], guildWorlds: List[String]): List[String] = {
+    val account = accountWorlds.map(w => w.toLowerCase -> w).toMap
+    guildWorlds.map(_.toLowerCase).distinct.flatMap(account.get)
   }
 }
