@@ -133,37 +133,34 @@ object ObserverEmbeds {
   private def areaOf(raid: RaidAnnouncement, raidType: Option[RaidType]): String =
     Option(raid.area).filter(_.nonEmpty).orElse(raidType.flatMap(_.area)).getOrElse("an unknown area")
 
-  /** The imminent-raid post, at the area stage — an hour before the raid starts.
-   *
-   *  "Imminent Raid" over the area as a grey line, and when its subarea is
-   *  revealed: 15 minutes before the start. An account with limited discoveries
-   *  learns nothing more until the raid starts, so this is usually all there is.
-   *  When a better-explored account's feed already names the raid, its name
-   *  (linked to its wiki page) is the title, and its creatures and picture come too. */
-  def areaEmbed(raid: RaidAnnouncement, raidType: Option[RaidType],
-                emoji: String = Config.raidEmoji): MessageEmbed = {
-    val title = raidType.map(_.name).getOrElse("Imminent Raid")
+  // A raid gets three posts, one per stage, always in this order. The feed only
+  // says which raid it is at the start, so the first two never name it.
+
+  /** The area stage, an hour before the raid starts: "Imminent Raid" over the area
+   *  as a grey line, and when its subarea is revealed. */
+  def areaEmbed(raid: RaidAnnouncement, emoji: String = Config.raidEmoji): MessageEmbed = {
     val reveals = raid.startDate.map(start =>
       s"**Subarea reveals:** <t:${start.minus(com.tibiabot.observer.ObserverRaidPoller.SubareaLead).getEpochSecond}:R>")
-    stageEmbed(title, raidType, s"-# ${areaOf(raid, raidType)}" :: reveals.toList, emoji)
+    stageEmbed("Imminent Raid", None, s"-# ${areaOf(raid, None)}" :: reveals.toList, emoji)
   }
 
-  /** The post at the subarea stage — 15 minutes before the raid starts. It goes
-   *  out again at the start, now naming the raid, when no earlier post could; and
-   *  for a raid first seen once it has started, it is the only one before its lines.
-   *
-   *  "Subarea Revealed" over the subarea as a grey line (its area when there is
-   *  none), and when the raid starts (or started). Like the area post, the raid's
-   *  name is the title when the feed already gives it. */
-  def subareaEmbed(raid: RaidAnnouncement, raidType: Option[RaidType], at: java.time.Instant,
+  /** The subarea stage, 15 minutes before the raid starts: "Subarea Revealed" over
+   *  the subarea as a grey line (its area when there is none), and when it starts. */
+  def subareaEmbed(raid: RaidAnnouncement, emoji: String = Config.raidEmoji): MessageEmbed = {
+    val starts = raid.startDate.map(start => s"**Raid starts:** <t:${start.getEpochSecond}:R>")
+    val where = raid.subarea.filter(_.nonEmpty).getOrElse(areaOf(raid, None))
+    stageEmbed("Subarea Revealed", None, s"-# $where" :: starts.toList, emoji)
+  }
+
+  /** The start, when the feed says which raid it is: its name, linked to its wiki
+   *  page, over the subarea as a grey line, when it started, and its creatures and
+   *  picture. Its broadcast lines follow. A raid the catalogue doesn't know is
+   *  titled "Raid Started", with no creatures. */
+  def startedEmbed(raid: RaidAnnouncement, raidType: Option[RaidType],
                    emoji: String = Config.raidEmoji): MessageEmbed = {
-    val subarea = raid.subarea.orElse(raidType.flatMap(_.subarea)).filter(_.nonEmpty)
-    val title = raidType.map(_.name).getOrElse("Subarea Revealed")
-    val when = raid.startDate.map { start =>
-      if (start.isAfter(at)) s"**Raid starts:** <t:${start.getEpochSecond}:R>"
-      else s"**Raid started:** <t:${start.getEpochSecond}:R>"
-    }
-    stageEmbed(title, raidType, s"-# ${subarea.getOrElse(areaOf(raid, raidType))}" :: when.toList, emoji)
+    val started = raid.startDate.map(start => s"**Raid started:** <t:${start.getEpochSecond}:R>")
+    val where = raid.subarea.orElse(raidType.flatMap(_.subarea)).filter(_.nonEmpty).getOrElse(areaOf(raid, raidType))
+    stageEmbed(raidType.map(_.name).getOrElse("Raid Started"), raidType, s"-# $where" :: started.toList, emoji)
   }
 
   /** A stage post: the `:raid:` emoji and its title (the raid's name linked to its

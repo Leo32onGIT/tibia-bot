@@ -323,6 +323,17 @@ observer_tokens
   waited on; the daily re-apply still mends anything missed. Confirmed before the
   change from blue's logs: user 313911524475535364 in guild 1224670957466161234
   had raid rules on all 11 of the account's worlds, Victoris first.
+- **Three posts, always (26 Sep 2026).** The feed never says which raid it is
+  before the start, for any account; the earlier idea that a better-explored
+  account would name it sooner was wrong. So every raid gets exactly three posts
+  in order, each under its own dedup key: `imminent` ("Imminent Raid", the area),
+  `subarea` ("Subarea Revealed", the subarea) and `started` (the raid by name,
+  creatures and picture), then its lines. The `named` key, the re-posted named
+  subarea post, and the name-if-known titles are gone. A raid first seen past a
+  stage gets only its latest post. The same day the primary started looking 2, 5,
+  10 and 20s after a stage is due (it was 20s), and announcing each new raids
+  copy on Redis so a secondary polls at once (it guessed 45s), since start posts
+  had been landing 20–45s late.
 - **Mini world changes: notifications message only (24 Sep 2026).** No DM carries
   them for now. The boosted DM's per-member MWC section from Phase 3 was taken out,
   along with the helpers that existed only for it (`ObserverEmbeds.mwcEmbed`,

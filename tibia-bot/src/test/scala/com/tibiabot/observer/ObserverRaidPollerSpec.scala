@@ -12,7 +12,7 @@ import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 
 /** A raid through its three stages, as an account with limited discoveries sees
- *  it: the area and the start an hour ahead, the subarea half an hour ahead, and
+ *  it: the area and the start an hour ahead, the subarea 15 minutes ahead, and
  *  which raid it is only once it has started. The posts are stand-ins that say
  *  what they are, so these run without Config. */
 class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
@@ -56,8 +56,9 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
       post = (guildId, _, embed) => posts += (guildId -> embed.getDescription),
       schedule = (delay, task) => scheduled += (delay -> task),
       servesGuild = _ == "g1",
-      areaPost = (_, raidType) => said(s"area:${raidType.map(_.name).getOrElse("?")}"),
-      subareaPost = (_, raidType, _) => said(s"subarea:${raidType.map(_.name).getOrElse("?")}"),
+      areaPost = _ => said("area"),
+      subareaPost = _ => said("subarea"),
+      startedPost = (_, raidType) => said(s"started:${raidType.map(_.name).getOrElse("?")}"),
       linePost = message => said(s"line:$message"),
       now = () => clock)
 
@@ -74,7 +75,7 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     val h = new Harness
     h.pollAt(0, entry("areaRevealed"))
     h.pollAt(5, entry("areaRevealed"))
-    h.posts.toList shouldBe List("g1" -> "area:?")
+    h.posts.toList shouldBe List("g1" -> "area")
     h.markedFor("g2") shouldBe empty
   }
 
@@ -94,7 +95,7 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     wakes.head()                       // the first wake finds the subarea
     wakes.tail.foreach(_())            // the rest see it was found and skip
     h.fetches shouldBe before + 1
-    h.posts.toList shouldBe List("g1" -> "area:?", "g1" -> "subarea:?")
+    h.posts.toList shouldBe List("g1" -> "area", "g1" -> "subarea")
   }
 
   test("a start wake keeps looking until the feed says which raid it is") {
@@ -118,7 +119,7 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.pollAt(0, entry("areaRevealed"))
     h.pollAt(30, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
     h.pollAt(31, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
-    h.posts.toList shouldBe List("g1" -> "area:?", "g1" -> "subarea:?")
+    h.posts.toList shouldBe List("g1" -> "area", "g1" -> "subarea")
   }
 
   test("the lines are timed from the start once the raid is revealed there, though the start was known an hour before") {
@@ -138,14 +139,14 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.scheduled shouldBe empty
   }
 
-  test("a raid first seen already started gets the subarea post, then its lines at once and on time") {
+  test("a raid first seen already started gets only the start post, then its lines at once and on time") {
     val h = new Harness
     h.pollAt(61, entry("raidStarted", Some("Krimhorn"), WinterWolves))
-    h.posts.toList shouldBe List("g1" -> "subarea:Winter Wolves near Krimhorn")
+    h.posts.toList shouldBe List("g1" -> "started:Winter Wolves near Krimhorn")
     h.scheduled.map(_._1.toMillis).toList shouldBe List(0L, 220000L - 60000L)
   }
 
-  test("a raid only identified at its start gets a post naming it, ahead of its first line") {
+  test("every raid gets its three posts in order, the start post ahead of its first line") {
     val h = new Harness
     h.pollAt(0, entry("areaRevealed"))
     h.pollAt(30, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
@@ -153,27 +154,16 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.pollAt(60, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")),
       entry("raidStarted", Some("Krimhorn"), WinterWolves))
     h.scheduled.foreach(_._2())
-    // A later poll does not name it again.
+    // A later poll posts nothing again.
     h.pollAt(62, entry("raidStarted", Some("Krimhorn"), WinterWolves))
     val said = h.posts.map(_._2).toList
-    said.take(3) shouldBe List("area:?", "subarea:?", "subarea:Winter Wolves near Krimhorn")
+    said.take(3) shouldBe List("area", "subarea", "started:Winter Wolves near Krimhorn")
     said.drop(3) should have size 2
     all(said.drop(3)) should startWith("line:")
     h.markedFor("g2") shouldBe empty
   }
 
-  test("a raid named from the area stage gets nothing new at its start") {
-    val h = new Harness
-    val named = entry("areaRevealed", typeId = WinterWolves)
-    h.pollAt(0, entry("areaRevealed"), named)
-    h.pollAt(30, entry("areaRevealed"), named, entry("subareaRevealed", Some("Krimhorn")))
-    h.pollAt(60, entry("areaRevealed"), named, entry("subareaRevealed", Some("Krimhorn")),
-      entry("raidStarted", Some("Krimhorn"), WinterWolves))
-    h.posts.map(_._2).toList shouldBe
-      List("area:Winter Wolves near Krimhorn", "subarea:Winter Wolves near Krimhorn")
-  }
-
-  test("a raids channel created before a raid is identified gets its named post along with its lines") {
+  test("a raids channel created before a raid starts gets its start post along with its lines") {
     val h = new Harness
     h.feed = List(entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
     h.poller.seedPosted("g1", "Antica")
@@ -181,14 +171,14 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
       entry("raidStarted", Some("Krimhorn"), WinterWolves))
     h.scheduled.foreach(_._2())
     val said = h.posts.map(_._2).toList
-    said.headOption shouldBe Some("subarea:Winter Wolves near Krimhorn")
+    said.headOption shouldBe Some("started:Winter Wolves near Krimhorn")
     said.drop(1) should have size 2
     all(said.drop(1)) should startWith("line:")
   }
 
-  test("a raids channel created once a raid is identified posts nothing more of it") {
+  test("a raids channel created once a raid has started posts nothing more of it") {
     val h = new Harness
-    h.feed = List(entry("subareaRevealed", Some("Krimhorn"), WinterWolves))
+    h.feed = List(entry("raidStarted", Some("Krimhorn"), WinterWolves))
     h.poller.seedPosted("g1", "Antica")
     h.pollAt(60, entry("raidStarted", Some("Krimhorn"), WinterWolves))
     h.scheduled.foreach(_._2())
@@ -199,7 +189,7 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     val h = new Harness
     // Both lines are past, but the raid is not over: nothing is left out.
     h.pollAt(70, entry("raidStarted", Some("Krimhorn"), WinterWolves))
-    h.posts.toList shouldBe List("g1" -> "subarea:Winter Wolves near Krimhorn")
+    h.posts.toList shouldBe List("g1" -> "started:Winter Wolves near Krimhorn")
     h.scheduled.map(_._1.toMillis).toList shouldBe List(0L, 0L)
   }
 
@@ -212,17 +202,19 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.scheduled shouldBe empty
   }
 
-  test("a raid a better-explored account already names shows its name from the area stage") {
+  test("a raid first seen at its subarea stage gets only the subarea post") {
     val h = new Harness
-    h.pollAt(0, entry("areaRevealed"), entry("areaRevealed", typeId = WinterWolves))
-    h.posts.toList shouldBe List("g1" -> "area:Winter Wolves near Krimhorn")
+    h.pollAt(50, entry("areaRevealed"), entry("subareaRevealed", Some("Krimhorn")))
+    h.posts.toList shouldBe List("g1" -> "subarea")
+    h.markedFor("g1") shouldBe Set("imminent", "subarea")
   }
 
   test("merge takes the furthest stage, and the start, subarea and raid from whichever entry has them") {
     val merged = ObserverRaidPoller.merge(List(
-      entry("areaRevealed", startDate = None, typeId = WinterWolves),
-      entry("subareaRevealed", Some("Krimhorn"))), _ == WinterWolves)
-    merged.category shouldBe "subareaRevealed"
+      entry("areaRevealed", startDate = None),
+      entry("subareaRevealed", Some("Krimhorn")),
+      entry("raidStarted", startDate = None, typeId = WinterWolves)))
+    merged.category shouldBe "raidStarted"
     merged.subarea shouldBe Some("Krimhorn")
     merged.startDate shouldBe Some(start)
     merged.raidTypeId shouldBe WinterWolves

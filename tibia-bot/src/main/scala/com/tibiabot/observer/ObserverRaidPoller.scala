@@ -12,8 +12,7 @@ import scala.concurrent.duration._
 
 /** A raid we are unfurling. `anchor` is the raid's start instant (the feed's
  *  startDate, or when we first saw it started); broadcast timings are measured from
- *  it. `raidTypeId` is the best the feed has said so far — often nothing known until
- *  the raid starts. */
+ *  it. `raidTypeId` is 0 until the raid starts, when the feed says which it is. */
 private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Option[Instant], firstSeen: Instant)
 
 /** Drives the per-world raids channels: a post for each stage of a raid, then its
@@ -22,23 +21,20 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *  ==The stages==
  *  A raid reaches the feed in three: its area is revealed an hour before it starts,
  *  its subarea 15 minutes before, and then it starts. The feed's time is the start
- *  at every stage. An account with limited discoveries is not told *which* raid it
- *  is until it starts — so nothing about a raid can be relied on before then but
- *  its area, its subarea and its start. Each stage therefore gets its own post, and
- *  nothing posted is edited:
+ *  at every stage, but it only says *which* raid it is at the start, for every
+ *  account. So every raid gets the same three posts, in order, one per stage, each
+ *  under its own dedup key, and nothing posted is edited:
  *
- *   - area revealed: the imminent-raid post — the area, and when the subarea reveals;
- *   - subarea revealed: the subarea, and when the raid starts;
- *   - raid started: the raid by name, when no earlier post could name it, then the
- *     broadcast lines, each timed from the start off the catalogue.
+ *   - area revealed (`imminent`): "Imminent Raid", the area, and when the subarea reveals;
+ *   - subarea revealed (`subarea`): "Subarea Revealed", the subarea, and when the raid starts;
+ *   - raid started (`started`): the raid by name, its creatures and picture — then
+ *     the broadcast lines (`line:i`), each timed from the start off the catalogue.
  *
- *  A raid first seen past its area stage gets only its latest stage's post, and one
- *  first seen already started gets the subarea post (saying when it started) ahead
- *  of its lines. A raid already over — its last broadcast `FinishedAfter` past —
- *  gets nothing: it is still in the feed, but it is no longer news. What a post shows grows with what is known: when a better-explored
- *  account's feed already names the raid, its name, creatures and picture come too.
- *  Everything every linked account's feed says about a raid is combined — see
- *  [[ObserverRaidPoller.merge]].
+ *  A raid first seen past a stage gets only its latest stage's post; the stages
+ *  before it are marked done, so an out-of-date post never follows. A raid already
+ *  over — its last broadcast `FinishedAfter` past — gets nothing: it is still in the
+ *  feed, but it is no longer news. The entries every linked account's feed has for
+ *  a raid are combined into one view first — see [[ObserverRaidPoller.merge]].
  *
  *  ==When it looks==
  *  [[tick]] runs every minute and sweeps the feed every `sweepEvery` for new raids.
@@ -50,8 +46,7 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *  start and the raid are known. A line whose moment has passed fires at once.
  *
  *  Dedup is durable, in the database, keyed on `(guild, raidId, key)` where `key`
- *  is `"imminent"`, `"subarea"`, `"named"` (set by whichever post first names the
- *  raid) or `"line:i"`; the in-memory registry is only
+ *  is `"imminent"`, `"subarea"`, `"started"` or `"line:i"`; the in-memory registry is only
  *  bookkeeping, so a restart re-hydrates from the next poll without re-posting — and
  *  without posting raids that finished while it was down.
  *
@@ -70,8 +65,9 @@ final class ObserverRaidPoller(
   sweepEvery: Duration = Duration.ofMinutes(15),
   wakeAfter: List[Duration] = ObserverRaidPoller.DefaultWakes,
   known: Int => Boolean = id => RaidTypeCatalog.get(id).isDefined,
-  areaPost: (RaidAnnouncement, Option[RaidType]) => MessageEmbed = ObserverEmbeds.areaEmbed(_, _),
-  subareaPost: (RaidAnnouncement, Option[RaidType], Instant) => MessageEmbed = ObserverEmbeds.subareaEmbed(_, _, _),
+  areaPost: RaidAnnouncement => MessageEmbed = ObserverEmbeds.areaEmbed(_),
+  subareaPost: RaidAnnouncement => MessageEmbed = ObserverEmbeds.subareaEmbed(_),
+  startedPost: (RaidAnnouncement, Option[RaidType]) => MessageEmbed = ObserverEmbeds.startedEmbed(_, _),
   linePost: String => MessageEmbed = ObserverEmbeds.raidLineEmbed,
   now: () => Instant = () => Instant.now()
 ) extends StrictLogging {
@@ -96,8 +92,6 @@ final class ObserverRaidPoller(
 
   @volatile private var lastSweep: Instant = Instant.EPOCH
 
-  private def typePriority(id: Int): Int = if (known(id)) 1 else 0
-
   /** Meant to run once a minute: sweeps for new raids when one is due. The stage
    *  changes of raids already known are caught by their own one-off polls. */
   def tick(): Unit = {
@@ -115,8 +109,8 @@ final class ObserverRaidPoller(
       val at = now()
       pooledRaids().foreach { case (world, entries) =>
         val channels = ownChannels(world)
-        val raids = entries.groupBy(_.raidId).values.map(merge(_, known)).toList
-        RaidRanking.order(raids, typePriority).foreach { raid =>
+        val raids = entries.groupBy(_.raidId).values.map(merge).toList
+        RaidRanking.order(raids).foreach { raid =>
           register(raid, world, at)
           reached.update(raid.raidId, math.max(reached.getOrElse(raid.raidId, 0), stage(raid.category)))
           // A raid already over is history, not news: raids stay in the feed for
@@ -124,7 +118,7 @@ final class ObserverRaidPoller(
           // unfurl every one from earlier in the day.
           if (!tracked.get(raid.raidId).exists(over(_, at))) {
             val raidType = RaidTypeCatalog.get(raid.raidTypeId)
-            channels.foreach { case (guildId, channelId) => announce(guildId, channelId, raid, raidType, at) }
+            channels.foreach { case (guildId, channelId) => announce(guildId, channelId, raid, raidType) }
             wakeForNextStage(raid, at)
             for (anchor <- tracked.get(raid.raidId).flatMap(_.anchor); rt <- raidType)
               if (scheduledRaids.putIfAbsent(raid.raidId, ()).isEmpty)
@@ -140,34 +134,22 @@ final class ObserverRaidPoller(
     }
   }
 
-  /** The post for the stage a raid has reached, once per guild. Past the area stage
-   *  the area post is marked done too, so an hour-old "imminent" never follows.
-   *
-   *  A post that names the raid marks it `named`. A raid only identified at its start
-   *  (an account with limited discoveries) was named by none of its stage posts, so
-   *  the start brings one more: the subarea post again, now with the raid's name,
-   *  creatures and picture, saying it has started. That start is noticed by the poll
-   *  just after it, and the same poll schedules the lines, so this post is queued
-   *  ahead of the first. A raid named in an earlier post gets nothing new here. */
+  /** The post for the stage a raid has reached, once per guild. The stages before it
+   *  are marked done first, so a raid first seen at a later stage never gets an
+   *  out-of-date post after it. The start post is queued by the same poll that
+   *  schedules the lines, so it goes out ahead of the first. */
   private def announce(guildId: String, channelId: String, raid: RaidAnnouncement,
-                       raidType: Option[RaidType], at: Instant): Unit = {
-    def markNamed(): Unit =
-      if (raidType.isDefined) raidRepository.markPostedIfNew(guildId, raid.raidId, "named")
-    stage(raid.category) match {
-      case AreaStage =>
-        if (raidRepository.markPostedIfNew(guildId, raid.raidId, "imminent")) {
-          markNamed()
-          post(guildId, channelId, areaPost(raid, raidType))
-        }
-      case s if s >= SubareaStage =>
-        if (raidRepository.markPostedIfNew(guildId, raid.raidId, "subarea")) {
-          raidRepository.markPostedIfNew(guildId, raid.raidId, "imminent")
-          markNamed()
-          post(guildId, channelId, subareaPost(raid, raidType, at))
-        } else if (s >= StartedStage && raidType.isDefined &&
-                   raidRepository.markPostedIfNew(guildId, raid.raidId, "named"))
-          post(guildId, channelId, subareaPost(raid, raidType, at))
-      case _ => ()
+                       raidType: Option[RaidType]): Unit = {
+    val reachedStage = stage(raid.category)
+    StageKeys.filter { case (s, _) => s < reachedStage }
+      .foreach { case (_, key) => raidRepository.markPostedIfNew(guildId, raid.raidId, key) }
+    StageKeys.get(reachedStage).foreach { key =>
+      if (raidRepository.markPostedIfNew(guildId, raid.raidId, key))
+        post(guildId, channelId, reachedStage match {
+          case AreaStage    => areaPost(raid)
+          case SubareaStage => subareaPost(raid)
+          case _            => startedPost(raid, raidType)
+        })
     }
   }
 
@@ -228,15 +210,15 @@ final class ObserverRaidPoller(
    *  for that world is first created, so it starts with the next new raid rather
    *  than backfilling raids already in progress.
    *
-   *  A raid not yet identified can't have its lines marked, so they will still post
-   *  at its start. Its named post is left unmarked too, so it arrives with them rather
-   *  than the lines arriving alone. */
+   *  A raid that hasn't started has its imminent and subarea posts marked only: its
+   *  start post and lines still go out at the start, together. */
   def seedPosted(guildId: String, world: String): Unit =
     try pooledRaids().getOrElse(world, Nil)
-      .groupBy(_.raidId).values.map(merge(_, known)).foreach { raid =>
-        val raidType = RaidTypeCatalog.get(raid.raidTypeId)
-        val keys = List("imminent", "subarea") ++ raidType.map(_ => "named") ++
-          raidType.toList.flatMap(_.broadcasts.indices.map(i => s"line:$i"))
+      .groupBy(_.raidId).values.map(merge).foreach { raid =>
+        val started = stage(raid.category) >= StartedStage
+        val lines = if (!started) Nil
+          else RaidTypeCatalog.get(raid.raidTypeId).toList.flatMap(_.broadcasts.indices.map(i => s"line:$i"))
+        val keys = StageKeys.collect { case (s, key) if started || s < StartedStage => key }.toList ++ lines
         keys.foreach(key => raidRepository.markPostedIfNew(guildId, raid.raidId, key))
       }
     catch {
@@ -293,6 +275,9 @@ object ObserverRaidPoller {
   val SubareaStage = 2
   val StartedStage = 3
 
+  /** Each stage's post, by the dedup key it is recorded under. */
+  val StageKeys: Map[Int, String] = Map(AreaStage -> "imminent", SubareaStage -> "subarea", StartedStage -> "started")
+
   /** The feed's category for each stage, in order. */
   def stage(category: String): Int = category match {
     case "areaRevealed"    => AreaStage
@@ -315,14 +300,10 @@ object ObserverRaidPoller {
   /** One view of a raid from every entry the feed has for it — one per stage, and
    *  one per linked account that can see it. Its stage is the furthest any entry
    *  has reached; its area, subarea and start are whichever entry has them; and
-   *  its type is one the catalogue `known`s, if any entry names one — an account
-   *  with limited discoveries is told nothing of which raid it is until the start,
-   *  while a better-explored one may be told at once. */
-  def merge(entries: List[RaidAnnouncement], known: Int => Boolean): RaidAnnouncement = {
+   *  its type is the one its start entry gives (0 before then). */
+  def merge(entries: List[RaidAnnouncement]): RaidAnnouncement = {
     val latest = entries.maxBy(e => stage(e.category))
-    val typeId = entries.map(_.raidTypeId).find(known)
-      .orElse(entries.map(_.raidTypeId).find(_ != 0))
-      .getOrElse(latest.raidTypeId)
+    val typeId = entries.map(_.raidTypeId).find(_ != 0).getOrElse(latest.raidTypeId)
     latest.copy(
       area = entries.map(_.area).find(a => a != null && a.nonEmpty).getOrElse(latest.area),
       subarea = entries.flatMap(_.subarea).find(_.nonEmpty),
