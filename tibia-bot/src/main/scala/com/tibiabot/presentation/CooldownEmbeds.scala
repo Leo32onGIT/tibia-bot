@@ -70,7 +70,7 @@ object CooldownEmbeds {
   /** The heading both cooldown cards open with. No picture: each item below
    *  carries its own. */
   private def cardHeader: TextDisplay =
-    TextDisplay.of("### ⏳ Cooldown tracker\n-# Mark an item as collected/used and I'll message you when it's ready again.")
+    TextDisplay.of("### ⏳ Cooldown Tracker\n-# Mark an item as collected/used and I'll message you when it's ready again.")
 
   private def divider: Separator = Separator.createDivider(Separator.Spacing.SMALL)
 

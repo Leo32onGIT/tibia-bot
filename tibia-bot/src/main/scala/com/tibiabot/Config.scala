@@ -263,6 +263,8 @@ object Config {
  val exivaEmoji: String = discord.getString("exiva-emoji")
  /** Precedes the raid name in the imminent-raid embed's title. */
  val raidEmoji: String = discord.getString("raid-emoji")
+ /** Leads the Mini World Changes block of the server-save card. */
+ val mwcEmoji: String = discord.getString("mwc-emoji")
  val indentEmoji: String = discord.getString("indent-emoji")
  val dailyEmoji: String = discord.getString("daily-emoji")
  val levelUpEmoji: String = discord.getString("levelup-emoji")

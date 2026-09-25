@@ -19,9 +19,14 @@ import scala.jdk.CollectionConverters._
  *
  *  Everything that builds the message still builds embeds: the mini world
  *  changes, the boosted boss and creature, Rashid, Dream Courts and the Drome
- *  are each a description and a thumbnail, and each becomes one section of the
- *  card here, in the order given, with a divider between. The Server Save
- *  Notifications button goes under the card.
+ *  are each a description, and all but the mini world changes a thumbnail too.
+ *  Each becomes one block of the card here, in the order given, with a divider
+ *  between: a section with its picture on the right, or just its text across
+ *  the card's width when it has none. The Server Save Notifications button
+ *  goes under the card.
+ *
+ *  Each daily block is labelled the same way, by [[dailyText]]: a small grey
+ *  line in small caps saying what it is, then the name it is about.
  *
  *  Kept as embeds up to the last moment because the message is also read back.
  *  `/repair` and the mini world change watcher both rebuild it around the boss
@@ -30,6 +35,28 @@ import scala.jdk.CollectionConverters._
  *  embed message posted before 25 Sep 2026.
  */
 object ServerSaveCard {
+
+  // What each daily block is labelled. Shared by every place that builds one:
+  // the server-save refresh, BoostedService (the /setup, /repair and admin
+  // repost path) and the boosted DM, which carries the same boss and creature.
+  val BossLabel = "Boosted boss"
+  val CreatureLabel = "Boosted creature"
+  val RashidLabel = "Rashid can be found in"
+  def dreamCourtsLabel(world: String): String = s"Dream Courts boss in $world"
+  val DromeLabel = "Drome cycle ends"
+
+  private val SmallLetters = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"
+
+  /** `text` in small caps, the lettering the bot's channel names use. Only a
+   *  to z have them; everything else is left as it is. */
+  def smallCaps(text: String): String =
+    text.toLowerCase.map(c => if (c >= 'a' && c <= 'z') SmallLetters.charAt(c - 'a') else c)
+
+  /** One daily block's text: its label as a small grey line in small caps, then
+   *  what it names under it. `mark` is what goes before the name — the indent
+   *  and the block's own emoji. */
+  def dailyText(label: String, mark: String, name: String): String =
+    s"-# ${smallCaps(label)}\n### $mark $name"
 
   def notifyButton(letterEmoji: String): Button =
     Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(letterEmoji))

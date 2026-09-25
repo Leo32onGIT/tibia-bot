@@ -50,26 +50,31 @@ object ObserverEmbeds {
       s"${Config.noEmoji} Something went wrong with your link — try **Add** again."
   }
 
-  /** The bot's own mini world change art, hosted with its other Discord assets. */
+  /** The mini world change art the block carried until 25 Sep 2026. Only read
+   *  now, to recognise the block in a message posted before then. */
   private val MwcThumbnail = "https://violentbot.xyz/discord/observer/miniworldchange.png"
+
+  /** What the block's first line says after its emoji, and so how it is told
+   *  apart from the other blocks once it has no picture. */
+  private val MwcLead = "Mini World Changes for **"
 
   /** Room for the changes. The server-save card (see ServerSaveCard) is one V2
    *  message, and Discord allows 4,000 characters of text across the whole of
    *  one. This leaves the other five blocks, about 150 each, a thousand. */
   val MaxMwcDescription = 3000
 
-  /** The Mini World Changes embed in a guild's server-save notifications message,
-   *  for its world — the same world the Dream Courts embed names. Each change is its
-   *  name, linked to its wiki page, with the feed's description as a small grey line
-   *  under it. `None` when nothing is active, so a quiet day (or a world no linked
-   *  member covers, which the feed can't tell apart) just leaves the embed out. */
+  /** The Mini World Changes block in a guild's server-save notifications message,
+   *  for its world — the same world the Dream Courts block names. It opens on
+   *  `Mini World Changes for <world>` behind its own emoji, then each change: its
+   *  name, linked to its wiki page, with the feed's description as a small grey
+   *  line under it. No picture, so the text has the card's whole width. `None`
+   *  when nothing is active, so a quiet day (or a world no linked member covers,
+   *  which the feed can't tell apart) just leaves the block out. */
   def serverSaveMwcEmbed(world: String, changes: List[MiniWorldChange],
-                         emoji: String = Config.raidEmoji): Option[MessageEmbed] =
+                         emoji: String = Config.raidEmoji, leadEmoji: String = Config.mwcEmoji): Option[MessageEmbed] =
     if (changes.isEmpty) None
     else {
-      val lead =
-        if (changes.size == 1) s"The mini world change for **$world** is:"
-        else s"The mini world changes for **$world** are:"
+      val lead = s"$leadEmoji $MwcLead$world**"
       val entries = changes.map { c =>
         val name = s"### $emoji **[${c.title}](${MiniWorldChangeCatalog.wikiUrl(c.title)})**"
         // `-#` only reaches the end of its line, so the body is kept to one.
@@ -81,16 +86,17 @@ object ObserverEmbeds {
       val kept = entries.zip(lengths).takeWhile(_._2 <= MaxMwcDescription).map(_._1)
       Some(new EmbedBuilder()
         .setDescription((lead :: kept).mkString("\n"))
-        .setThumbnail(MwcThumbnail)
         .setColor(Embeds.BrandColor)
         .build())
     }
 
-  /** Whether an embed is the notifications message's mini world changes, told
-   *  apart by its own thumbnail: it has moved within the message, so its place
-   *  says nothing. */
+  /** Whether a block is the notifications message's mini world changes, told
+   *  apart by what its first line says: it has moved within the message, so its
+   *  place says nothing. A message from before 25 Sep 2026 has the old wording,
+   *  and is told apart by the picture it carried then. */
   def isServerSaveMwcEmbed(embed: MessageEmbed): Boolean =
-    Option(embed.getThumbnail).exists(_.getUrl == MwcThumbnail)
+    Option(embed.getDescription).flatMap(_.linesIterator.nextOption()).exists(_.contains(MwcLead)) ||
+      Option(embed.getThumbnail).exists(_.getUrl == MwcThumbnail)
 
   /** The boosted boss and creature of a posted notifications message: its first
    *  two embeds once any mini world changes are set aside. The changes sit first

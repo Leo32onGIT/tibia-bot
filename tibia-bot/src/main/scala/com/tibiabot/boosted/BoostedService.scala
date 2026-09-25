@@ -3,7 +3,7 @@ package com.tibiabot.boosted
 import com.tibiabot.Config
 import com.tibiabot.domain.{BoostedCache, BoostedStamp, BoostedName}
 import com.tibiabot.persistence.{BoostedRepository, CacheRepository, ConnectionProvider}
-import com.tibiabot.presentation.{Urls, EmbedText}
+import com.tibiabot.presentation.{Urls, EmbedText, ServerSaveCard}
 import com.tibiabot.tibiadata.TibiaApi
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.entities.MessageEmbed
@@ -86,9 +86,11 @@ final class BoostedService(
     tibiaDataClient.getBoostedBoss().map {
       case Right(boostedResponse) =>
         val boostedBoss = boostedResponse.boostable_bosses.boosted.name
-        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss), s"The boosted boss today is:\n### ${Config.indentEmoji}${Config.archfoeEmoji} **[$boostedBoss](${creatureWikiUrl(boostedBoss)})**")
+        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedBoss), ServerSaveCard.dailyText(ServerSaveCard.BossLabel,
+          s"${Config.indentEmoji}${Config.archfoeEmoji}", s"**[$boostedBoss](${creatureWikiUrl(boostedBoss)})**"))
       case Left(_) =>
-        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Vigour"), "The boosted boss today failed to load?")
+        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Vigour"), ServerSaveCard.dailyText(ServerSaveCard.BossLabel,
+          s"${Config.indentEmoji}${Config.archfoeEmoji}", "Failed to load"))
     }
 
   /** The "boosted creature today" embed (with a Podium fallback if the API fails). */
@@ -96,9 +98,11 @@ final class BoostedService(
     tibiaDataClient.getBoostedCreature().map {
       case Right(creatureResponse) =>
         val boostedCreature = creatureResponse.creatures.boosted.name
-        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature), s"The boosted creature today is:\n### ${Config.indentEmoji}${Config.levelUpEmoji} **[$boostedCreature](${creatureWikiUrl(boostedCreature)})**")
+        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl(boostedCreature), ServerSaveCard.dailyText(ServerSaveCard.CreatureLabel,
+          s"${Config.indentEmoji}${Config.levelUpEmoji}", s"**[$boostedCreature](${creatureWikiUrl(boostedCreature)})**"))
       case Left(_) =>
-        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Tenacity"), "The boosted creature today failed to load?")
+        com.tibiabot.presentation.BoostedEmbeds.create(creatureImageUrl("Podium_of_Tenacity"), ServerSaveCard.dailyText(ServerSaveCard.CreatureLabel,
+          s"${Config.indentEmoji}${Config.levelUpEmoji}", "Failed to load"))
     }
 
   // User-facing /boosted notification-list status messages, centralized here
