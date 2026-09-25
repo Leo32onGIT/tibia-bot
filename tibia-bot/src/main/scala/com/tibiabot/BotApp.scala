@@ -1522,7 +1522,8 @@ object BotApp extends App with StrictLogging {
             world = world.name,
             channelId = world.statisticsChannel,
             posted = world.statisticsPosted,
-            huntedNames = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet
+            huntedNames = huntedPlayersData.getOrElse(guildId, Nil).map(_.name.toLowerCase).toSet,
+            messages = statistics.StatisticsMessages.decode(world.statisticsMessages)
           )
       }
     }
@@ -1659,23 +1660,28 @@ object BotApp extends App with StrictLogging {
   /** Replace whatever this bot last put in a statistics channel with today's post.
    *
    *  The channel shows one thing — the last server save day — the way the online
-   *  list shows one roster, so the same convention applies: read the recent
-   *  history, purge this bot's own messages, then post. That clears yesterday's
-   *  summary and, the first time it runs, the `/setup` intro as well.
+   *  list shows one roster. The last post is deleted by the ids stored when it
+   *  went out, then today's goes out and its ids are stored in turn.
    *
-   *  Only this bot's messages go. Anything a person said in there is theirs, and
-   *  several bots can share a guild.
-   *
-   *  The purge list is fixed at the moment of the history read, so today's post
-   *  is not in it and cannot be caught by a delete that lands after the send.
-   *  A history read that fails still posts — a stale summary above a fresh one
-   *  is worth more than losing the day over a tidy-up. */
+   *  A channel with no ids on record (a post from before they were kept, on 26
+   *  Sep 2026, or the `/setup` intro before the first post) is cleared the old
+   *  way, once: read the recent history and purge this bot's own messages. Only
+   *  this bot's messages go — anything a person said in there is theirs, and
+   *  several bots can share a guild — and the purge list is fixed at the moment
+   *  of the history read, so today's post is not in it. A history read that
+   *  fails still posts: a stale summary above a fresh one is worth more than
+   *  losing the day over a tidy-up. */
   private def replaceStatisticsPost(
       channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
-      messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]
+      target: statistics.StatisticsTarget,
+      day: java.time.LocalDate,
+      messages: List[List[net.dv8tion.jda.api.components.container.Container]]
   ): Unit = {
-    def post(): Unit = sendInOrder(channel, messages)
-    channel.getHistory.retrievePast(100).queue(
+    def post(): Unit = sendStatisticsPost(channel, target, day, messages)
+    if (target.messages.ids.nonEmpty) {
+      deleteStatisticsPost(channel, target.messages.ids)
+      post()
+    } else channel.getHistory.retrievePast(100).queue(
       history => {
         try {
           val mine = history.asScala.filter(_.getAuthor.getId == botUser).toList.asJava
@@ -1692,40 +1698,88 @@ object BotApp extends App with StrictLogging {
       })
   }
 
-  /** Send a day's messages to one channel, in the order they were built.
+  /** Bring a post up to the day it was built again from, in place.
+   *
+   *  Edited message by message where the day still takes as many messages as
+   *  it did at ten — the ordinary case, since only the experience figures and
+   *  Most Exp Lost move. A day that now needs more or fewer is posted afresh
+   *  instead, the old messages deleted by id, which keeps the post in order at
+   *  the cost of it moving to the bottom of a channel that holds nothing else.
+   *
+   *  Only the post made for that day: one with no ids on record, or ids from
+   *  another day, is left alone — the day's post was never sent, and the next
+   *  one will be. Nothing is pinged; an edit never notifies anyone. */
+  private def updateStatisticsPost(
+      channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+      target: statistics.StatisticsTarget,
+      day: java.time.LocalDate,
+      messages: List[List[net.dv8tion.jda.api.components.container.Container]]
+  ): Unit =
+    if (!target.messages.isFor(day))
+      logger.info(s"Statistics: no post of $day on record for '${target.world}' in ${target.guildLabel}; not updating")
+    else if (target.messages.ids.size == messages.size)
+      target.messages.ids.zip(messages).foreach { case (id, cards) =>
+        channel.editMessageById(id, new net.dv8tion.jda.api.utils.messages.MessageEditBuilder()
+          .useComponentsV2().setComponents(cards.asJava).build())
+          .queue(null, (error: Throwable) =>
+            logger.warn(s"Statistics: could not update message $id for '${target.world}' in ${target.guildLabel}: ${error.getMessage}"))
+      }
+    else {
+      deleteStatisticsPost(channel, target.messages.ids)
+      sendStatisticsPost(channel, target, day, messages)
+    }
+
+  /** A post's messages, by id. One already gone is the outcome wanted. */
+  private def deleteStatisticsPost(channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+                                   ids: List[String]): Unit =
+    ids.foreach(id => channel.deleteMessageById(id).queue(null, (_: Throwable) => ()))
+
+  /** Send a day's messages to one channel, in the order they were built, and
+   *  store their ids once they are all out.
    *
    *  Chained rather than queued separately: two `queue()` calls are two
-   *  independent requests and nothing promises the first lands first, which on
-   *  the one day a post needs two messages would put the bosses above the
-   *  board. Chaining also keeps the whole post to a single slot in the outbound
-   *  queue, which is what the pacing there is counting.
-   */
-  private def sendInOrder(channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
-                          messages: List[List[net.dv8tion.jda.api.entities.MessageEmbed]]): Unit = {
-    def send(embeds: List[net.dv8tion.jda.api.entities.MessageEmbed]) =
-      channel.sendMessageEmbeds(embeds.asJava).setSuppressedNotifications(true)
-    // The button rides the last message, at the foot of the post where a reader
-    // finishes it. A refresh still rewrites only the board, which leads the
-    // first message; on the day the post spills, a press down here finds that
-    // message above it (see interactions.StatisticsButtons).
-    val lastIndex = messages.size - 1
-    val sends = messages.zipWithIndex.map { case (embeds, index) =>
-      if (index == lastIndex && Config.Statistics.Refresh.enabled) send(embeds).setComponents(statisticsRefreshRow)
-      else send(embeds)
-    }
-    sends match {
+   *  independent requests and nothing promises the first lands first, which
+   *  would put the bosses above the board. Chaining also keeps the whole post
+   *  to a single slot in the outbound queue, which is what the pacing there is
+   *  counting. Silent, like every card the bot posts. */
+  private def sendStatisticsPost(channel: net.dv8tion.jda.api.entities.channel.concrete.TextChannel,
+                                 target: statistics.StatisticsTarget,
+                                 day: java.time.LocalDate,
+                                 messages: List[List[net.dv8tion.jda.api.components.container.Container]]): Unit = {
+    type Sent = net.dv8tion.jda.api.requests.RestAction[List[net.dv8tion.jda.api.entities.Message]]
+    def send(cards: List[net.dv8tion.jda.api.components.container.Container]) =
+      channel.sendMessageComponents(cards.asJava).useComponentsV2().setSuppressedNotifications(true)
+    messages match {
       case Nil => ()
       case first :: rest =>
-        rest.foldLeft[net.dv8tion.jda.api.requests.RestAction[net.dv8tion.jda.api.entities.Message]](
-          first)((sent, next) => sent.flatMap(_ => next)).queue(null, null)
+        val start: Sent = send(first).map(message => List(message))
+        rest.foldLeft(start)((sent, cards) => sent.flatMap(done => send(cards).map(message => done :+ message)))
+          .queue(
+            sent => recordStatisticsMessages(target, statistics.StatisticsMessages(day.toString, sent.map(_.getId))),
+            (error: Throwable) =>
+              logger.warn(s"Statistics: could not post '${target.world}' to ${target.guildLabel}: ${error.getMessage}"))
     }
   }
 
-  /** The refresh control under a statistics post. */
-  private def statisticsRefreshRow: net.dv8tion.jda.api.components.actionrow.ActionRow =
-    net.dv8tion.jda.api.components.actionrow.ActionRow.of(
-      net.dv8tion.jda.api.components.buttons.Button.secondary(
-        interactions.StatisticsButtons.RefreshId, "⟳"))
+  /** Store the ids a world's post went out as, in the database and in the copy
+   *  of the row `statisticsTargets` reads, for the reason
+   *  [[recordStatisticsPosted]] writes both. */
+  private def recordStatisticsMessages(target: statistics.StatisticsTarget,
+                                       sent: statistics.StatisticsMessages): Unit =
+    try {
+      worldConfigRepository.updateWorldString(target.guildId, target.world, "statistics_messages", sent.encode)
+      modifyWorldsData { data =>
+        data.get(target.guildId) match {
+          case None => data
+          case Some(worlds) => data.updated(target.guildId, worlds.map { world =>
+            if (world.name.equalsIgnoreCase(target.world)) world.copy(statisticsMessages = sent.encode) else world
+          })
+        }
+      }
+    } catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not store the post's ids for '${target.world}' in ${target.guildLabel}: ${error.getMessage}")
+    }
 
   /** Store that a world's day has been posted, in the database and in the copy
    *  of the row `statisticsTargets` reads back thirty seconds later. Both, or
@@ -1746,9 +1800,11 @@ object BotApp extends App with StrictLogging {
    *  figures were already written to the shared cache by the primary's hourly
    *  highscore sweep, so all this does is read them and post to its own guilds.
    *
-   *  One message, four embeds. Nothing waits on anything: the kill statistics
-   *  the last two read were published overnight and filed at four in the
-   *  morning, six hours before this runs. */
+   *  Four cards, posted at server save and brought up to date once, silently,
+   *  when the world's closing highscore reading is in (see
+   *  `statistics.StatisticsService`). Nothing waits on anything else: the kill
+   *  statistics the last two read were published overnight and filed at four
+   *  in the morning, six hours before this runs. */
   private lazy val statisticsService = new statistics.StatisticsService(
     experience = experienceRepository,
     highscores = highscoreRepository,
@@ -1758,136 +1814,64 @@ object BotApp extends App with StrictLogging {
     targets = () => statisticsTargets(),
     announce = (target, report, frags, enemyLosses) =>
       statisticsChannelFor(target).foreach { channel =>
-        // The day's post puts the save day's figures back on the board, so what
-        // this channel was last refreshed to is no longer what it shows.
-        // Forgetting it here is what lets somebody press at five past ten and
-        // get the rolling day, rather than being told the post already has the
-        // latest reading — which would be true of a window nobody is looking at
-        // any more.
-        statisticsShown.remove(target.channelId)
-        // Read before the send is queued rather than inside it: both lookups are
-        // database reads, and the queue is paced.
-        val sheets = statisticsSheets(target.world)
-        val side = statisticsSideIcon(target.guildId, sheets)
-        val vocation = statisticsVocation(target.world, sheets)
+        val cards = statisticsCards(target, report, frags, enemyLosses)
         outboundSender.enqueue("statistics") { () =>
-          // The world, then the war, then what the world killed, then what might
-          // happen today — one message, so a channel somebody scrolls through
-          // reads as one entry per day. A day too big for Discord's 6,000
-          // characters spills onto a second message rather than losing rows.
-          //
-          // The last two are absent only when the day's kill statistics were
-          // never filed, since both read that snapshot. Normally they were, six
-          // hours earlier — tibia.com publishes them overnight, not at server
-          // save — so this is the tibia.com-was-down case rather than a race.
-          val embeds =
-            presentation.StatisticsEmbeds.build(
-              report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
-              Config.levelUpEmoji, Config.levelDownEmoji) :::
-            presentation.PvpEmbeds.build(
-              target.world, frags, enemyLosses, side, vocation, statisticsLevel(sheets),
-              Config.barEmoji,
-              presentation.Bars.Scale.forWorld(report.averageOnline, report.averageLevel),
-              Config.levelDownEmoji, jumpToDeath(target)) :::
-            creatureEmbeds(report)
-          replaceStatisticsPost(channel, presentation.EmbedPages.messages(embeds))
+          replaceStatisticsPost(channel, target, report.saveDay, cards)
         }
       },
-    recordPosted = recordStatisticsPosted
+    recordPosted = recordStatisticsPosted,
+    update = (target, report, frags, enemyLosses) =>
+      statisticsChannelFor(target).foreach { channel =>
+        val cards = statisticsCards(target, report, frags, enemyLosses)
+        outboundSender.enqueue("statistics") { () =>
+          updateStatisticsPost(channel, target, report.saveDay, cards)
+        }
+      }
   )
 
-  /** The half of the post that reads the day's kill statistics: what the world
-   *  killed, and which bosses that history says might be up.
+  /** One discord's day as the messages it goes out in: the world, then the
+   *  war, then what the world killed, then what might happen today. A day too
+   *  long for one V2 message spills onto the next rather than losing rows.
    *
-   *  Built in one place because it travels as a unit — on the message the board
-   *  goes out on where the snapshot was already filed, and on a message of its
-   *  own where it was not. Empty until then, which is what keeps the two paths
-   *  from posting a prediction that cannot see yesterday. */
-  private def creatureEmbeds(
-      report: statistics.DailyReport
-  ): List[net.dv8tion.jda.api.entities.MessageEmbed] =
+   *  The last two are absent only when the day's kill statistics were never
+   *  filed, since both read that snapshot. Normally they were, six hours
+   *  earlier — tibia.com publishes them overnight, not at server save — so this
+   *  is the tibia.com-was-down case rather than a race.
+   *
+   *  Its database reads (the sheets behind the icons) are made here, before the
+   *  send is queued, because the queue is paced. */
+  private def statisticsCards(
+      target: statistics.StatisticsTarget,
+      report: statistics.DailyReport,
+      frags: domain.FragTally,
+      enemyLosses: List[domain.ExperienceDelta]
+  ): List[List[net.dv8tion.jda.api.components.container.Container]] = {
+    val sheets = statisticsSheets(target.world)
+    val side = statisticsSideIcon(target.guildId, sheets)
+    val vocation = statisticsVocation(target.world, sheets)
+    val board = presentation.StatisticsEmbeds.build(
+      report, Config.newsEmoji, side, presentation.SkillEmojis.icon,
+      Config.levelUpEmoji, Config.levelDownEmoji)
+    val pvp = presentation.PvpEmbeds.build(
+      target.world, frags, enemyLosses, side, vocation, statisticsLevel(sheets),
+      Config.barEmoji,
+      presentation.Bars.Scale.forWorld(report.averageOnline, report.averageLevel),
+      Config.levelDownEmoji, jumpToDeath(target))
+    presentation.StatisticsCard.messages(board :: pvp :: killCards(report))
+  }
+
+  /** The half of the post that reads the day's kill statistics: what the world
+   *  killed, and which bosses that history says might be up. Empty until the
+   *  snapshot is filed, which is what keeps a prediction that cannot see
+   *  yesterday from being posted. */
+  private def killCards(report: statistics.DailyReport): List[presentation.StatisticsCard.Part] =
     if (report.kills.isEmpty) Nil
     else
       presentation.StatisticsEmbeds.creatureStats(
-        report, Config.creatureEmoji, Config.goldEmoji, Config.specialKillEmojis.getOrElse(_, ""),
-        Config.creatureWiki.titleFor) :::
-      presentation.BossPredictionEmbeds.build(report, Config.bossEmoji, Config.nemesisEmoji)
-
-  /** The reading each statistics channel's experience embed was built from, and
-   *  when each last had its button pressed.
-   *
-   *  In memory rather than in the guild's database. Losing both in a restart
-   *  costs one rebuild that changes nothing a reader would notice, which is
-   *  cheaper than a column on 122 databases and an ALTER to add it — and the
-   *  figures themselves are never at risk either way, since they come from the
-   *  readings table and not from what is remembered here. Keyed by channel,
-   *  because that is what a press arrives with and what a post belongs to. */
-  private val statisticsShown = scala.collection.concurrent.TrieMap.empty[String, Instant]
-  private val statisticsPressed = scala.collection.concurrent.TrieMap.empty[String, Instant]
-
-  /** One press of a statistics channel's refresh button: the experience board,
-   *  rebuilt over the last 24 hours, or why it was not.
-   *
-   *  Only the board. The war, the creatures and the bosses are about the save
-   *  day the post was published for and do not move, so they are neither
-   *  rebuilt nor re-read — the caller splices these embeds in front of the ones
-   *  the message already carries.
-   *
-   *  The heading keeps the published day and the section headings keep their
-   *  wording, which is why the figures' real span is stated in the embed's
-   *  footer: nothing else in it says that the numbers under "Top Experience
-   *  Gained" are now a rolling day rather than that date's.
-   *
-   *  The press is recorded whether or not it produced anything, since the floor
-   *  exists to stop the pressing rather than to stop the answering. */
-  def refreshStatisticsBoard(
-      guildId: String,
-      world: Worlds
-  ): Either[statistics.RefreshDecision, List[net.dv8tion.jda.api.entities.MessageEmbed]] = {
-    val channelId = world.statisticsChannel
-    val pressedAt = Instant.now()
-    val outcome = statisticsService.refresh(
-      world.name, statisticsShown.get(channelId), statisticsPressed.get(channelId))
-    statisticsPressed.put(channelId, pressedAt)
-    outcome.map { refreshed =>
-      statisticsShown.put(channelId, refreshed.window.to)
-      // The day the post was published for, so the heading does not move. A row
-      // with nothing stored has never posted, which a button on a post cannot
-      // really be — fall back to the day that would be posted now rather than
-      // refusing over a field nothing else reads here.
-      val saveDay = scala.util.Try(java.time.LocalDate.parse(world.statisticsPosted))
-        .getOrElse(statistics.DailyStatistics.reportedDay(ZonedDateTime.now(domain.time.Clock.Berlin)))
-      val sheets = statisticsSheets(world.name)
-      val report = statistics.DailyReport(
-        world = world.name,
-        saveDay = saveDay,
-        gains = refreshed.gains,
-        losses = refreshed.losses,
-        // Re-read rather than carried over from the post: it is one indexed
-        // query, and parsing it back out of the embed we are about to replace
-        // would be the same value by a worse route.
-        advance = statisticsTopAdvance(world.name, saveDay))
-      presentation.StatisticsEmbeds.build(
-        report, Config.newsEmoji, statisticsSideIcon(guildId, sheets), presentation.SkillEmojis.icon,
-        Config.levelUpEmoji, Config.levelDownEmoji,
-        freshness = Some(presentation.StatisticsEmbeds.Freshness(
-          refreshed.window.hours, refreshed.window.to)))
-    }
-  }
-
-  /** The published day's best skill advance, or None if it cannot be read.
-   *
-   *  A failure costs the section rather than the refresh, the same rule the
-   *  daily post follows for every figure it cannot get. */
-  private def statisticsTopAdvance(world: String, saveDay: java.time.LocalDate): Option[domain.HighscoreEvent] = {
-    val (from, to) = statistics.DailyStatistics.window(saveDay)
-    try highscoreRepository.topAdvance(world, from, to)
-    catch {
-      case NonFatal(error) =>
-        logger.warn(s"Statistics: could not re-read the top advance for '$world': ${error.getMessage}")
-        None
-    }
-  }
+        report, Config.creatureEmoji, Config.specialKillEmojis.getOrElse(_, ""),
+        Config.creatureWiki.titleFor).toList :::
+      presentation.BossPredictionEmbeds.build(
+        report, Config.bossEmoji, Config.nemesisEmoji, Config.creatureWiki.titleFor).toList
 
   /** The statistics channel for one target, if this bot can write to it. */
   private def statisticsChannelFor(

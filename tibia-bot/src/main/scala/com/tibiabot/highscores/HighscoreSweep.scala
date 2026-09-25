@@ -2,7 +2,7 @@ package com.tibiabot.highscores
 
 import com.tibiabot.domain.HighscoreEvent
 import com.tibiabot.persistence.{ExperienceRepository, HighscoreRepository}
-import com.tibiabot.scheduler.ServerSaveSchedule
+import com.tibiabot.statistics.DailyStatistics
 import com.tibiabot.tibiadata.{HighscoreCategory, HighscoreList, Highscores, HighscoresApi}
 import com.tibiabot.tibiadata.response.{HighscoreData, HighscoreEntry}
 import com.tibiabot.highscores.HighscoreSweep.{NoPages, PageReads}
@@ -71,9 +71,12 @@ final class HighscoreSweep(
 
   /** The experience list feeds the history tables and nothing else — it never
    *  posts, because the online-list comparison already announces a level-up
-   *  within the minute and this reading is an hour old. */
+   *  within the minute and this reading is an hour old.
+   *
+   *  The reading just after server save closes the day before it rather than
+   *  opening the new one: see [[com.tibiabot.statistics.DailyStatistics.saveDayOf]]. */
   private def recordHistory(world: String, entries: List[HighscoreEntry], snapshotAt: Instant): Unit = {
-    val saveDay = ServerSaveSchedule.lastServerSave(snapshotAt.atZone(com.tibiabot.domain.time.Clock.Berlin)).toLocalDate
+    val saveDay = DailyStatistics.saveDayOf(snapshotAt)
     experience.recordReadings(world, entries, snapshotAt)
     experience.recordDaily(world, entries, saveDay)
   }

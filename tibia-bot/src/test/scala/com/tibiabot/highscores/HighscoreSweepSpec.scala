@@ -197,6 +197,16 @@ class HighscoreSweepSpec extends AnyFunSuite with Matchers {
     history.dailies.head._3 shouldBe LocalDate.parse("2026-09-01")
   }
 
+  test("the reading just after server save is filed under the day that closed") {
+    // 08:40 UTC is 10:40 Berlin: the first reading after the save, and the
+    // first to hold the experience everyone online at the save earned.
+    val history = new StubExperience
+    val afterSave = Instant.parse("2026-09-02T08:40:00Z")
+    await(sweeper(new StubApi(fullList(List(entry("Bubble", 2000L)))), new StubRepo, history)
+      .sweepList(world, HighscoreLists.experience, afterSave))
+    history.dailies.head._3 shouldBe LocalDate.parse("2026-09-01")
+  }
+
   test("a skill list never touches the history tables") {
     val history = new StubExperience
     await(sweeper(new StubApi(fullList(List(entry("Bubble", 116)))), new StubRepo, history).sweepList(world, sword, snapshot))

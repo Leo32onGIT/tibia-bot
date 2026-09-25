@@ -1,16 +1,16 @@
 package com.tibiabot.presentation
 
+import com.tibiabot.presentation.StatisticsCard.{Part, section}
 import com.tibiabot.statistics.{BossChance, BossPrediction, Chance, DailyReport}
-import net.dv8tion.jda.api.entities.MessageEmbed
 
 import java.time.Instant
 
-/** The third embed: which bosses might be up today.
+/** The last card: which bosses might be up today.
  *
- *  ==One list, not two bands==
- *  The reference implementation groups by chance under two headings. Ordering
- *  already carries that — most overdue first — so the heading was saying it
- *  twice, and a dot on the row says it in the space of one character.
+ *  ==Two groups, by chance==
+ *  High chance, then low, each under a small-caps label led by its dot, so the
+ *  rows carry no dot of their own (26 Sep 2026; one list with a dot on every row
+ *  before). Within a group the order is the predictor's, most overdue first.
  *
  *  ==Timestamps rather than day counts==
  *  "22 days (window 18–25)" asks a reader to know that the first number is days
@@ -36,45 +36,55 @@ object BossPredictionEmbeds {
    *  instead of silence, so the feature does not look broken while it warms up.
    *
    *  Every due boss is listed. A mature history on a busy world can have a
-   *  couple of dozen inside some window at once, and the list used to stop at
-   *  twenty and count the rest — but that cap existed because this embed shared
-   *  one 6,000-character message with the other two, and [[EmbedPages]] means it
-   *  no longer has to. A boss somebody could go and kill today is not worth
-   *  hiding to save a reader a scroll.
+   *  couple of dozen inside some window at once. A boss somebody could go and
+   *  kill today is not worth hiding to save a reader a scroll, and
+   *  [[StatisticsCard.messages]] carries a long card on to another message.
    *
    *  @param titleIcon the icon on the heading — the boosted-boss one, which
    *                   reads as "bosses" in general rather than as any one of them
    *  @param bossIcon  the icon that leads every boss row
+   *  @param bossTitle the wiki's page title for a boss, by name, to link it to;
+   *                   None for one the wiki lookup does not match, which reads
+   *                   unlinked
    */
-  def build(report: DailyReport, titleIcon: String, bossIcon: String): List[MessageEmbed] = {
+  def build(report: DailyReport, titleIcon: String, bossIcon: String,
+            bossTitle: String => Option[String]): Option[Part] = {
     val due = report.dueBosses
-    if (due.isEmpty && report.predictions.isEmpty && report.awaitingSighting == 0) Nil
-    else EmbedPages.build(
-      PredictionColor, description(report, due, titleIcon, bossIcon), footer = footer(report))
+    if (due.isEmpty && report.predictions.isEmpty && report.awaitingSighting == 0) None
+    else {
+      val heading = s"## $titleIcon Bosses Due"
+      val blocks =
+        if (due.nonEmpty) heading :: groups(due, bossIcon, bossTitle)
+        else if (report.predictions.nonEmpty)
+          List(s"$heading\n*No boss is inside a spawn window today, out of ${report.predictions.size} being tracked.*")
+        else List(s"$heading\n*Not enough history yet to predict anything — see below.*")
+      Some(Part(PredictionColor, footer(report).fold(blocks)(note => blocks.init :+ s"${blocks.last}\n-# $note")))
+    }
   }
 
-  private def description(report: DailyReport, due: List[BossPrediction],
-                          titleIcon: String, bossIcon: String): String = {
-    val heading = s"## $titleIcon Bosses Due"
-    val rows =
-      if (due.nonEmpty) due.map(line(_, bossIcon))
-      else if (report.predictions.nonEmpty)
-        List(s"*No boss is inside a spawn window today, out of ${report.predictions.size} being tracked.*")
-      else List("*Not enough history yet to predict anything — see below.*")
-    (heading :: rows).mkString("\n")
-  }
+  /** The due bosses, high chance then low, each group under its dot. */
+  private def groups(due: List[BossPrediction], bossIcon: String, bossTitle: String => Option[String]): List[String] =
+    List(
+      (Chance.High, ":green_circle:", "High chance"),
+      (Chance.Low, ":yellow_circle:", "Low chance")
+    ).flatMap { case (chance, dot, label) =>
+      val rows = due.filter(_.best == chance).map(line(_, bossIcon, bossTitle))
+      Option.when(rows.nonEmpty)(section(label, rows, icon = dot))
+    }
 
-  /** One boss: a dot for the chance, the icon, the name, and when its window
-   *  turns over.
+  /** One boss: the icon, the name linked to its wiki page, and when its window
+   *  turns over. The chance is on the group's label.
    *
    *  A boss with several spawn points says how many of them are up, since "two
-   *  of four Rotworm Queens are due" is a different trip from one. */
-  private def line(prediction: BossPrediction, bossIcon: String): String = {
-    val dot = if (prediction.best == Chance.High) ":green_circle:" else ":yellow_circle:"
+   *  of four Rotworm Queens are due" is a different trip from one. The count
+   *  sits outside the link. */
+  private def line(prediction: BossPrediction, bossIcon: String, bossTitle: String => Option[String]): String = {
     val leading = prediction.leading
     val spawns = if (leading.sizeIs > 1) s" ×${leading.size}" else ""
     val when = leading.headOption.map(timing).getOrElse("")
-    s"$dot $bossIcon **${prediction.boss.name}**$spawns${StatLines.Dot}$when"
+    val name = prediction.boss.name
+    val shown = bossTitle(name).fold(name)(page => s"[$name](${CreatureWiki.urlForTitle(page)})")
+    s"$bossIcon **$shown**$spawns${StatLines.Dot}$when"
   }
 
   /** What the window is doing, as a relative timestamp.
@@ -99,7 +109,8 @@ object BossPredictionEmbeds {
    *  against the reader's own clock, and keeps doing so after the post is old. */
   private def relative(instant: Instant): String = s"<t:${instant.getEpochSecond}:R>"
 
-  /** What the reader needs to trust the list, and nothing else.
+  /** What the reader needs to trust the list, and nothing else: a small grey
+   *  line at the foot of the card, where the embed had its footer.
    *
    *  A boss with no sighting in our history is not predicted at all, so a short
    *  list on a young history means "we do not know yet" rather than "nothing is

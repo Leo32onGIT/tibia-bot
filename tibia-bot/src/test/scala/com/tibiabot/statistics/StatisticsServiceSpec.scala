@@ -419,121 +419,155 @@ class StatisticsServiceSpec extends AnyFunSuite with Matchers {
     marks should contain theSameElementsAs List("broken", "fine")
   }
 
-  /** The refresh button's half of the service: rolling figures on demand, and
-   *  the refusals that keep a press from costing anything it need not. */
-  private val lastReading = Instant.parse("2026-09-18T18:40:00Z")
-  private val pressedAt = ZonedDateTime.ofInstant(lastReading.plusSeconds(300), Clock.Berlin)
+  /** The day's one update: the post brought up to the world's closing reading,
+   *  once, when that reading has been in for a few minutes. */
+  private val save = ZonedDateTime.parse("2026-09-11T10:00:00+02:00").withZoneSameInstant(Clock.Berlin)
+  private val closingReading = save.plusMinutes(40).toInstant
 
-  private class RollingExperience(
-      times: List[Instant] = Nil,
-      gains: List[ExperienceDelta] = Nil,
-      losses: List[ExperienceDelta] = Nil,
-      failTimes: Boolean = false,
-      failMovers: Boolean = false
-  ) extends ExperienceRepository {
+  /** Experience whose closing reading is filed from `filedAt` on, on the clock
+   *  the service reads; every question about it is kept. */
+  private class ClosingExperience(clock: () => ZonedDateTime, filedAt: Option[ZonedDateTime],
+                                  fail: Boolean = false)
+      extends StubExperience(Map("Antica" -> List(delta("Bubble", 900)))) {
     val asked = mutable.ListBuffer.empty[(Instant, Instant)]
-    val measured = mutable.ListBuffer.empty[(Instant, Instant)]
-    def recordReadings(world: String, entries: List[HighscoreEntry], observed: Instant): Unit = ()
-    def recordDaily(world: String, entries: List[HighscoreEntry], saveDay: LocalDate): Unit = ()
-    def readingTimes(world: String, from: Instant, to: Instant): List[Instant] = {
+    override def readingTimes(world: String, from: Instant, to: Instant): List[Instant] = {
       asked += ((from, to))
-      if (failTimes) throw new RuntimeException("database is away")
-      times
+      if (fail) throw new RuntimeException("database is away")
+      if (filedAt.exists(at => !clock().isBefore(at)) && !closingReading.isBefore(from) && !closingReading.isAfter(to))
+        List(closingReading)
+      else Nil
     }
-    def gainsBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] = {
-      measured += ((from, to))
-      if (failMovers) throw new RuntimeException("database is away")
-      gains
-    }
-    def lossesBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] =
-      if (failMovers) throw new RuntimeException("database is away") else losses
-    def dailyGains(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
-    def dailyLosses(world: String, saveDay: LocalDate, limit: Int): List[ExperienceDelta] = Nil
-    def lossesAmong(world: String, saveDay: LocalDate, names: Set[String], limit: Int): List[ExperienceDelta] = Nil
-    def removeExpiredReadings(before: Instant): Unit = ()
-    def removeExpiredDaily(before: LocalDate): Unit = ()
   }
 
-  private def refresher(experience: ExperienceRepository,
-                        now: ZonedDateTime = pressedAt): StatisticsService =
-    new StatisticsService(
+  /** A service on a clock the test moves, with the updates it handed over. */
+  private class UpdateHarness(
+      targets: List[StatisticsTarget],
+      filedAt: Option[ZonedDateTime] = Some(save.plusMinutes(45)),
+      updateFails: Boolean = false,
+      frags: FragRepository = new StubFrags(),
+      failReadings: Boolean = false
+  ) {
+    var clock: ZonedDateTime = save.plusMinutes(46)
+    val experience = new ClosingExperience(() => clock, filedAt, failReadings)
+    val updates = mutable.ListBuffer.empty[(String, DailyReport, FragTally, List[ExperienceDelta])]
+    val service = new StatisticsService(
       experience = experience,
       highscores = NoopHighscores,
       killStatistics = new StubKillStatistics(),
-      frags = new StubFrags(),
+      frags = frags,
       worldOnline = NoWorldOnline,
-      targets = () => Nil,
-      announce = (_, _, _, _) => (),
+      targets = () => targets,
+      announce = (_, _, _, _) => fail("nothing is posted outside the window"),
       recordPosted = (_, _) => (),
-      now = () => now
+      update = (target, report, tally, losses) => {
+        if (updateFails) throw new RuntimeException("message is gone")
+        updates += ((target.guildId, report, tally, losses))
+      },
+      now = () => clock
     )
 
-  private def hourly(count: Int): List[Instant] =
-    List.tabulate(count)(back => lastReading.minus(java.time.Duration.ofHours(back.toLong)))
-
-  test("a refresh measures the rolling window and reports both ends of it") {
-    val experience = new RollingExperience(
-      times = hourly(30), gains = List(delta("Bubble", 900)), losses = List(delta("Waldorf", -400)))
-
-    val refreshed = refresher(experience).refresh("Antica", shown = None, lastPressed = None)
-      .getOrElse(fail("expected figures"))
-
-    refreshed.window shouldBe ExperienceWindow(lastReading.minus(java.time.Duration.ofHours(24)), lastReading)
-    refreshed.window.hours shouldBe 24L
-    refreshed.gains.map(_.name) shouldBe List("bubble")
-    refreshed.losses.map(_.name) shouldBe List("waldorf")
-    // Measured between the window's own ends, never between invented instants.
-    experience.measured.toList shouldBe List((refreshed.window.from, refreshed.window.to))
+    /** Tick at each of `minutes` past server save. */
+    def tickAt(minutes: Double*): Unit = minutes.foreach { m =>
+      clock = save.plusSeconds((m * 60).toLong)
+      service.tick()
+    }
   }
 
-  test("a refresh asks for a bounded stretch of readings, not the whole week") {
-    val experience = new RollingExperience(times = hourly(30))
-    refresher(experience).refresh("Antica", shown = None, lastPressed = None)
+  private val postedToday = yesterday.toString
 
-    val (from, to) = experience.asked.head
-    to shouldBe pressedAt.toInstant
-    java.time.Duration.between(from, to) shouldBe StatisticsRefresh.Lookback
+  test("a post made today is updated once its closing reading has been in five minutes") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)))
+    h.tickAt(46)          // the reading is seen
+    h.updates shouldBe empty
+    h.tickAt(50.5)        // four and a half minutes on: the rest of the lists may still be coming
+    h.updates shouldBe empty
+    h.tickAt(51)
+    h.updates.map(_._1) shouldBe List("g1")
+    h.updates.head._2.saveDay shouldBe yesterday
+    h.updates.head._2.gains.map(_.name) shouldBe List("bubble")
   }
 
-  test("a post already showing the last reading is refused with it") {
-    val experience = new RollingExperience(times = hourly(30))
-
-    refresher(experience).refresh("Antica", shown = Some(lastReading), lastPressed = None) shouldBe
-      Left(RefreshDecision.NothingNewer(lastReading))
-    // Refused without measuring anything.
-    experience.measured shouldBe empty
+  test("a post is updated once, however long the tick keeps running") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)))
+    h.tickAt(46, 51, 52, 60, 90)
+    h.updates should have size 1
   }
 
-  test("a press inside the floor never reaches the database") {
-    val experience = new RollingExperience(times = hourly(30))
-    val pressed = pressedAt.toInstant.minusSeconds(5)
-
-    refresher(experience).refresh("Antica", shown = None, lastPressed = Some(pressed)) shouldBe
-      Left(RefreshDecision.TooSoon(pressed.plus(StatisticsRefresh.Floor)))
-    experience.asked shouldBe empty
+  test("nothing is updated while the closing reading is not in") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)), filedAt = None)
+    h.tickAt(46, 51, 60, 90)
+    h.updates shouldBe empty
   }
 
-  test("a world without a day of readings is told to wait, not that it is current") {
-    val experience = new RollingExperience(times = hourly(3))
-
-    refresher(experience).refresh("Antica", shown = None, lastPressed = None) shouldBe
-      Left(RefreshDecision.NotEnoughReadings)
+  test("the reading asked for is the one just after server save") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)))
+    h.tickAt(46)
+    h.experience.asked.head shouldBe ((save.toInstant, save.plusHours(1).toInstant))
   }
 
-  test("a database that is away is not reported as a world with nothing to show") {
-    refresher(new RollingExperience(failTimes = true))
-      .refresh("Antica", shown = None, lastPressed = None) shouldBe Left(RefreshDecision.Unavailable)
-
-    refresher(new RollingExperience(times = hourly(30), failMovers = true))
-      .refresh("Antica", shown = None, lastPressed = None) shouldBe Left(RefreshDecision.Unavailable)
+  test("a world is asked about at most once a minute, not every tick") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)), filedAt = None)
+    h.tickAt(46, 46.25, 46.5, 46.75, 47, 47.25)
+    h.experience.asked should have size 2
   }
 
-  test("a quiet day is figures of none rather than a refusal") {
-    val refreshed = refresher(new RollingExperience(times = hourly(30)))
-      .refresh("Antica", shown = None, lastPressed = None)
-      .getOrElse(fail("expected figures"))
+  test("a world is rebuilt once however many discords are waiting on it") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday), target("g2", posted = postedToday)))
+    h.tickAt(46, 51)
+    h.updates.map(_._1) should contain theSameElementsAs List("g1", "g2")
+    h.experience.moverCalls should have size 1
+  }
 
-    refreshed.gains shouldBe empty
-    refreshed.losses shouldBe empty
+  test("a channel that did not post today is not updated") {
+    val h = new UpdateHarness(List(target("g1", posted = "2026-09-09"), target("g2")))
+    h.tickAt(46, 51, 60)
+    h.updates shouldBe empty
+  }
+
+  test("a closing reading that never came is given up on two hours after server save") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)), filedAt = Some(save.plusMinutes(125)))
+    h.tickAt(125, 131, 140)
+    h.updates shouldBe empty
+  }
+
+  test("the update carries the guild's own frags and hunted losses, like the post") {
+    val tally = FragTally(3, 1, 450L, 150L, Nil, Nil, None, None)
+    val h = new UpdateHarness(
+      List(target("g1", posted = postedToday, hunted = Set("waldorf"))),
+      frags = new StubFrags(Map(("g1", "Antica") -> tally)))
+    h.tickAt(46, 51)
+    h.updates.head._3 shouldBe tally
+    h.experience.lossCalls.toList shouldBe List(("Antica", Set("waldorf")))
+  }
+
+  test("an update that throws is not tried again") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)), updateFails = true)
+    h.tickAt(46, 51, 52, 60)
+    h.experience.moverCalls should have size 1
+  }
+
+  test("a database that is away is asked again a minute later") {
+    val h = new UpdateHarness(List(target("g1", posted = postedToday)), failReadings = true)
+    h.tickAt(46, 47)
+    h.experience.asked should have size 2
+    h.updates shouldBe empty
+  }
+
+  // --- the stored ids ---------------------------------------------------------
+
+  test("a post's ids are stored with the day it was for, and read back") {
+    val stored = StatisticsMessages("2026-09-10", List("111", "222"))
+    stored.encode shouldBe "2026-09-10:111,222"
+    StatisticsMessages.decode(stored.encode) shouldBe stored
+    stored.isFor(yesterday) shouldBe true
+    stored.isFor(yesterday.minusDays(1)) shouldBe false
+  }
+
+  test("nothing stored reads as no post at all") {
+    StatisticsMessages.decode("") shouldBe StatisticsMessages.empty
+    StatisticsMessages.decode(null) shouldBe StatisticsMessages.empty
+    StatisticsMessages.decode("garbage") shouldBe StatisticsMessages.empty
+    StatisticsMessages.empty.encode shouldBe ""
+    StatisticsMessages.empty.isFor(yesterday) shouldBe false
   }
 }

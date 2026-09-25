@@ -6,8 +6,8 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.LocalDate
 
-/** The boss embed: one list, a dot per row, and Discord timestamps rather than
- *  day counts. */
+/** The Bosses Due card: the due bosses in two groups by chance, each under its
+ *  dot, names linked to the wiki, and Discord timestamps rather than day counts. */
 class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val day = LocalDate.of(2026, 9, 10)
@@ -29,117 +29,137 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
     DailyReport("Antica", day, Nil, Nil, scala.None, scala.None,
       predictions = predictions, awaitingSighting = awaiting)
 
-  private def pages(r: DailyReport) = BossPredictionEmbeds.build(r, title, icon)
+  /** Stands in for the wiki lookup: everything resolves but "Nowiki". */
+  private val wiki: String => Option[String] = name => if (name == "Nowiki") scala.None else Some(name)
 
-  /** The one page an ordinary day produces. */
-  private def build(r: DailyReport) = pages(r).head
+  private def card(r: DailyReport) = BossPredictionEmbeds.build(r, title, icon, wiki)
+
+  private def build(r: DailyReport) = card(r).get
+
+  // Furyosa 20 days into a 12-28 window is high; White Pale at 11 is short of
+  // it by a day, which is only a low chance.
+  private def furyosa = prediction("Furyosa", 20)
+  private def whitePale = prediction("White Pale", 11)
 
   test("the title is Bosses Due and carries the boosted-boss icon") {
-    build(report(List(prediction("Furyosa", 20)))).getDescription should
-      startWith(s"## $title Bosses Due")
+    build(report(List(furyosa))).blocks.head shouldBe s"## $title Bosses Due"
+  }
+
+  test("the card is purple") {
+    build(report(List(furyosa))).colour shouldBe BossPredictionEmbeds.PredictionColor
+  }
+
+  test("high chance comes first, then low, each group under its dot and a small-caps label") {
+    val built = build(report(List(whitePale, furyosa)))
+    built.blocks.tail.map(_.linesIterator.next()) shouldBe List(
+      "-# :green_circle: ʜɪɢʜ ᴄʜᴀɴᴄᴇ",
+      "-# :yellow_circle: ʟᴏᴡ ᴄʜᴀɴᴄᴇ")
+    built.blocks(1) should include("Furyosa")
+    built.blocks(2) should include("White Pale")
+  }
+
+  test("a day with only one chance has only that group") {
+    build(report(List(furyosa))).blocks.tail.map(_.linesIterator.next()) shouldBe List("-# :green_circle: ʜɪɢʜ ᴄʜᴀɴᴄᴇ")
+  }
+
+  test("the rows carry no dot of their own, since the label says the chance") {
+    val rows = build(report(List(whitePale, furyosa))).blocks.tail.flatMap(_.linesIterator.drop(1))
+    rows should not be empty
+    rows.foreach { row =>
+      row should not include "circle"
+    }
   }
 
   test("the rows carry the nemesis icon, not the one on the title") {
-    // Two different glyphs on purpose: the heading means "bosses" in general,
+    // Two different glyphs on purpose: the title means "bosses" in general,
     // a row means this named boss.
-    val description = build(report(List(prediction("Furyosa", 20)))).getDescription
-    description.linesIterator.drop(1).toList.foreach { row =>
-      row should include(icon)
+    build(report(List(furyosa))).blocks.tail.flatMap(_.linesIterator.drop(1)).foreach { row =>
+      row should startWith(icon)
       row should not include title
     }
   }
 
-  test("every row leads with a dot for the chance and the boss icon") {
-    val embed = build(report(List(prediction("Furyosa", 20))))
-    embed.getDescription should include(s":green_circle: $icon **Furyosa**")
+  test("a boss's name links to its wiki page") {
+    build(report(List(furyosa))).text should include(s"$icon **[Furyosa](https://tibia.fandom.com/wiki/Furyosa)**")
   }
 
-  test("a low chance gets the other dot") {
-    build(report(List(prediction("White Pale", 11)))).getDescription should include(":yellow_circle:")
+  test("a boss the wiki lookup does not match reads unlinked") {
+    val text = build(report(List(prediction("Nowiki", 20)))).text
+    text should include(s"$icon **Nowiki**")
+    text should not include "]("
   }
 
   test("a boss inside its window says when the window closes") {
     // Ferumbras at 165 days into a 161-175 window: it is up now, and what a
     // reader wants is how long they have.
-    val embed = build(report(List(prediction("Ferumbras", 165, 161, 175))))
-    embed.getDescription should include("window closes <t:")
-    embed.getDescription should include(":R>")
+    val text = build(report(List(prediction("Ferumbras", 165, 161, 175)))).text
+    text should include("window closes <t:")
+    text should include(":R>")
   }
 
   test("a boss short of its window says when the window opens") {
-    val embed = build(report(List(prediction("White Pale", 11))))
-    embed.getDescription should include("opens <t:")
+    build(report(List(whitePale))).text should include("opens <t:")
   }
 
   test("a boss past a window that had an end says how long it has been overdue") {
-    build(report(List(prediction("Man in the Cave", 200, 12, 16))))
-      .getDescription should include("overdue since <t:")
+    build(report(List(prediction("Man in the Cave", 200, 12, 16)))).text should include("overdue since <t:")
   }
 
   test("timestamps are relative, so the post stays true after the morning") {
     // A rendered day count freezes at the moment of posting; <t:...:R> does not.
-    val embed = build(report(List(prediction("Furyosa", 20))))
-    embed.getDescription should not include "20 days"
-    embed.getDescription should include(":R>")
+    val text = build(report(List(furyosa))).text
+    text should not include "20 days"
+    text should include(":R>")
   }
 
   test("a boss that is not due is left out entirely") {
-    val embed = build(report(List(prediction("Furyosa", 20), prediction("Yeti", 2))))
-    embed.getDescription should include("Furyosa")
-    embed.getDescription should not include "Yeti"
+    val text = build(report(List(furyosa, prediction("Yeti", 2)))).text
+    text should include("Furyosa")
+    text should not include "Yeti"
   }
 
-  test("a multi-spawn boss says how many of its spawns are up") {
-    build(report(List(prediction("Rotworm Queen", 20, 12, 24, spawns = 3))))
-      .getDescription should include("×3")
+  test("a multi-spawn boss says how many of its spawns are up, outside the link") {
+    build(report(List(prediction("Rotworm Queen", 20, 12, 24, spawns = 3)))).text should
+      include("[Rotworm Queen](https://tibia.fandom.com/wiki/Rotworm_Queen)** ×3")
   }
 
   test("a single spawn carries no multiplier") {
-    build(report(List(prediction("Furyosa", 20)))).getDescription should not include "×"
+    build(report(List(furyosa))).text should not include "×"
   }
 
-  test("a long list spills onto a second embed rather than being cut short") {
-    // It used to stop at twenty and count the rest. The cap was there because
-    // this embed shared one message with the other two, which it no longer must.
+  test("a long list is carried on to further messages rather than being cut short") {
     val many = (1 to 120).toList.map(i => prediction(s"Averylongbossname$i", 20 + i))
-    val built = pages(report(many))
-    built.size should be > 1
-    built.foreach(_.getDescription.length should be <= 4096)
-    val whole = built.map(_.getDescription).mkString("\n")
+    val packed = StatisticsCard.pack(List(build(report(many))))
+    packed.size should be > 1
+    packed.foreach(_.flatMap(_._2).map(_.length).sum should be <= StatisticsCard.MaxText)
+    val whole = packed.flatten.flatMap(_._2).mkString("\n")
     (1 to 120).foreach(i => whole should include(s"Averylongbossname$i"))
     whole should not include "more"
   }
 
   // --- the honest part ------------------------------------------------------
 
-  test("a world still waiting for sightings says so rather than looking broken") {
-    val embed = build(report(Nil, awaiting = 57))
-    embed.getDescription should include("Not enough history")
-    embed.getFooter.getText should include("57")
+  test("a world still waiting for sightings says so, with the count as a grey line at the foot") {
+    val built = build(report(Nil, awaiting = 57))
+    built.text should include("Not enough history")
+    built.text.linesIterator.toList.last shouldBe "-# 57 boss(es) not yet predicted"
   }
 
-  test("the footer goes once every boss has been seen") {
-    build(report(List(prediction("Furyosa", 20)))).getFooter shouldBe null
+  test("the count sits under the last group when there are bosses due") {
+    val built = build(report(List(whitePale, furyosa), awaiting = 4))
+    built.blocks.last.linesIterator.toList.last shouldBe "-# 4 boss(es) not yet predicted"
+    built.blocks.last should include("White Pale")
+  }
+
+  test("the count goes once every boss has been seen") {
+    build(report(List(furyosa))).text should not include "not yet predicted"
   }
 
   test("a mature history with nothing due says that plainly") {
-    val embed = build(report(List(prediction("Yeti", 2))))
-    embed.getDescription should include("No boss is inside a spawn window")
+    build(report(List(prediction("Yeti", 2)))).text should include("No boss is inside a spawn window")
   }
 
-  test("nothing at all produces no embed rather than an empty one") {
-    pages(report()) shouldBe empty
-  }
-
-  test("there are no fields") {
-    build(report(List(prediction("Furyosa", 20)))).getFields shouldBe empty
-  }
-
-  test("the footer goes on the last page, where a reader looks for it") {
-    val many = (1 to 120).toList.map(i => prediction(s"Averylongbossname$i", 20 + i))
-    val built = pages(report(many, awaiting = 12))
-    built.size should be > 1
-    built.init.foreach(_.getFooter shouldBe null)
-    built.last.getFooter.getText should include("12")
+  test("nothing at all produces no card rather than an empty one") {
+    card(report()) shouldBe scala.None
   }
 }

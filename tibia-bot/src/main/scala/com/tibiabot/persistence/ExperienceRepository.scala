@@ -18,11 +18,10 @@ import java.time.{Instant, LocalDate}
  *  snapshots that is 1.63M rows a day, measured at 30.7 MB per world for the
  *  week they are kept — against a rollup carrying a fortieth of the volume for
  *  ninety days. That week was dropped in September 2026, correctly, while
- *  nothing read it; it is back because the statistics post's refresh does.
- *
- *  The week is more than the window strictly needs — a day and an hour would
- *  do — and is kept at a week anyway so the intra-day curve stays buildable
- *  without paying for this table twice. */
+ *  nothing read it, and came back for the statistics post's refresh button.
+ *  The button went on 26 Sep 2026 and the readings stayed, by choice, so the
+ *  intra-day curve stays buildable. The daily post also reads them to learn
+ *  when a world's closing reading is in (see [[readingTimes]]). */
 trait ExperienceRepository {
 
   /** File one snapshot's readings, keyed by the instant tibia.com built it.
@@ -50,18 +49,16 @@ trait ExperienceRepository {
    *  in [[gainsBetween]], instead of each character being measured over a
    *  slightly different span.
    *
-   *  Two callers, and the shape suits both: the refresh picks its window from
-   *  this list, and its cooldown is the last entry — "has anything landed since
-   *  the figures on the post". */
+   *  The daily post asks it one question: whether the reading that closes a
+   *  save day is in for a world yet, so the post can be brought up to it — see
+   *  [[com.tibiabot.statistics.StatisticsService]]. */
   def readingTimes(world: String, from: Instant, to: Instant): List[Instant]
 
   /** The largest experience gains between two readings, largest first.
    *
    *  `from` and `to` are snapshot instants [[readingTimes]] returned, not
    *  arbitrary times: both ends are matched on equality, so anything else finds
-   *  nothing at all rather than the nearest reading. Choosing them is
-   *  [[com.tibiabot.statistics.ExperienceWindow]]'s job, which is where the
-   *  question of what counts as "a day ago" is decided and tested.
+   *  nothing at all rather than the nearest reading.
    *
    *  Same exclusion as [[dailyGains]], for the same reason and by the same
    *  means: the join drops anybody missing from either end, since entering the

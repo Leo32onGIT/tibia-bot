@@ -72,7 +72,12 @@ case class Worlds(name: String,
    *  none has been posted since ids were kept (25 Sep 2026). Everything that
    *  touches the card finds it by this: `/repair`, `/fullbless`, and the card's
    *  own buttons, which read their world off it. */
-  roleCardMessage: String = "0"
+  roleCardMessage: String = "0",
+  /** The messages this world's statistics post went out as, and the save day
+   *  it was for, as `day:id,id`; "" for a post from before these were kept
+   *  (26 Sep 2026). The next post deletes exactly these and the day's one
+   *  update edits them — see `statistics.StatisticsMessages`. */
+  statisticsMessages: String = ""
 )
 
 case class CustomSort(entityType: String, name: String, label: String, emoji: String)

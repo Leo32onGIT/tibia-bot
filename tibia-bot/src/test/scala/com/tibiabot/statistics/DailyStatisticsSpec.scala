@@ -46,11 +46,38 @@ class DailyStatisticsSpec extends AnyFunSuite with Matchers {
 
   // --- the window it spans ------------------------------------------------
 
-  test("a save day runs from its own server save to the next one") {
+  test("a save day's readings run from an hour after its server save to an hour after the next") {
+    // The reading just after a save closes the day before it, so the window
+    // starts and ends an hour late.
     val (from, to) = DailyStatistics.window(LocalDate.of(2026, 9, 10))
-    from shouldBe berlin("2026-09-10T10:00:00+02:00").toInstant
-    to shouldBe berlin("2026-09-11T10:00:00+02:00").toInstant
+    from shouldBe berlin("2026-09-10T11:00:00+02:00").toInstant
+    to shouldBe berlin("2026-09-11T11:00:00+02:00").toInstant
     Duration.between(from, to).toHours shouldBe 24
+  }
+
+  // --- which day a reading belongs to --------------------------------------
+
+  test("the reading just after server save closes the day before it") {
+    // Server save logs everyone out, and experience only reaches the
+    // highscores on logout, so the 10:40 reading is the first to hold the
+    // closing day's whole total.
+    DailyStatistics.saveDayOf(berlin("2026-09-11T10:40:00+02:00").toInstant) shouldBe LocalDate.of(2026, 9, 10)
+  }
+
+  test("the reading before server save belongs to the day it was taken in") {
+    DailyStatistics.saveDayOf(berlin("2026-09-11T09:40:00+02:00").toInstant) shouldBe LocalDate.of(2026, 9, 10)
+  }
+
+  test("the second reading after server save opens the new day") {
+    DailyStatistics.saveDayOf(berlin("2026-09-11T11:40:00+02:00").toInstant) shouldBe LocalDate.of(2026, 9, 11)
+  }
+
+  test("a reading's day and the window agree at the edges") {
+    val day = LocalDate.of(2026, 9, 10)
+    val (from, to) = DailyStatistics.window(day)
+    DailyStatistics.saveDayOf(from) shouldBe day
+    DailyStatistics.saveDayOf(to.minusSeconds(1)) shouldBe day
+    DailyStatistics.saveDayOf(to) shouldBe day.plusDays(1)
   }
 
   test("the day the clocks go back is twenty-five hours long") {

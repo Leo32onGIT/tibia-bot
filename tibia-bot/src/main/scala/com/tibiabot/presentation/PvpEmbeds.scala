@@ -1,9 +1,9 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.domain.{ExperienceDelta, FragTally, Fragger, Repeat, TopKill}
-import net.dv8tion.jda.api.entities.MessageEmbed
+import com.tibiabot.presentation.StatisticsCard.{Part, section}
 
-/** The second embed: the guild's own war.
+/** The second card: the guild's own war.
  *
  *  The only guild-scoped part of the daily post. Everything above and below it
  *  is a fact about the world; this is a fact about who that discord decided to
@@ -57,8 +57,8 @@ object PvpEmbeds {
       barScale: Bars.Scale,
       xpDown: String,
       jumpUrl: String => Option[String]
-  ): List[MessageEmbed] = {
-    val sections = List(
+  ): Part = {
+    val blocks = List(
       Some(List(
         "## :dagger: PVP",
         Bars.split(
@@ -78,11 +78,8 @@ object PvpEmbeds {
         section("Top Ally Killed", List(killLine(kill, sideIcon, vocationOf, jumpUrl))))
     ).flatten
 
-    EmbedPages.build(PvpColor, sections.mkString("\n"))
+    Part(PvpColor, blocks)
   }
-
-  private def section(title: String, rows: List[String]): String =
-    (s"### $title" :: rows).mkString("\n")
 
   /** A killer's level is looked up rather than stored: the frag tally keeps a
    *  name per kill and nothing else. */
@@ -108,9 +105,7 @@ object PvpEmbeds {
    *  cell at the end rather than another marker beside the name: the markers
    *  say what a character *is*, and this is somewhere to go.
    *
-   *  A bare URL would be the one thing Discord turns into a preview card, but
-   *  not inside an embed — those are only made from a message's own text — so
-   *  the mark carries it.
+   *  A bare URL would print the whole link on the row, so the mark carries it.
    *
    *  Dropped rather than rendered dead when the death was never posted, which
    *  [[StatLines.cells]] closes the row up around: no trailing separator with

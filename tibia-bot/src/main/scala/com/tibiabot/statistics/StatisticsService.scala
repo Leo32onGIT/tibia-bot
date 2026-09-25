@@ -7,6 +7,7 @@ import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
 import java.time.{Instant, LocalDate, ZonedDateTime}
+import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 
 /** One discord's statistics channel for one world.
@@ -26,7 +27,10 @@ final case class StatisticsTarget(
      *  online list and the deaths channel already hold in memory, and because
      *  "Most Exp Lost" is the only query that needs it — pushing it down would
      *  mean the cache reading a guild's own database. */
-    huntedNames: Set[String] = Set.empty
+    huntedNames: Set[String] = Set.empty,
+    /** The messages this channel's last post went out as — see
+     *  [[StatisticsMessages]]. */
+    messages: StatisticsMessages = StatisticsMessages.empty
 ) {
 
   /** Whether this channel still owes a post for `day`. String comparison against
@@ -35,19 +39,34 @@ final case class StatisticsTarget(
   def owes(day: LocalDate): Boolean = posted != day.toString
 }
 
-/** The experience figures a refreshed embed carries, and the window they are
- *  measured over.
+/** The messages a channel's post went out as, and the save day it was for.
  *
- *  The window travels with the rows because the embed says how long it covers.
- *  It is usually a day, and the times it is not — a sweep that stopped for a
- *  few hours — are exactly the times a reader should be told. */
-final case class RefreshedExperience(
-    window: ExperienceWindow,
-    gains: List[ExperienceDelta],
-    losses: List[ExperienceDelta]
-)
+ *  Stored in the guild's `worlds.statistics_messages` as `day:id,id`, so the
+ *  next day's post deletes exactly these and the day's one update edits them:
+ *  nothing is found by reading the channel. Empty for a post made before the
+ *  ids were kept (26 Sep 2026), which the next post clears by reading the
+ *  channel's history once. */
+final case class StatisticsMessages(day: String, ids: List[String]) {
 
-/** Posts the daily statistics embed once per world per server-save day.
+  def encode: String = if (ids.isEmpty) "" else s"$day:${ids.mkString(",")}"
+
+  /** Whether these are the post for `saveDay`, and so the ones its update edits. */
+  def isFor(saveDay: LocalDate): Boolean = ids.nonEmpty && day == saveDay.toString
+}
+
+object StatisticsMessages {
+
+  val empty: StatisticsMessages = StatisticsMessages("", Nil)
+
+  def decode(stored: String): StatisticsMessages =
+    Option(stored).map(_.trim).filter(_.nonEmpty).map(_.split(":", 2)) match {
+      case Some(Array(day, ids)) => StatisticsMessages(day, ids.split(",").map(_.trim).filter(_.nonEmpty).toList)
+      case _                     => empty
+    }
+}
+
+/** Posts the daily statistics once per world per server-save day, and brings
+ *  that post up to date once, when the world's closing reading is in.
  *
  *  Unlike the highscore sweep this fetches nothing — every figure it reports is
  *  already in `bot_cache`, put there by the primary's hourly sweep. So there is
@@ -82,6 +101,8 @@ final case class RefreshedExperience(
  *                      the embed is built outside so this stays free of JDA. The
  *                      report's `kills` says whether the creature figures and
  *                      the bosses are in it at all
+ *  @param update       hands the same day, rebuilt, to the caller to edit into the
+ *                      post it already made, once its closing reading is in
  *  @param recordPosted stores the day this target has now been served. A callback
  *                      rather than the world-config repository itself, because the
  *                      stored row has a cached twin in memory that `targets` reads
@@ -99,6 +120,7 @@ final class StatisticsService(
     targets: () => List[StatisticsTarget],
     announce: (StatisticsTarget, DailyReport, FragTally, List[ExperienceDelta]) => Unit,
     recordPosted: (StatisticsTarget, LocalDate) => Unit,
+    update: (StatisticsTarget, DailyReport, FragTally, List[ExperienceDelta]) => Unit = (_, _, _, _) => (),
     now: () => ZonedDateTime = () => ZonedDateTime.now(Clock.Berlin)
 ) extends StrictLogging {
 
@@ -116,77 +138,88 @@ final class StatisticsService(
       val owed = targets().filter(_.owes(day))
       if (owed.nonEmpty) postAll(owed, day)
     }
+    updateAll(currentTime)
   }
 
-  /** One press of a channel's refresh button.
+  // The day's one update, per guild and world, and what it waits on.
+  private val updated = TrieMap.empty[(String, String, LocalDate), Unit]
+  private val closingSeen = TrieMap.empty[(String, LocalDate), Instant]
+  private val lastAsked = TrieMap.empty[String, Instant]
+
+  /** Bring each post made today up to the world's closing reading, once.
    *
-   *  Answers with the experience figures over a rolling window, or with why
-   *  there are none to give. Reads nothing else: the rest of the post — the
-   *  war, the creatures, the bosses — is about the save day it was published
-   *  for and does not move, so a refresh leaves those embeds exactly as they
-   *  are. See [[StatisticsRefresh]] for what decides this and why the cooldown
-   *  is the data rather than a timer.
+   *  The post goes out at server save with the last reading taken before it,
+   *  about 09:40, and for worlds late in the sweep's alphabet the 08:40 one. It
+   *  can't wait for better: experience reaches the highscores only when a
+   *  character logs out, and server save is what logs everyone out, so the
+   *  first reading to hold the whole day is the one after it — tibia.com's
+   *  10:40, which the sweep files world by world until about 11:30 (see
+   *  [[DailyStatistics.ClosingReading]]). When a world's is in, its day is
+   *  built again and handed to `update` for every post of it made today, and
+   *  each is edited in place, silently.
    *
-   *  Fetches nothing from tibia.com, the same as the daily post. A press costs
-   *  at most three indexed queries against readings the sweep already banked,
-   *  which is what makes a button on a public channel affordable at all.
+   *  Once per post per day, held in memory: a restart before the cut-off
+   *  updates again, which edits in the same figures. After [[UpdateUntil]] a
+   *  world whose closing reading never came is left as posted, since any later
+   *  reading already belongs to the next day.
    *
-   *  @param shown       the reading this channel's embed was built from, or None
-   *                     where this bot has not refreshed it since booting
-   *  @param lastPressed when this channel last pressed, refusal or not
-   *  @return the figures, or the refusal to tell the reader
-   */
-  def refresh(
-      world: String,
-      shown: Option[Instant],
-      lastPressed: Option[Instant]
-  ): Either[RefreshDecision, RefreshedExperience] = {
-    val at = now().toInstant
-    // Checked before the query rather than inside the decision, so somebody
-    // leaning on the button cannot make us read the table forty times a second.
-    StatisticsRefresh.retryAfter(lastPressed, at) match {
-      case Some(retryAt) => Left(RefreshDecision.TooSoon(retryAt))
+   *  A world is asked about at most once every [[AskEvery]]: the tick runs every
+   *  fifteen seconds for the post's sake, and the question is only worth asking
+   *  as often as the answer can change. */
+  private def updateAll(currentTime: ZonedDateTime): Unit = {
+    val at = currentTime.toInstant
+    val save = ServerSaveSchedule.lastServerSave(currentTime).toInstant
+    val day = DailyStatistics.reportedDay(currentTime)
+    updated.keys.filter(_._3 != day).foreach(updated.remove)
+    closingSeen.keys.filter(_._2 != day).foreach(closingSeen.remove)
+    if (at.isBefore(save.plus(UpdateUntil))) {
+      val waiting = targets().filter(t => !t.owes(day) && !updated.contains((t.guildId, t.world, day)))
+      waiting.groupBy(_.world).foreach { case (world, due) =>
+        if (closingReadingIn(world, day, save, at))
+          report(world, day, killsFor(world, day)).foreach(built => due.foreach(target => updatePost(target, built, day)))
+      }
+    }
+  }
+
+  /** Whether `world`'s closing reading for `day` has been filed, and long
+   *  enough ago that the rest of its lists are in too.
+   *
+   *  The experience list is one of a world's twelve, all read within a minute
+   *  or so of each other; waiting [[Settle]] after first seeing it is what
+   *  lets the update carry that reading's skill advances as well. */
+  private def closingReadingIn(world: String, day: LocalDate, save: Instant, at: Instant): Boolean =
+    closingSeen.get((world, day)) match {
+      case Some(seen) => !at.isBefore(seen.plus(Settle))
       case None =>
-        readings(world, at) match {
-          case None => Left(RefreshDecision.Unavailable)
-          case Some(times) =>
-            StatisticsRefresh.decide(times, shown, lastPressed, at) match {
-              case RefreshDecision.Rebuild(window) => movers(world, window)
-              case refusal => Left(refusal)
+        if (lastAsked.get(world).exists(asked => at.isBefore(asked.plus(AskEvery)))) false
+        else {
+          lastAsked.put(world, at)
+          val filed =
+            try experience.readingTimes(world, save, save.plus(DailyStatistics.ClosingReading)).nonEmpty
+            catch {
+              case NonFatal(error) =>
+                logger.warn(s"Statistics: could not ask whether '$world' has its closing reading: ${error.getMessage}")
+                false
             }
+          if (filed) closingSeen.put((world, day), at)
+          false
         }
     }
+
+  /** One post's update: the day rebuilt with this guild's own frags, handed
+   *  over the same way the post was. Marked done whether or not the edit
+   *  works, for the reason [[post]] marks a day. */
+  private def updatePost(target: StatisticsTarget, report: DailyReport, day: LocalDate): Unit = {
+    try {
+      val frags = tally(target, day)
+      val losses = enemyLosses(target, day)
+      if (report.nonEmpty || frags.nonEmpty) update(target, report, frags, losses)
+    } catch {
+      case NonFatal(error) =>
+        logger.warn(s"Statistics: could not update '${target.world}' in ${target.guildLabel}: ${error.getMessage}")
+    }
+    updated.put((target.guildId, target.world, day), ())
   }
-
-  /** The window's two ends, or None where the query failed.
-   *
-   *  An empty list and a failure are told apart here rather than being folded
-   *  into each other: the first is a world waiting for its first readings, the
-   *  second is a database that will answer in a minute, and the reader is given
-   *  a different sentence for each. */
-  private def readings(world: String, at: Instant): Option[List[Instant]] =
-    try Some(experience.readingTimes(world, at.minus(StatisticsRefresh.Lookback), at))
-    catch {
-      case NonFatal(error) =>
-        logger.warn(s"Statistics: could not read the reading times for '$world': ${error.getMessage}")
-        None
-    }
-
-  /** Both ends of the window's ordering.
-   *
-   *  An empty result is a real answer rather than a failure — a world where
-   *  nobody in the top thousand moved in a day is a quiet world, and the embed
-   *  says so in the same words the daily post uses. */
-  private def movers(world: String, window: ExperienceWindow): Either[RefreshDecision, RefreshedExperience] =
-    try Right(RefreshedExperience(
-      window = window,
-      gains = experience.gainsBetween(world, window.from, window.to, DailyStatistics.TopGains),
-      losses = experience.lossesBetween(world, window.from, window.to, DailyStatistics.TopLosses)))
-    catch {
-      case NonFatal(error) =>
-        logger.warn(s"Statistics: could not read the rolling experience for '$world': ${error.getMessage}")
-        Left(RefreshDecision.Unavailable)
-    }
 
   private def postAll(owed: List[StatisticsTarget], day: LocalDate): Unit = {
     // Built per world rather than per target, and only for the worlds something
@@ -322,6 +355,10 @@ final class StatisticsService(
     }
     markPosted(target, report.saveDay)
   }
+
+  private val UpdateUntil = java.time.Duration.ofHours(2)
+  private val Settle = java.time.Duration.ofMinutes(5)
+  private val AskEvery = java.time.Duration.ofMinutes(1)
 
   private def markPosted(target: StatisticsTarget, day: LocalDate): Unit =
     try recordPosted(target, day)

@@ -1,25 +1,19 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
+import com.tibiabot.presentation.StatisticsCard.{Part, section}
 import com.tibiabot.statistics.DailyReport
 import com.tibiabot.tibiadata.HighscoreCategory
-import net.dv8tion.jda.api.entities.MessageEmbed
 
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** The first embed of the daily post: what the world did.
+/** The first card of the daily post, what the world did, and the kill
+ *  statistics card further down. Cards since 26 Sep 2026, embeds before, which
+ *  is where the name comes from — see [[StatisticsCard]] for the shape.
  *
- *  ==Why there are no fields==
- *  Everything is one description. A field caps at 1,024 characters and a ten-row
- *  leaderboard of linked names is already 1,200, but the deciding reason is the
- *  heading: only a description can hold `##` and `###`, and the date has to
- *  outrank its own sections. Fields also reflow differently on a phone, which
- *  this post no longer has to think about.
- *
- *  Long enough to need more than one embed on a busy day, so the body goes
- *  through [[EmbedPages]] rather than straight into a builder — a tenth gainer
- *  is never dropped to make the post fit.
+ *  The date is the card's `##` title so it outranks its own sections, which are
+ *  small-caps labels under it.
  *
  *  ==Why the icons are arguments==
  *  Config-free, so a test of this file does not need a database host set — the
@@ -34,7 +28,7 @@ object StatisticsEmbeds {
 
   /** Ally green, the same the activity channel gives an allied guild. The board
    *  is the world doing well — experience gained, a skill reached — and the PVP
-   *  embed under it answers in the other half of the pair. */
+   *  card under it answers in the other half of the pair. */
   val WorldColor: Int = Embeds.AllyGreen
 
   /** The bot's yellow, which everywhere else means "this happened on its own
@@ -51,7 +45,7 @@ object StatisticsEmbeds {
     s"## $titleIcon [${report.postedDay.format(dayFormat)}](${Urls.topExperienceUrl(report.world)})"
 
   /** @param titleIcon the icon on the date heading — the animated newspaper,
-   *                   which is why this embed carries no thumbnail: the same
+   *                   which is why this card carries no picture: the same
    *                   picture twice, once of it moving and once of it still
    *  @param sideIcon  the ally/enemy icon for a character, by name; empty for
    *                   somebody this discord does not track
@@ -65,92 +59,34 @@ object StatisticsEmbeds {
       sideIcon: String => String,
       skillIcon: HighscoreCategory => String,
       xpUp: String,
-      xpDown: String,
-      freshness: Option[Freshness] = None
-  ): List[MessageEmbed] = {
-    val sections = List(
+      xpDown: String
+  ): Part =
+    Part(WorldColor, List(
       Some(heading(report, titleIcon)),
       Some(section("Top Experience Gained", gains(report, sideIcon, xpUp))),
       Option.when(report.losses.nonEmpty)(
         section("Top Experience Lost", report.losses.map(gainLine(_, sideIcon, xpDown)))),
       report.advance.map(event =>
         section("Top Skill Advancement", List(advanceLine(event, sideIcon, skillIcon))))
-    ).flatten
+    ).flatten)
 
-    EmbedPages.build(WorldColor, sections.mkString("\n"),
-      footer = freshness.map(_.label), stamp = freshness.map(_.takenAt))
-  }
-
-  /** What a refreshed board says at its foot: the span its figures cover, and
-   *  the reading they end at.
+  /** The day's kill statistics, as their own card: what the world's creatures
+   *  lost, and which special bosses died.
    *
-   *  It exists because the headings above it do not move. "Top Experience
-   *  Gained" says the same thing whether the figures are the save day's or the
-   *  last day's, and the date at the top is the morning the post went out
-   *  either way — so this is the only place a reader learns which of the two
-   *  they are looking at.
+   *  Titled like the other three cards, with the creatures and the special
+   *  kills as its two sections (26 Sep 2026; until then Special Kills was a
+   *  second title of its own, behind the gold emoji). Absent when both are
+   *  empty.
    *
-   *  The span is the window's real length rather than the day it asked for. It
-   *  is 24 nearly always, and the mornings it is not are exactly the mornings
-   *  somebody would otherwise compare a 28-hour figure against yesterday's
-   *  24-hour one and conclude the world had a big night.
+   *  No date on it: the board above it has already said which day this is.
    *
-   *  In the embed's footer rather than in its description, which is where the
-   *  online lists already put "how current is this" — "Last updated • Today at
-   *  02:13" — and where a reader of this discord therefore looks for it. The
-   *  time rides as a real footer timestamp rather than as text, so Discord
-   *  prints it in the reader's own zone and format.
-   *
-   *  @param hours   the window's real length, rounded to whole hours
-   *  @param takenAt the reading the figures end at, which is what the stamp
-   *                 shows — not the moment the button was pressed. The two can
-   *                 be an hour apart, and only the reading is a fact about the
-   *                 figures underneath it. */
-  final case class Freshness(hours: Long, takenAt: java.time.Instant) {
-
-    /** The footer's own words. The stamp after them says when, so this does not
-     *  repeat it. */
-    def label: String = s"Last $hours hours"
-  }
-
-  /** A refreshed board in place of the one a message already carries.
-   *
-   *  The board is however many embeds it took — a busy day runs past one — and
-   *  they lead the message, so the leading run in this colour is what a refresh
-   *  replaces and everything after it is left exactly as it was. That is the
-   *  whole of "only the experience embed changes": the war, the creatures and
-   *  the bosses are about the save day the post was published for, they do not
-   *  move, and they are not rebuilt or re-read.
-   *
-   *  Matching on the colour rather than on position, because the alternative is
-   *  counting embeds and being wrong on the day the board spills. */
-  def replaceBoard(existing: List[MessageEmbed], board: List[MessageEmbed]): List[MessageEmbed] =
-    board ::: existing.dropWhile(_.getColorRaw == WorldColor)
-
-  /** The day's creature figures, as their own embed.
-   *
-   *  Separate from the board rather than a section at the foot of it, for two
-   *  reasons. It is the one part of the post that waits on tibia.com rolling its
-   *  kill statistics, so on a slow morning it goes out in a later message than
-   *  the board — and a section cannot move between messages while a heading rank
-   *  stays put. And it carries its own colour, which a section inside a green
-   *  embed cannot.
-   *
-   *  No date on it. It has one only in the message where it travels alone, and
-   *  by then the board two minutes above it in the channel has already said
-   *  which day this is.
-   *
-   *  No `killed` on the rows either. Both headings already say what the figures
+   *  No `killed` on the rows either. The title already says what the figures
    *  count, and repeating the verb on every row spends the width on the one word
    *  that never varies.
    *
-   *  @param titleIcon   leads Creature Kills. Not the newspaper the board leads
-   *                     with: this half often goes out as its own message, where
+   *  @param titleIcon   leads the title. Not the newspaper the board leads with:
    *                     a second newspaper reads as a second bulletin rather than
-   *                     the other half of one
-   *  @param goldIcon    leads Special Kills, at the same rank as PVP and Bosses
-   *                     Due, since it is a section about something else entirely
-   *                     rather than a subdivision of the creature list
+   *                     another part of one
    *  @param specialIcon the configured emoji for a special boss, by its key;
    *                     empty for one nothing is configured for, which renders as
    *                     no icon rather than a gap
@@ -162,9 +98,9 @@ object StatisticsEmbeds {
    *                     anything unmatched, which prints unlinked rather than
    *                     differently; see [[CreatureWiki]] for why that is cheap
    */
-  def creatureStats(report: DailyReport, titleIcon: String, goldIcon: String,
+  def creatureStats(report: DailyReport, titleIcon: String,
                     specialIcon: String => String,
-                    creatureTitle: String => Option[String]): List[MessageEmbed] = {
+                    creatureTitle: String => Option[String]): Option[Part] = {
     val creatures = report.topKills.map { row =>
       // Looked up by the race as reported; printed in the casing of whatever
       // page that matched, which is the only thing that knows whether the
@@ -181,11 +117,11 @@ object StatisticsEmbeds {
       s"$lead**${StatLines.number(count.toLong)}** ${linked(kill.nameFor(count), creatureTitle(kill.name))}"
     }
     val sections = List(
-      Option.when(creatures.nonEmpty)((s"## $titleIcon Creature Kills" :: creatures).mkString("\n")),
-      Option.when(specials.nonEmpty)((s"## $goldIcon Special Kills" :: specials).mkString("\n"))
+      Option.when(creatures.nonEmpty)(section("Creatures", creatures)),
+      Option.when(specials.nonEmpty)(section("Special Kills", specials))
     ).flatten
 
-    if (sections.isEmpty) Nil else EmbedPages.build(CreatureColor, sections.mkString("\n"))
+    Option.when(sections.nonEmpty)(Part(CreatureColor, s"## $titleIcon Kill Statistics" :: sections))
   }
 
   /** A name as the post prints it, linked to its wiki page where there is one.
@@ -198,15 +134,6 @@ object StatisticsEmbeds {
    *  @param title the wiki page it matched, if it matched one */
   private def linked(shown: String, title: Option[String]): String =
     title.fold(shown)(page => s"[$shown](${CreatureWiki.urlForTitle(page)})")
-
-  /** A section is its heading and its rows. Absent sections are dropped by the
-   *  caller rather than printed empty, so a quiet day is short rather than a
-   *  column of headings with nothing under them.
-   *
-   *  The label carries no emoji: the `##` title above it has one, and repeating
-   *  the trick on every `###` under that turns a hierarchy into a row of badges. */
-  private def section(title: String, rows: List[String]): String =
-    (s"### $title" :: rows).mkString("\n")
 
   private def gains(report: DailyReport, sideIcon: String => String, xpUp: String): List[String] =
     if (report.gains.isEmpty) List("*Nobody in the top 1,000 gained experience.*")

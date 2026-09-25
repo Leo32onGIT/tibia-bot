@@ -92,8 +92,8 @@ final class JdbcExperienceRepository(connectionProvider: ConnectionProvider) ext
   def lossesBetween(world: String, from: Instant, to: Instant, limit: Int): List[ExperienceDelta] =
     between(world, from, to, "<", "ASC", limit)
 
-  /** Two readings of the same world joined on the character, which is every
-   *  figure the refreshed experience embed reports.
+  /** Two readings of the same world joined on the character: every
+   *  character's movement between two exact hours.
    *
    *  Both ends are an equality on `observed`, so each end is a primary key
    *  lookup — `(world, name, observed)` leads with exactly what is bound here —

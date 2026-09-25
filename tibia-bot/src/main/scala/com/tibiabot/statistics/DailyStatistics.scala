@@ -4,7 +4,7 @@ import com.tibiabot.domain.{ExperienceDelta, HighscoreEvent}
 import com.tibiabot.domain.time.Clock
 import com.tibiabot.scheduler.ServerSaveSchedule
 
-import java.time.{Instant, LocalDate, ZonedDateTime}
+import java.time.{Duration, Instant, LocalDate, ZonedDateTime}
 
 /** One world's finished server-save day, as the Statistics channel reports it.
  *
@@ -109,7 +109,27 @@ object DailyStatistics {
   def reportedDay(now: ZonedDateTime): LocalDate =
     ServerSaveSchedule.lastServerSave(now).toLocalDate.minusDays(1)
 
-  /** The instants a save day spans: its own server save until the next one.
+  /** How long after server save a highscore reading still belongs to the day
+   *  that just closed.
+   *
+   *  A character's experience only reaches the highscores when they log out,
+   *  and server save logs everybody out. So the first reading after the save —
+   *  tibia.com rebuilds on the :40, so the 10:40 one — is the first to hold
+   *  what everyone online at the save earned that day. Filed under the new day,
+   *  as it was until 26 Sep 2026, that experience went into the next morning's
+   *  post instead. An hour takes in that one reading and not the 11:40. */
+  val ClosingReading: Duration = Duration.ofHours(1)
+
+  /** The save day a highscore reading taken at `snapshotAt` belongs to: the one
+   *  running at the time, except for the reading that closes a day — see
+   *  [[ClosingReading]]. */
+  def saveDayOf(snapshotAt: Instant): LocalDate =
+    ServerSaveSchedule.lastServerSave(snapshotAt.minus(ClosingReading).atZone(Clock.Berlin)).toLocalDate
+
+  /** The instants a save day's highscore readings are taken in: from just
+   *  after its own closing reading to the end of the next one, which is where
+   *  [[saveDayOf]] draws the line. An advance first seen in the reading after
+   *  the save happened on the day before it, so it is that day's too.
    *
    *  Resolved through Berlin at both ends rather than as "start plus 24 hours",
    *  because two days a year are 23 or 25 hours long and a fixed offset would
@@ -117,7 +137,7 @@ object DailyStatistics {
   def window(saveDay: LocalDate): (Instant, Instant) = {
     val from = saveDay.atTime(ServerSaveSchedule.serverSaveTime).atZone(Clock.Berlin)
     val to = saveDay.plusDays(1).atTime(ServerSaveSchedule.serverSaveTime).atZone(Clock.Berlin)
-    (from.toInstant, to.toInstant)
+    (from.toInstant.plus(ClosingReading), to.toInstant.plus(ClosingReading))
   }
 
   /** How many losers the post names. Half the gainers: a day's losses are one

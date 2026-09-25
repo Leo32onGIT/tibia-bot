@@ -7,7 +7,7 @@ import java.util.Locale
  *  `{vocation} **level** — **[name](url)** {side icon} · {figure}` — the online
  *  list's own convention for a character ([[com.tibiabot.TibiaBot]]), so a name
  *  reads the same in both channels, with the row's figure after it. Shared rather
- *  than written twice because the world embed and the PVP embed differ only in
+ *  than written twice because the board and the PVP card differ only in
  *  what the last cell holds.
  *
  *  Config-free, like everything else in this package that the statistics post

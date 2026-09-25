@@ -8,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.{Instant, LocalDate}
 
-/** The world embed: what it says, and that it stays inside Discord's limits. */
+/** The board and the kill statistics card: what they say, and in what shape. */
 class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   private val day = LocalDate.of(2026, 9, 10)
@@ -40,116 +40,111 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     HighscoreEvent("Antica", category, name.toLowerCase, name, "Master Sorcerer", 361, score - 1, score,
       Instant.parse("2026-09-10T18:40:00Z"))
 
-  private def pages(r: DailyReport, side: String => String = _ => "") =
+  private def build(r: DailyReport, side: String => String = _ => "") =
     StatisticsEmbeds.build(r, news, side, _ => "<:mlvl:3>", up, down)
-
-  /** The one page an ordinary day produces. */
-  private def build(r: DailyReport, side: String => String = _ => "") = pages(r, side).head
 
   // --- the shape of a row --------------------------------------------------
 
   test("a row reads like the online list — vocation, level, name, side — then the figure") {
-    val embed = build(report(gains = List(delta("Arieswar", 182450912, level = 418))), _ => "<:ally:9>")
-    embed.getDescription should include(
+    val board = build(report(gains = List(delta("Arieswar", 182450912, level = 418))), _ => "<:ally:9>")
+    board.text should include(
       ":shield: **418** — **[Arieswar](https://www.tibia.com/community/?name=Arieswar)** <:ally:9> · " + up + " **182,450,912**")
   }
 
   test("a character nobody tracks carries no side icon and the row closes up") {
     // GuildIcons renders an untracked, guildless character as an empty string,
     // so the row must not leave a gap where the icon would have been.
-    val bare = build(report(gains = List(delta("Arieswar", 900)))).getDescription
+    val bare = build(report(gains = List(delta("Arieswar", 900)))).text
     bare should include("**[Arieswar](https://www.tibia.com/community/?name=Arieswar)** · " + up)
     bare should not include "  ·"
   }
 
   test("the experience icons stand in for the sign, and never appear together") {
-    val embed = build(report(gains = List(delta("Arieswar", 900)), losses = List(delta("Unlucky One", -18402993))))
-    embed.getDescription should include(up + " **900**")
-    embed.getDescription should include(down + " **18,402,993**")
+    val board = build(report(gains = List(delta("Arieswar", 900)), losses = List(delta("Unlucky One", -18402993))))
+    board.text should include(up + " **900**")
+    board.text should include(down + " **18,402,993**")
     // the falling icon already says it; a minus would say it twice
-    embed.getDescription should not include "-18,402,993"
-    embed.getDescription should not include "+900"
+    board.text should not include "-18,402,993"
+    board.text should not include "+900"
   }
 
-  // --- headings ------------------------------------------------------------
+  // --- the card ------------------------------------------------------------
 
-  test("the date is an h2 and outranks its own sections") {
-    val embed = build(report(gains = List(delta("Arieswar", 900))))
-    embed.getDescription should startWith(s"## $news [Friday 11 September 2026](")
-    embed.getDescription should include("### Top Experience Gained")
+  test("the date is the card's ## title, and each section a small-caps label under a divider") {
+    val board = build(report(
+      gains = List(delta("Arieswar", 900)),
+      losses = List(delta("Unlucky One", -900)),
+      advance = Some(advance("magiclevel", 131))))
+    board.blocks.head should startWith(s"## $news [Friday 11 September 2026](")
+    board.blocks.tail.map(_.linesIterator.next()) shouldBe List(
+      "-# ᴛᴏᴘ ᴇxᴘᴇʀɪᴇɴᴄᴇ ɢᴀɪɴᴇᴅ",
+      "-# ᴛᴏᴘ ᴇxᴘᴇʀɪᴇɴᴄᴇ ʟᴏsᴛ",
+      "-# ᴛᴏᴘ sᴋɪʟʟ ᴀᴅᴠᴀɴᴄᴇᴍᴇɴᴛ")
+  }
+
+  test("the board is green") {
+    build(report(gains = List(delta("Arieswar", 900)))).colour shouldBe StatisticsEmbeds.WorldColor
   }
 
   test("the date is the morning the post goes out, not the save day it reports") {
     // The save day closes at 10:00 the next morning and the post follows it, so
     // a reader opening the channel sees today's date on today's paper. Everybody
     // already knows the figures are yesterday's.
-    val embed = build(report(gains = List(delta("Arieswar", 900))))
-    embed.getDescription should include("Friday 11 September 2026")
-    embed.getDescription should not include "10 September 2026"
+    val board = build(report(gains = List(delta("Arieswar", 900))))
+    board.text should include("Friday 11 September 2026")
+    board.text should not include "10 September 2026"
   }
 
   test("only the title carries an emoji; the section labels are bare") {
-    // Repeating the trick on every heading under the title turns a hierarchy
-    // into a row of badges, so the labels are plain words on purpose.
-    val embed = build(report(
+    // Repeating the trick on every label under the title turns a hierarchy into
+    // a row of badges, so the labels are plain words on purpose.
+    val board = build(report(
       gains = List(delta("Arieswar", 900)),
       losses = List(delta("Unlucky One", -900)),
-      advance = Some(advance("magiclevel", 131)),
-      kills = Some(summary())))
-    embed.getDescription.linesIterator.filter(_.startsWith("### ")).foreach { heading =>
-      heading should not include ":"
-    }
+      advance = Some(advance("magiclevel", 131))))
+    board.blocks.tail.map(_.linesIterator.next()).foreach(_ should not include ":")
   }
 
   test("the date links through to the world's experience table, not its tibia.com page") {
-    val body = build(report(gains = List(delta("Arieswar", 900)))).getDescription
+    val body = build(report(gains = List(delta("Arieswar", 900)))).text
     body should include("https://guildstats.eu/top-experience/Antica")
     body should not include "subtopic=worlds"
   }
 
-  test("a section with nothing in it is absent rather than an empty heading") {
-    val embed = build(report(gains = List(delta("Arieswar", 900))))
-    embed.getDescription should not include "Top Experience Lost"
-    embed.getDescription should not include "Top Skill Advancement"
-    embed.getDescription should not include "Creature Kills"
+  test("a section with nothing in it is absent rather than an empty label") {
+    val board = build(report(gains = List(delta("Arieswar", 900))))
+    board.blocks should have size 2
+    board.text should not include "ʟᴏsᴛ"
+    board.text should not include "ᴀᴅᴠᴀɴᴄᴇᴍᴇɴᴛ"
   }
 
-  test("there are no fields at all") {
-    // Which is what frees the post from the 1,024-character cap and from
-    // reflowing differently on a phone.
-    build(report(gains = List(delta("Arieswar", 900)), kills = Some(summary()))).getFields shouldBe empty
-  }
-
-  // --- the other three sections -------------------------------------------
+  // --- the other sections --------------------------------------------------
 
   test("magic level is named without doubling the word level") {
-    val embed = build(report(advance = Some(advance("magiclevel", 131))))
-    embed.getDescription should include("<:mlvl:3> magic level **131**")
-    embed.getDescription should not include "magic level level"
+    val board = build(report(advance = Some(advance("magiclevel", 131))))
+    board.text should include("<:mlvl:3> magic level **131**")
+    board.text should not include "magic level level"
   }
 
   test("a category this build no longer knows renders plainly instead of throwing") {
-    build(report(advance = Some(advance("bosspoints", 4200)))).getDescription should include("bosspoints **4200**")
+    build(report(advance = Some(advance("bosspoints", 4200)))).text should include("bosspoints **4200**")
   }
 
   test("a day nobody gained on says so rather than showing an empty list") {
-    build(report(losses = List(delta("Unlucky One", -900)))).getDescription should include("Nobody")
+    build(report(losses = List(delta("Unlucky One", -900)))).text should include("Nobody")
   }
 
-  test("the board no longer carries the creature figures at all") {
-    // They are their own embed now, because they travel in a different message
-    // on a morning tibia.com is slow and because they carry their own colour.
-    val embed = build(report(
+  test("the board does not carry the creature figures") {
+    val board = build(report(
       gains = List(delta("Arieswar", 900)),
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965))))
-    embed.getDescription should not include "Creature Kills"
-    embed.getDescription should not include "flimsy lost souls"
+    board.text should not include "Kill Statistics"
+    board.text should not include "flimsy lost souls"
   }
 
-  // --- the creature embed --------------------------------------------------
+  // --- the kill statistics card ----------------------------------------------
 
-  private val gold = "<:gold:5>"
   private val creatureIcon = "<:creature:6>"
 
   // Stands in for CreatureWiki, answering with a page title the way it does, so
@@ -163,15 +158,25 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   }
 
   private def creature(r: DailyReport) =
-    StatisticsEmbeds.creatureStats(r, creatureIcon, gold, key => s"<:$key:9>", wiki)
+    StatisticsEmbeds.creatureStats(r, creatureIcon, key => s"<:$key:9>", wiki)
 
-  private def creatureBody(r: DailyReport) = creature(r).head.getDescription
+  private def creatureBody(r: DailyReport) = creature(r).get.text
+
+  test("the card is titled Kill Statistics, with the creatures and the special kills as its sections") {
+    val card = creature(report(
+      kills = Some(summary()),
+      topKills = List(killed("flimsy lost souls", 23965)),
+      specials = List(SpecialKills.all.head -> 3))).get
+    card.blocks.map(_.linesIterator.next()) shouldBe List(
+      s"## $creatureIcon Kill Statistics",
+      "-# ᴄʀᴇᴀᴛᴜʀᴇs",
+      "-# sᴘᴇᴄɪᴀʟ ᴋɪʟʟs")
+  }
 
   test("the creatures are listed largest first, count leading") {
     val body = creatureBody(report(
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965), killed("quara looters", 13))))
-    body should startWith(s"## $creatureIcon Creature Kills")
     body should include("**23,965** [Flimsy Lost Souls](https://tibia.fandom.com/wiki/Flimsy_Lost_Souls)")
     body should include("**13** [Quara Looters](https://tibia.fandom.com/wiki/Quara_Looters)")
     body.indexOf("Flimsy") should be < body.indexOf("Quara")
@@ -179,10 +184,8 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("the row reads the same linked or not, so an unresolved race loses only the link") {
     val r = report(kills = Some(summary()), topKills = List(killed("cyclopes", 400)))
-    val linked = StatisticsEmbeds.creatureStats(r, creatureIcon, gold, _ => "", wiki)
-      .head.getDescription
-    val bare = StatisticsEmbeds.creatureStats(r, creatureIcon, gold, _ => "", _ => None)
-      .head.getDescription
+    val linked = StatisticsEmbeds.creatureStats(r, creatureIcon, _ => "", wiki).get.text
+    val bare = StatisticsEmbeds.creatureStats(r, creatureIcon, _ => "", _ => None).get.text
     bare should include("**400** Cyclopes")
     bare should not include "]("
     linked should include("**400** [Cyclopes](")
@@ -190,13 +193,11 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     linked.replaceAll("""\[([^\]]+)\]\([^)]+\)""", "$1") shouldBe bare
   }
 
-  test("no row repeats the verb the headings already carry") {
+  test("no row repeats the verb the title already carries") {
     val body = creatureBody(report(
       kills = Some(summary()),
       topKills = List(killed("flimsy lost souls", 23965)),
       specials = List(SpecialKills.all.head -> 3)))
-    body should include("Creature Kills")
-    body should include("Special Kills")
     body should not include "killed"
   }
 
@@ -243,13 +244,12 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       not include "killed by"
   }
 
-  test("special kills get their own heading, one rank up, led by the gold icon") {
-    val body = creatureBody(report(
+  test("a special kill leads with its own boss's emoji") {
+    creatureBody(report(
       kills = Some(summary()),
       topKills = List(killed("dragon", 900)),
-      specials = List(SpecialKills.all.head -> 3)))
-    body should include(s"## $gold Special Kills")
-    body should include("<:plunder:9> **3** [Plunder Patriarches](https://tibia.fandom.com/wiki/Plunder_Patriarch)")
+      specials = List(SpecialKills.all.head -> 3))) should
+      include("<:plunder:9> **3** [Plunder Patriarches](https://tibia.fandom.com/wiki/Plunder_Patriarch)")
   }
 
   test("a special boss is shown by its name, not the race the endpoint counts it under") {
@@ -260,161 +260,48 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
     body should not include "patriarches"
   }
 
-  test("a day none of them died has no Special Kills heading") {
+  test("a day none of them died has no Special Kills section") {
     creatureBody(report(kills = Some(summary()), topKills = List(killed("dragon", 900)))) should
-      not include "Special Kills"
+      not include "sᴘᴇᴄɪᴀʟ"
+  }
+
+  test("a day of special kills alone still opens on the title") {
+    val card = creature(report(kills = Some(summary()), specials = List(SpecialKills.all.head -> 2))).get
+    card.blocks.map(_.linesIterator.next()) shouldBe List(s"## $creatureIcon Kill Statistics", "-# sᴘᴇᴄɪᴀʟ ᴋɪʟʟs")
   }
 
   test("a special boss with no configured emoji renders without one rather than with a gap") {
     val body = StatisticsEmbeds.creatureStats(
       report(kills = Some(summary()), specials = List(SpecialKills.all.head -> 2)),
-      news, gold, _ => "", wiki).head.getDescription
+      news, _ => "", wiki).get.text
     body should include("**2** [Plunder Patriarches](")
     body should not include "  **2**"
   }
 
-  test("a day with nothing killed produces no embed at all") {
-    creature(report(kills = Some(summary()))) shouldBe empty
+  test("a day with nothing killed produces no card at all") {
+    creature(report(kills = Some(summary()))) shouldBe None
   }
 
-  test("the creature embed wears the bot's yellow, not the board's green") {
-    val built = creature(report(kills = Some(summary()), topKills = List(killed("dragon", 900))))
-    built.foreach(_.getColor.getRGB & 0xFFFFFF shouldBe StatisticsEmbeds.CreatureColor)
+  test("the kill statistics card wears the bot's yellow, not the board's green") {
+    creature(report(kills = Some(summary()), topKills = List(killed("dragon", 900)))).get.colour shouldBe
+      StatisticsEmbeds.CreatureColor
     StatisticsEmbeds.CreatureColor should not be StatisticsEmbeds.WorldColor
-  }
-
-  test("the fullest creature embed fits inside Discord's limits") {
-    val top = (1 to 10).toList.map(i => killed(s"some very long creature name $i", 100000 - i))
-    val built = creature(report(
-      kills = Some(summary()),
-      topKills = top,
-      specials = SpecialKills.all.map(_ -> 3)))
-    built should have size 1
-    built.head.getDescription.length should be < 4096
   }
 
   // --- limits --------------------------------------------------------------
 
-  test("the fullest world embed fits inside Discord's limits") {
+  test("the fullest board fits one V2 message on its own") {
     val gains = (1 to 10).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i, level = 400 + i))
-    val built = StatisticsEmbeds.build(
-      report(gains, List(delta("Someoneunlucky", -9182993)), Some(advance("magiclevel", 131)), Some(summary())),
+    val board = StatisticsEmbeds.build(
+      report(gains, (1 to 5).toList.map(i => delta(s"Someoneunlucky$i", -9182993L - i)),
+        Some(advance("magiclevel", 131)), Some(summary())),
       news, _ => "<:otherguild:1><:enemy:2>", _ => "<:mlvl:3>", up, down)
-    built should have size 1
-    built.head.getDescription.length should be < 4096
-    built.head.getLength should be < 6000
+    board.text.length should be < StatisticsCard.MaxText
   }
 
-  test("a board too long for one description spills onto a second embed") {
-    // Not reachable with ten gainers, but the guard has to hold whatever the
-    // list grows to: the tenth name is never dropped to make the post fit.
-    val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
-    val built = pages(report(gains = many))
-    built.size should be > 1
-    built.foreach(_.getDescription.length should be <= 4096)
-    // every name survives the split
-    val whole = built.map(_.getDescription).mkString("\n")
-    many.foreach(mover => whole should include(mover.displayName))
-  }
-
-  test("no page carries a thumbnail; the animated title icon is the picture") {
-    val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
-    val built = pages(report(gains = many))
-    built.foreach(_.getThumbnail shouldBe null)
-    built.foreach(_.getColor.getRGB & 0xFFFFFF shouldBe StatisticsEmbeds.WorldColor)
-  }
-
-  // --- the refreshed board -------------------------------------------------
-
-  private val taken = Instant.parse("2026-09-18T18:40:00Z")
-
-  test("the daily post carries no footer at all") {
-    // The default, so a post nobody has pressed reads exactly as it always has.
-    val embed = build(report(gains = List(delta("Bubble", 900))))
-    embed.getFooter shouldBe null
-    embed.getTimestamp shouldBe null
-  }
-
-  test("a refreshed board says what it covers in the footer, and stamps the reading") {
-    val built = StatisticsEmbeds.build(
-      report(gains = List(delta("Bubble", 900))), news, _ => "", _ => "<:mlvl:3>", up, down,
-      freshness = Some(StatisticsEmbeds.Freshness(24L, taken)))
-
-    built.head.getFooter.getText shouldBe "Last 24 hours"
-    built.head.getTimestamp.toInstant shouldBe taken
-  }
-
-  test("the freshness is not in the description, where it was a subtext line") {
-    // It reads as the online lists' "Last updated" stamp now, which is where
-    // this discord already looks for how current something is.
-    val built = StatisticsEmbeds.build(
-      report(gains = List(delta("Bubble", 900))), news, _ => "", _ => "<:mlvl:3>", up, down,
-      freshness = Some(StatisticsEmbeds.Freshness(24L, taken)))
-
-    built.head.getDescription should not include "-#"
-    built.head.getDescription should not include "Last 24 hours"
-  }
-
-  test("the headings, the rows and the date are untouched by a refresh") {
-    val r = report(gains = List(delta("Bubble", 900)), losses = List(delta("Waldorf", -400)),
-      advance = Some(advance("magiclevel", 131)))
-    val plain = StatisticsEmbeds.build(r, news, _ => "", _ => "<:mlvl:3>", up, down).head
-    val refreshed = StatisticsEmbeds.build(r, news, _ => "", _ => "<:mlvl:3>", up, down,
-      freshness = Some(StatisticsEmbeds.Freshness(24L, taken))).head
-
-    // The whole difference is the footer: same date heading, same section
-    // headings, same rows, same skill advancement, down to the character.
-    refreshed.getDescription shouldBe plain.getDescription
-  }
-
-  test("a window that is not a day says the length it really is") {
-    StatisticsEmbeds.Freshness(28L, taken).label shouldBe "Last 28 hours"
-  }
-
-  test("the stamp lands on the last page of a board that spilled") {
-    // Where a reader expects to find it, and once: a footer on every page would
-    // read as three separate boards.
-    val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
-    val built = StatisticsEmbeds.build(
-      report(gains = many), news, _ => "", _ => "<:mlvl:3>", up, down,
-      freshness = Some(StatisticsEmbeds.Freshness(24L, taken)))
-
-    built.size should be > 1
-    built.init.foreach(_.getFooter shouldBe null)
-    built.last.getFooter.getText shouldBe "Last 24 hours"
-    built.last.getTimestamp.toInstant shouldBe taken
-  }
-
-  test("a refresh replaces the board and leaves every other embed alone") {
-    val board = pages(report(gains = List(delta("Bubble", 900))))
-    val pvp = new net.dv8tion.jda.api.EmbedBuilder().setColor(PvpEmbeds.PvpColor).setDescription("## PVP").build()
-    val bosses = new net.dv8tion.jda.api.EmbedBuilder()
-      .setColor(BossPredictionEmbeds.PredictionColor).setDescription("## Bosses Due").build()
-    val fresh = pages(report(gains = List(delta("Bubble", 1900))))
-
-    val replaced = StatisticsEmbeds.replaceBoard(board ::: List(pvp, bosses), fresh)
-
-    replaced.size shouldBe fresh.size + 2
-    replaced.take(fresh.size).map(_.getDescription) shouldBe fresh.map(_.getDescription)
-    replaced.drop(fresh.size) shouldBe List(pvp, bosses)
-  }
-
-  test("a board that spilled onto two embeds is replaced whole") {
-    // The leading run in the board's colour goes, however long it is — counting
-    // embeds instead would leave half of yesterday's board above today's.
-    val many = (1 to 200).toList.map(i => delta(s"Averylongcharactername$i", 100000000L - i))
-    val spilled = pages(report(gains = many))
-    val pvp = new net.dv8tion.jda.api.EmbedBuilder().setColor(PvpEmbeds.PvpColor).setDescription("## PVP").build()
-    val fresh = pages(report(gains = List(delta("Bubble", 1900))))
-
-    spilled.size should be > 1
-    StatisticsEmbeds.replaceBoard(spilled ::: List(pvp), fresh) shouldBe fresh ::: List(pvp)
-  }
-
-  test("a message with nothing but a board is replaced by a board") {
-    val board = pages(report(gains = List(delta("Bubble", 900))))
-    val fresh = pages(report(gains = List(delta("Bubble", 1900))))
-
-    StatisticsEmbeds.replaceBoard(board, fresh) shouldBe fresh
+  test("the fullest kill statistics card fits one V2 message on its own") {
+    val top = (1 to 10).toList.map(i => killed(s"some very long creature name $i", 100000 - i))
+    creature(report(kills = Some(summary()), topKills = top, specials = SpecialKills.all.map(_ -> 3)))
+      .get.text.length should be < StatisticsCard.MaxText
   }
 }
