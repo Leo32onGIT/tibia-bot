@@ -4,7 +4,7 @@ import com.tibiabot.domain.RaidAnnouncement
 import com.tibiabot.persistence.ObserverRaidRepository
 import com.tibiabot.presentation.ObserverEmbeds
 import com.typesafe.scalalogging.StrictLogging
-import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.utils.messages.MessageCreateData
 
 import java.time.{Duration, Instant}
 import scala.collection.concurrent.TrieMap
@@ -25,10 +25,13 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *  account. So every raid gets the same three posts, in order, one per stage, each
  *  under its own dedup key, and nothing posted is edited:
  *
- *   - area revealed (`imminent`): "Imminent Raid", the area, and when the subarea reveals;
- *   - subarea revealed (`subarea`): "Subarea Revealed", the subarea, and when the raid starts;
+ *   - area revealed (`imminent`): "Imminent raid", the area, and when the subarea reveals;
+ *   - subarea revealed (`subarea`): "Subarea revealed", the subarea, and when the raid starts;
  *   - raid started (`started`): the raid by name, its creatures and picture — then
  *     the broadcast lines (`line:i`), each timed from the start off the catalogue.
+ *
+ *  The stage posts are Components V2 cards and the lines embeds (see
+ *  `ObserverEmbeds`), so every post is handed over as a whole message.
  *
  *  A raid first seen past a stage gets only its latest stage's post; the stages
  *  before it are marked done, so an out-of-date post never follows. A raid already
@@ -59,16 +62,17 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
 final class ObserverRaidPoller(
   pooledRaids: () => Map[String, List[RaidAnnouncement]],
   raidRepository: ObserverRaidRepository,
-  post: (String, String, MessageEmbed) => Unit,
+  post: (String, String, MessageCreateData) => Unit,
   schedule: (FiniteDuration, () => Unit) => Unit,
   servesGuild: String => Boolean,
   sweepEvery: Duration = Duration.ofMinutes(15),
   wakeAfter: List[Duration] = ObserverRaidPoller.DefaultWakes,
   known: Int => Boolean = id => RaidTypeCatalog.get(id).isDefined,
-  areaPost: RaidAnnouncement => MessageEmbed = ObserverEmbeds.areaEmbed(_),
-  subareaPost: RaidAnnouncement => MessageEmbed = ObserverEmbeds.subareaEmbed(_),
-  startedPost: (RaidAnnouncement, Option[RaidType]) => MessageEmbed = ObserverEmbeds.startedEmbed(_, _),
-  linePost: String => MessageEmbed = ObserverEmbeds.raidLineEmbed,
+  areaPost: RaidAnnouncement => MessageCreateData = r => ObserverEmbeds.stageMessage(ObserverEmbeds.areaCard(r)),
+  subareaPost: RaidAnnouncement => MessageCreateData = r => ObserverEmbeds.stageMessage(ObserverEmbeds.subareaCard(r)),
+  startedPost: (RaidAnnouncement, Option[RaidType]) => MessageCreateData =
+    (r, t) => ObserverEmbeds.stageMessage(ObserverEmbeds.startedCard(r, t)),
+  linePost: String => MessageCreateData = ObserverEmbeds.raidLineMessage,
   now: () => Instant = () => Instant.now()
 ) extends StrictLogging {
   import ObserverRaidPoller._

@@ -7,7 +7,16 @@ import com.tibiabot.statistics.BossCatalogue
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
+import net.dv8tion.jda.api.components.container.{Container, ContainerChildComponent}
+import net.dv8tion.jda.api.components.section.Section
+import net.dv8tion.jda.api.components.separator.Separator
+import net.dv8tion.jda.api.components.textdisplay.TextDisplay
+import net.dv8tion.jda.api.components.thumbnail.Thumbnail
 import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageCreateData}
+
+import java.time.Instant
+import scala.jdk.CollectionConverters._
 
 /** The `/observer` panel: a member's own Tibia Observer token status, with the
  *  Add / Remove controls. Ephemeral, so it only ever shows one member their own
@@ -111,7 +120,7 @@ object ObserverEmbeds {
   private val DripGrey = 4540237
 
   /** Boss names (and race aliases) from the boss catalogue, lower-cased — used to
-   *  pick the imminent embed's thumbnail: a boss over an ordinary creature. */
+   *  pick the start card's picture: a boss over an ordinary creature. */
   private lazy val bossNames: Set[String] =
     BossCatalogue.bosses.flatMap(b => b.name.toLowerCase :: b.raceName.map(_.toLowerCase).toList).toSet
 
@@ -135,48 +144,68 @@ object ObserverEmbeds {
 
   // A raid gets three posts, one per stage, always in this order. The feed only
   // says which raid it is at the start, so the first two never name it.
+  //
+  // Each is a Components V2 card, gold-edged as the raid embeds before it were:
+  // the stage as a small grey label in small caps (as the server-save card's
+  // blocks are labelled), the place as a header behind the `:raid:` emoji, and
+  // when the next thing happens as a small grey line with its label in bold.
+  // The broadcast lines stay embeds.
 
-  /** The area stage, an hour before the raid starts: "Imminent Raid" over the area
-   *  as a grey line, and when its subarea is revealed. */
-  def areaEmbed(raid: RaidAnnouncement, emoji: String = Config.raidEmoji): MessageEmbed = {
+  /** The area stage, an hour before the raid starts: the area, and when its
+   *  subarea is revealed. */
+  def areaCard(raid: RaidAnnouncement, emoji: String = Config.raidEmoji): Container = {
     val reveals = raid.startDate.map(start =>
-      s"**Subarea reveals:** <t:${start.minus(com.tibiabot.observer.ObserverRaidPoller.SubareaLead).getEpochSecond}:R>")
-    stageEmbed("Imminent Raid", None, s"-# ${areaOf(raid, None)}" :: reveals.toList, emoji)
+      timeLine("Subarea reveals", start.minus(com.tibiabot.observer.ObserverRaidPoller.SubareaLead)))
+    stageCard(TextDisplay.of(stageText("Imminent raid", s"$emoji ${areaOf(raid, None)}", reveals.toList)))
   }
 
-  /** The subarea stage, 15 minutes before the raid starts: "Subarea Revealed" over
-   *  the subarea as a grey line (its area when there is none), and when it starts. */
-  def subareaEmbed(raid: RaidAnnouncement, emoji: String = Config.raidEmoji): MessageEmbed = {
-    val starts = raid.startDate.map(start => s"**Raid starts:** <t:${start.getEpochSecond}:R>")
+  /** The subarea stage, 15 minutes before the raid starts: the subarea (its area
+   *  when there is none), and when the raid starts. */
+  def subareaCard(raid: RaidAnnouncement, emoji: String = Config.raidEmoji): Container = {
+    val starts = raid.startDate.map(start => timeLine("Raid starts", start))
     val where = raid.subarea.filter(_.nonEmpty).getOrElse(areaOf(raid, None))
-    stageEmbed("Subarea Revealed", None, s"-# $where" :: starts.toList, emoji)
+    stageCard(TextDisplay.of(stageText("Subarea revealed", s"$emoji $where", starts.toList)))
   }
 
-  /** The start, when the feed says which raid it is: its name, linked to its wiki
-   *  page, over the subarea as a grey line, when it started, and its creatures and
-   *  picture. Its broadcast lines follow. A raid the catalogue doesn't know is
-   *  titled "Raid Started", with no creatures. */
-  def startedEmbed(raid: RaidAnnouncement, raidType: Option[RaidType],
-                   emoji: String = Config.raidEmoji): MessageEmbed = {
-    val started = raid.startDate.map(start => s"**Raid started:** <t:${start.getEpochSecond}:R>")
+  /** The start, when the feed says which raid it is: its name as the header,
+   *  linked to its wiki page, over the subarea in bold and when it started, with a
+   *  picture of its boss or lead creature beside them. Under a divider, its
+   *  creatures as wiki-linked bullets. Its broadcast lines follow. A raid the
+   *  catalogue doesn't know has the subarea as its header, as the posts before it
+   *  do, and no picture or creatures. */
+  def startedCard(raid: RaidAnnouncement, raidType: Option[RaidType],
+                  emoji: String = Config.raidEmoji): Container = {
+    val started = raid.startDate.map(start => timeLine("Raid started", start)).toList
     val where = raid.subarea.orElse(raidType.flatMap(_.subarea)).filter(_.nonEmpty).getOrElse(areaOf(raid, raidType))
-    stageEmbed(raidType.map(_.name).getOrElse("Raid Started"), raidType, s"-# $where" :: started.toList, emoji)
+    raidType match {
+      case None =>
+        stageCard(TextDisplay.of(stageText("Raid started", s"$emoji $where", started)))
+      case Some(rt) =>
+        val name = rt.link.fold(rt.name)(url => s"[${rt.name}]($url)")
+        val text = TextDisplay.of(stageText("Raid started", s"$emoji $name", s"-# **$where**" :: started))
+        val top = thumbnailUrl(rt.creatures).fold[ContainerChildComponent](text)(url =>
+          Section.of(Thumbnail.fromUrl(url), text))
+        val creatures =
+          if (rt.creatures.isEmpty) Nil
+          else List(Separator.createDivider(Separator.Spacing.SMALL),
+            TextDisplay.of(s"-# ${ServerSaveCard.smallCaps("Creatures")}\n${rt.creatures.map(creatureBullet).mkString("\n")}"))
+        stageCard(top :: creatures: _*)
+    }
   }
 
-  /** A stage post: the `:raid:` emoji and its title (the raid's name linked to its
-   *  wiki page, when known), its lines, and — when the raid is known — its creatures
-   *  as wiki-linked bullets with a thumbnail of its boss or lead creature. */
-  private def stageEmbed(title: String, raidType: Option[RaidType], lines: List[String],
-                         emoji: String): MessageEmbed = {
-    val creatures = raidType.map(_.creatures).getOrElse(Vector.empty)
-    val creatureBlock = if (creatures.nonEmpty) s"\n\n**Creatures:**\n${creatures.map(creatureBullet).mkString("\n")}" else ""
-    val builder = new EmbedBuilder()
-      .setColor(Embeds.AutomaticColor)
-      .setTitle(s"$emoji $title", raidType.flatMap(_.link).orNull)
-      .setDescription((lines.mkString("\n") + creatureBlock).take(4000))
-    thumbnailUrl(creatures).foreach(builder.setThumbnail)
-    builder.build()
-  }
+  /** A stage card's text: its label, its header, then its lines. */
+  private def stageText(label: String, header: String, lines: List[String]): String =
+    (s"-# ${ServerSaveCard.smallCaps(label)}" :: s"### $header" :: lines).mkString("\n")
+
+  /** When the next thing happens, as a countdown on a small grey line. */
+  private def timeLine(what: String, at: Instant): String = s"-# **$what:** <t:${at.getEpochSecond}:R>"
+
+  private def stageCard(parts: ContainerChildComponent*): Container =
+    Container.of(parts.asJava).withAccentColor(Int.box(Embeds.AutomaticColor))
+
+  /** A stage card as the message the raids channel is sent. */
+  def stageMessage(card: Container): MessageCreateData =
+    new MessageCreateBuilder().useComponentsV2().setComponents(card).build()
 
   /** One raid broadcast line, dripped as the raid unfolds: just the in-world text in
    *  bold, in the neutral grey. Short and concise by design — no title, no footer. */
@@ -185,6 +214,10 @@ object ObserverEmbeds {
       .setColor(DripGrey)
       .setDescription(s"**${message.take(3990)}**")
       .build()
+
+  /** A broadcast line as the message the raids channel is sent: its embed alone. */
+  def raidLineMessage(message: String): MessageCreateData =
+    MessageCreateData.fromEmbeds(raidLineEmbed(message))
 
   /** Add is offered when there is no token; Remove when there is one. The other is
    *  shown disabled so the panel always reads as a pair (as `/boosted` does). The

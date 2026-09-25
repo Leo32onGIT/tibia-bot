@@ -347,6 +347,18 @@ observer_tokens
   "Subarea Revealed", and a named one's carry its name. Every stage post puts its
   location under the title as a grey `-#` line: the area at the area stage, and the
   subarea alone from the subarea stage on (the area when there is no subarea).
+  Superseded by the V2 cards below.
+- **Stage posts are V2 cards (26 Sep 2026).** Picked from a mockup, after the
+  notifications channel went V2. Each stage is a gold-edged card: the stage as a
+  small grey small-caps label (`ɪᴍᴍɪɴᴇɴᴛ ʀᴀɪᴅ`, `sᴜʙᴀʀᴇᴀ ʀᴇᴠᴇᴀʟᴇᴅ`,
+  `ʀᴀɪᴅ sᴛᴀʀᴛᴇᴅ`), the place as a `###` header behind `:raid:`, and the countdown
+  as bold-labelled subtext (`-# **Raid starts:** <t:…:R>`). The start card's header
+  is the raid's name linked to its wiki page, over the subarea as bold subtext and
+  the countdown, with its picture beside them; its creatures follow under a
+  divider and a `ᴄʀᴇᴀᴛᴜʀᴇs` label, as bullets. An unknown raid's start card has the
+  subarea as its header and no picture or creatures. The broadcast lines are still
+  the grey embeds. Every raid post, lines included, is now sent silent, as the
+  notifications channel's are.
 - **Fleet split: BUILT.** Every Observer request now leaves from one bot, the same
   shape as the fansite pipeline. The primary (or a lone bot) runs the sidecar
   (`observer` compose profile), fetches the pooled MWC and raid feeds for every

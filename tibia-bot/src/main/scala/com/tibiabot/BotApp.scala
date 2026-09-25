@@ -285,10 +285,10 @@ object BotApp extends App with StrictLogging {
   val observerRaidPoller = new observer.ObserverRaidPoller(
     () => observerFeed.raidsByWorld(),
     observerRaidRepository,
-    post = (guildId, channelId, embed) => outboundSender.enqueue("observer-raid") { () =>
+    post = (guildId, channelId, message) => outboundSender.enqueue("observer-raid") { () =>
       Option(discordGateway.guildById(guildId))
         .flatMap(g => Option(g.getTextChannelById(channelId)))
-        .foreach(_.sendMessageEmbeds(embed).queue(_ => (), _ => ()))
+        .foreach(_.sendMessage(message).setSuppressedNotifications(true).queue(_ => (), _ => ()))
     },
     // Fire a raid's broadcast lines at their exact moment — the scheduler sleeps until
     // each is due, so there is no polling and the line lands to the second.

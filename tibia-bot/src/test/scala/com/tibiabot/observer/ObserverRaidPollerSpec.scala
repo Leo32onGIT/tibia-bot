@@ -2,8 +2,7 @@ package com.tibiabot.observer
 
 import com.tibiabot.domain.RaidAnnouncement
 import com.tibiabot.persistence.ObserverRaidRepository
-import net.dv8tion.jda.api.EmbedBuilder
-import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.utils.messages.MessageCreateData
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -48,12 +47,12 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
       def prunePostedOlderThan(cutoff: Instant): Unit = ()
     }
 
-    private def said(text: String): MessageEmbed = new EmbedBuilder().setDescription(text).build()
+    private def said(text: String): MessageCreateData = MessageCreateData.fromContent(text)
 
     val poller = new ObserverRaidPoller(
       pooledRaids = () => { fetches += 1; feed.groupBy(_.world) },
       raidRepository = repo,
-      post = (guildId, _, embed) => posts += (guildId -> embed.getDescription),
+      post = (guildId, _, message) => posts += (guildId -> message.getContent),
       schedule = (delay, task) => scheduled += (delay -> task),
       servesGuild = _ == "g1",
       areaPost = _ => said("area"),
