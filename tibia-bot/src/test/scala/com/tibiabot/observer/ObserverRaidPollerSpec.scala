@@ -76,10 +76,10 @@ class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
     h.markedFor("g2") shouldBe empty
   }
 
-  test("a one-off poll is scheduled just after the subarea reveals, half an hour before the start") {
+  test("a one-off poll is scheduled just after the subarea reveals, 15 minutes before the start") {
     val h = new Harness
     h.pollAt(0, entry("areaRevealed"))
-    h.scheduled.map(_._1.toSeconds).toList shouldBe List(30 * 60 + 20, 30 * 60 + 120)
+    h.scheduled.map(_._1.toSeconds).toList shouldBe List(45 * 60 + 20, 45 * 60 + 120)
   }
 
   test("the subarea stage is a new post, and the area post never follows it") {

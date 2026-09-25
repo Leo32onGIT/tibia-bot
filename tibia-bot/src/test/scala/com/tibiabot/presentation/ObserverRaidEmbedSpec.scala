@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.domain.RaidAnnouncement
-import com.tibiabot.observer.RaidTypeCatalog
+import com.tibiabot.observer.{ObserverRaidPoller, RaidTypeCatalog}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -29,19 +29,19 @@ class ObserverRaidEmbedSpec extends AnyFunSuite with Matchers {
     e.getUrl shouldBe null
     e.getDescription shouldBe lines(
       "-# Hrodmir",
-      s"**Subarea reveals:** <t:${start.minus(Duration.ofMinutes(30)).getEpochSecond}:R>")
+      s"**Subarea reveals:** <t:${start.minus(ObserverRaidPoller.SubareaLead).getEpochSecond}:R>")
     e.getThumbnail shouldBe null
   }
 
   test("the subarea post of an unnamed raid is 'Subarea Revealed', with the subarea under it") {
     val e = ObserverEmbeds.subareaEmbed(raid("subareaRevealed", Some("Krimhorn")), None,
-      start.minus(Duration.ofMinutes(30)), emoji)
+      start.minus(ObserverRaidPoller.SubareaLead), emoji)
     e.getTitle shouldBe "<:raid:1> Subarea Revealed"
     e.getDescription shouldBe lines("-# Krimhorn", s"**Raid starts:** <t:${start.getEpochSecond}:R>")
   }
 
   test("a subarea post with no subarea to give falls back to the area") {
-    val e = ObserverEmbeds.subareaEmbed(raid("subareaRevealed"), None, start.minus(Duration.ofMinutes(30)), emoji)
+    val e = ObserverEmbeds.subareaEmbed(raid("subareaRevealed"), None, start.minus(ObserverRaidPoller.SubareaLead), emoji)
     e.getDescription should startWith("-# Hrodmir\n")
   }
 

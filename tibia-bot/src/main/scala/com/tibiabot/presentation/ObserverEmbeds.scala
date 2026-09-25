@@ -136,7 +136,7 @@ object ObserverEmbeds {
   /** The imminent-raid post, at the area stage — an hour before the raid starts.
    *
    *  "Imminent Raid" over the area as a grey line, and when its subarea is
-   *  revealed: half an hour before the start. An account with limited discoveries
+   *  revealed: 15 minutes before the start. An account with limited discoveries
    *  learns nothing more until the raid starts, so this is usually all there is.
    *  When a better-explored account's feed already names the raid, its name
    *  (linked to its wiki page) is the title, and its creatures and picture come too. */
@@ -148,7 +148,7 @@ object ObserverEmbeds {
     stageEmbed(title, raidType, s"-# ${areaOf(raid, raidType)}" :: reveals.toList, emoji)
   }
 
-  /** The post at the subarea stage — half an hour before the raid starts. It goes
+  /** The post at the subarea stage — 15 minutes before the raid starts. It goes
    *  out again at the start, now naming the raid, when no earlier post could; and
    *  for a raid first seen once it has started, it is the only one before its lines.
    *

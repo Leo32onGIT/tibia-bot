@@ -21,7 +21,7 @@ private final case class TrackedRaid(world: String, raidTypeId: Int, anchor: Opt
  *
  *  ==The stages==
  *  A raid reaches the feed in three: its area is revealed an hour before it starts,
- *  its subarea half an hour before, and then it starts. The feed's time is the start
+ *  its subarea 15 minutes before, and then it starts. The feed's time is the start
  *  at every stage. An account with limited discoveries is not told *which* raid it
  *  is until it starts — so nothing about a raid can be relied on before then but
  *  its area, its subarea and its start. Each stage therefore gets its own post, and
@@ -279,8 +279,11 @@ object ObserverRaidPoller {
   }
 
   /** How long before a raid starts its subarea is revealed. Its area is revealed an
-   *  hour before. */
-  val SubareaLead: Duration = Duration.ofMinutes(30)
+   *  hour before. Observer's own feed for a Carlin raid on Victoris (25 Sep 2026):
+   *  area 03:13, subarea 03:58, start 04:13. It was 30 minutes here until then,
+   *  so the imminent post named a reveal time that had already passed and the
+   *  poll meant to catch the subarea ran a quarter of an hour early. */
+  val SubareaLead: Duration = Duration.ofMinutes(15)
 
   /** How long after its last broadcast a raid counts as over. Until then everything
    *  it has is posted, however late — a restart mid-raid catches up; after, nothing. */
