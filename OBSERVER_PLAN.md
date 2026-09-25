@@ -301,8 +301,15 @@ observer_tokens
   now gives each rule a real id (keeping an existing one) and covers only the
   explored regions by default (`OBSERVER_RAID_REGIONS=explored`; `all` restores
   1–60). A world with nothing explored gets no rule and is reported as
-  `unexplored`. Once raids are seen arriving, try `all` to learn whether
-  unexplored regions are reported.
+  `unexplored`.
+  **Confirmed the same day:** with the rule switched to the explored regions
+  `[3, 11, 23]`, `/Raids` answered within seconds with that day's raids, the
+  missed Carlin orc raid (all three stages) and an upcoming one. So the 1–60 rule
+  matched nothing at all, and the blank id was never the problem: MWC rules with
+  that id match fine. Observer re-matches the whole day's raids against a rule
+  when it changes, so a rule can be tested instantly instead of waiting for a
+  raid. Don't use `all`. Whether one unexplored but valid region id works is still
+  open, and can be tested the same instant way.
 - **Rules only where account and guild meet (25 Sep 2026).** An account's MWC and
   raid rules now go only to worlds that are both the account's (it has characters
   there) and set up in the guild it was linked in, the guild's notifications world
