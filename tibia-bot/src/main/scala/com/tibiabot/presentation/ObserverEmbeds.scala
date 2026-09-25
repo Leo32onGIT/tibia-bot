@@ -74,7 +74,8 @@ object ObserverEmbeds {
                          emoji: String = Config.raidEmoji, leadEmoji: String = Config.mwcEmoji): Option[MessageEmbed] =
     if (changes.isEmpty) None
     else {
-      val lead = s"$leadEmoji $MwcLead$world**"
+      // A ### header, the same size as the cooldown tracker's heading.
+      val lead = s"### $leadEmoji $MwcLead$world**"
       val entries = changes.map { c =>
         val name = s"### $emoji **[${c.title}](${MiniWorldChangeCatalog.wikiUrl(c.title)})**"
         // `-#` only reaches the end of its line, so the body is kept to one.

@@ -26,7 +26,7 @@ class ObserverMwcEmbedSpec extends AnyFunSuite with Matchers {
     // Joined explicitly rather than a multi-line literal, whose line endings follow
     // the checkout's (CRLF on Windows) while the embed's are always \n.
     e.getDescription shouldBe List(
-      "<:mwc:2> Mini World Changes for **Antica**",
+      "### <:mwc:2> Mini World Changes for **Antica**",
       "### <:raid:1> **[Fury Gate](https://tibia.fandom.com/wiki/Fury_Gates_Mini_World_Change)**",
       "-# The Fury Gate has opened near Venore.",
       "### <:raid:1> **[Nomads](https://tibia.fandom.com/wiki/Nomads_Mini_World_Change)**",
@@ -41,7 +41,7 @@ class ObserverMwcEmbedSpec extends AnyFunSuite with Matchers {
   }
 
   test("opens the same way for a single change") {
-    block(List(change("Warpath"))).get.getDescription should startWith("<:mwc:2> Mini World Changes for **Antica**\n")
+    block(List(change("Warpath"))).get.getDescription should startWith("### <:mwc:2> Mini World Changes for **Antica**\n")
   }
 
   test("keeps a multi-line description on the one grey line, and drops an empty one") {
@@ -81,7 +81,8 @@ class ObserverMwcEmbedSpec extends AnyFunSuite with Matchers {
     val many = (1 to 40).toList.map(i => change(s"Change $i", "x" * 150))
     val d = block(many).get.getDescription
     d.length should be <= ObserverEmbeds.MaxMwcDescription
-    val names = d.linesIterator.count(_.startsWith("### "))
+    // The lead is a ### header too, so it is left out of the count.
+    val names = d.linesIterator.drop(1).count(_.startsWith("### "))
     names should (be > 0 and be < 40)
     d.linesIterator.count(_.startsWith("-# ")) shouldBe names
     d should endWith("x" * 150)
