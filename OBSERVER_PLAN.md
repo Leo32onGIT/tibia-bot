@@ -290,8 +290,15 @@ observer_tokens
   so the sidecar now gives each rule every region (`ALL_REGION_IDS`, 1–60, plus
   any explored id outside that range). Raid rules now go to the account's
   character worlds, most wanted first (the same order as MWC rules), and then to
-  any other world it has explored, up to the 15-rule cap. Not yet seen: a raid
-  from an unexplored region actually arriving in the feed.
+  any other world it has explored, up to the 15-rule cap.
+  **Settled 25 Sep 2026: the feed is exploration-gated after all.** A goblin raid
+  on Victoris (Femor Hills, started 03:28 UTC) never reached the feed. The
+  account's Victoris rule covered every region, and four polls across its area,
+  subarea and start stages all answered 200 with no raids. The account had
+  explored only Carlin and Hrodmir there. So the API stores any region but only
+  reports raids in areas the account has explored. Coverage grows only with
+  members exploring in-game, and with more linked accounts, since the feed is
+  pooled.
 - **Rules only where account and guild meet (25 Sep 2026).** An account's MWC and
   raid rules now go only to worlds that are both the account's (it has characters
   there) and set up in the guild it was linked in, the guild's notifications world
