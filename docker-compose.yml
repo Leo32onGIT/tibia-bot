@@ -50,6 +50,11 @@ services:
   # just be one more always-on container.
   observer-sidecar:
     build: ./observer-sidecar
+    # Rebuilt on every `docker compose up -d`, so a deploy picks up sidecar.py the
+    # same way it picks up the bot. Without this Compose builds it only when no
+    # image exists, and a changed sidecar keeps running the old code. The build
+    # cache makes an unchanged one a no-op, and its container is left running.
+    pull_policy: build
     profiles: ["observer"]
     env_file: .env
     networks:
