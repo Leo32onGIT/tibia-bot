@@ -5,7 +5,7 @@ A small localhost service that bridges the Scala bot to CipSoft's Tibia Observer
 TLS client (`curl_cffi`) is not — so this owns that pass plus the Observer request
 shapes, and the bot just calls it over `127.0.0.1`.
 
-**Stateless.** The bot owns all durable state (the encrypted refresh token in
+**Stateless.** The bot owns all durable state (the encrypted credential in
 Postgres). The sidecar only translates one call, adds browser TLS, and returns JSON.
 
 ## Run
@@ -32,21 +32,21 @@ Keep it bound to loopback. The bot points at it via `observer-api.sidecar-url`
 
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
-| GET | `/health` | — | `{ ok, minimalClientVersion }` |
-| POST | `/link` | `{ accessToken, deviceIdentification, clientVersion? }` | `{ ok, status, credential, expires, accountLabel, accountCount, raw }` |
-| POST | `/renew` | `{ credential, deviceIdentification, clientVersion? }` | `{ ok, credential, expires, raw }` |
+| POST | `/link` | `{ accessToken, deviceIdentification, clientVersion? }` | `{ ok, status, credential, expires, accountLabel, accountCount, worlds }` |
+| POST | `/renew` | `{ credential, deviceIdentification, clientVersion? }` | `{ ok, credential, expires }` |
 | POST | `/ensure-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds, skipped, limit, unchanged }` |
-| POST | `/ensure-raid-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds, skipped, limit, unchanged, unexplored?, regions, explored, areaNames, areaFields }` |
+| POST | `/ensure-raid-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds, skipped, limit, unchanged, unexplored?, regions, explored, areaNames }` |
 | POST | `/explored-areas` | `{ credential }` | `{ ok, explored: {world: [areaId]}, areaNames: {areaId: name} }` |
 | POST | `/clear-rules` | `{ credential, deviceIdentification? }` | `{ ok }` |
 | POST | `/mwc` | `{ bearerToken }` | `{ ok, miniWorldChanges: [{world,title,body,…}] }` |
 | POST | `/raids` | `{ bearerToken }` | `{ ok, raids: [{raidId,worldName,areaName,…}] }` |
 
 The credential model (confirmed live):
-- The `accessToken` (5-char code) is **case-sensitive and single-use** — sent verbatim.
+- The `accessToken` (5-char code) is **single-use**. The account page shows it in
+  upper case but the API only accepts it lower case, so `/link` lower-cases it.
 - `/link` returns a **`credential`** — a ~90-day JWT bearer that *is* the durable
   credential (there is no separate refresh token). The bot stores this, encrypted.
-  `expires` is its `exp` (epoch seconds); `raw` is the full upstream response.
+  `expires` is its `exp` (epoch seconds).
 - `/renew` presents the current credential to `Account/login` and gets a fresh
   90-day JWT — so renewing before expiry keeps the link alive until the user
   disconnects. Confirmed against a live credential.

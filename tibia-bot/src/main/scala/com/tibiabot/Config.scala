@@ -96,7 +96,6 @@ object Config {
     private val observer = discord.getConfig("observer-api")
     val encryptionSecret: String = observer.getString("encryption-secret").trim
     private val requestedOn: Boolean = observer.getString("mode").trim.toLowerCase == "on"
-    val baseUrl: String = observer.getString("base-url").stripSuffix("/")
     val clientVersion: String = observer.getString("client-version")
     val deviceIdentification: String = observer.getString("device-identification")
     val sidecarUrl: String = observer.getString("sidecar-url").stripSuffix("/")

@@ -4,17 +4,9 @@
 The JVM's TLS is Cloudflare-challenged on observer.tibia.com; a browser-grade TLS
 client is not. This tiny localhost service owns that pass (via curl_cffi) plus the
 Observer request shapes, so the Scala bot just calls it over 127.0.0.1 and stays
-clean. Stateless: the bot owns all durable state (the encrypted refresh token in
+clean. Stateless: the bot owns all durable state (the encrypted credential in
 Postgres); this only translates a call, adds browser TLS, and hands the JSON back.
-
-Endpoints (all JSON):
-  GET  /health                      -> { ok, minimalClientVersion }
-  POST /link    { accessToken, deviceIdentification[, clientVersion] }
-                                     -> { ok, status, bearerToken, refresh, expires,
-                                          accountLabel, accountCount, raw }
-  POST /refresh { refresh, deviceIdentification[, clientVersion] }
-                                     -> { ok, bearerToken, refresh, expires, raw }
-  POST /mwc     { bearerToken }      -> { ok, status, miniWorldChanges }   (Phase 3)
+The endpoints are listed in README.md.
 
 Run:  pip install -r requirements.txt ; python sidecar.py
 Env:  OBSERVER_API_BASE_URL (default https://observer.tibia.com/api/v1)
@@ -23,7 +15,6 @@ Env:  OBSERVER_API_BASE_URL (default https://observer.tibia.com/api/v1)
       OBSERVER_SIDECAR_TOKEN (optional shared secret; if set, callers must send
                               it as the X-Sidecar-Token header)
       OBSERVER_SIDECAR_HOST / OBSERVER_SIDECAR_PORT (default 127.0.0.1 / 8787)
-      OBSERVER_RAID_REGIONS  (explored | all; default explored) what a raid rule covers
 """
 import base64
 import json
@@ -77,23 +68,9 @@ def _json_body():
 
 @app.before_request
 def _guard():
-    if request.path == "/health":
-        return None
     if not _authorised(request):
         return jsonify({"ok": False, "error": "unauthorised"}), 401
     return None
-
-
-@app.get("/health")
-def health():
-    try:
-        r = _observer("GET", "/Status")
-        if r.status_code == 200:
-            d = r.json()
-            return jsonify({"ok": True, "minimalClientVersion": d.get("minimalClientVersion")})
-        return jsonify({"ok": False, "status_code": r.status_code}), 502
-    except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
-        return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 @app.post("/link")
@@ -136,7 +113,6 @@ def link():
         "accountLabel": (accounts[0].get("accountTitle") if accounts else None),
         "accountCount": len(accounts),
         "worlds": worlds,
-        "raw": d,                              # full shape, so the bot can adapt if a field moves
     })
 
 
@@ -168,7 +144,6 @@ def renew():
         "status_code": r.status_code,
         "credential": new_bearer,
         "expires": _jwt_exp(new_bearer) if new_bearer else None,
-        "raw": d,
     })
 
 
@@ -258,22 +233,19 @@ def _same_mwc_rules(before, after):
 
 def _explored_by_world(areas):
     """`/Area/ExploredAreas` — [{world, exploredAreas: [{areaId, name}]}] — as
-    ({world: sorted ids}, {id: name}, sorted field names of an area). A world with
-    nothing explored is left out."""
-    by_world, names, fields = {}, {}, set()
+    ({world: sorted ids}, {id: name}). A world with nothing explored is left out."""
+    by_world, names = {}, {}
     for entry in areas or []:
         ids = set()
         for area in entry.get("exploredAreas") or []:
-            fields.update(area.keys())
             if area.get("areaId") is None:
                 continue
             ids.add(area["areaId"])
-            name = area.get("areaName") or area.get("name")
-            if name:
-                names[str(area["areaId"])] = name
+            if area.get("name"):
+                names[str(area["areaId"])] = area["name"]
         if ids and entry.get("world"):
             by_world[entry["world"]] = sorted(ids)
-    return by_world, names, sorted(fields)
+    return by_world, names
 
 
 @app.post("/ensure-rules")
@@ -317,20 +289,6 @@ def ensure_rules():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
-# Every region, for OBSERVER_RAID_REGIONS=all. The API has no list of regions, and it does not
-# check a rule's RegionIds against the account's exploration or even against the
-# regions that exist: on 24 Sep 2026 it stored ids 1-60 for an account that had
-# explored only 3 (Carlin) and 23 (Hrodmir). Region ids are small integers, so this
-# range covers them all, and an explored id outside it is added anyway.
-ALL_REGION_IDS = list(range(1, 61))
-
-# Which regions a raid rule covers: "explored" (the default) or "all". A rule over
-# regions 1-60 was stored without complaint but never reported a single raid, not
-# even one in an explored area (25 Sep 2026), so rules are back to what the
-# account has explored, the shape the Observer app itself makes. "all" is kept to
-# test widening again once raids are seen arriving.
-RAID_REGIONS = os.environ.get("OBSERVER_RAID_REGIONS", "explored").strip().lower()
-
 # The id Observer stored for rules sent without one. Its own app gives each rule a
 # real id, and a rule with this one may never be checked against raids.
 NIL_RULE_ID = "00000000-0000-0000-0000-000000000000"
@@ -341,9 +299,10 @@ def ensure_raid_rules():
     """Ensure an enabled raid rule on each of `worlds`, as many worlds as the
     account has room for.
 
-    A rule covers the regions the account has explored there, or every region
-    (ALL_REGION_IDS) with OBSERVER_RAID_REGIONS=all; see RAID_REGIONS for why the
-    default went back to explored. Each rule carries a real id (see NIL_RULE_ID).
+    A rule covers the regions the account has explored there, the shape the
+    Observer app itself makes. A rule over every region id (1-60) was stored
+    without complaint but never reported a single raid, not even one in an
+    explored area (25 Sep 2026). Each rule carries a real id (see NIL_RULE_ID).
     A world with nothing explored gets no rule and is reported as `unexplored`.
     `worlds` is exactly what gets a rule, most wanted first: the bot sends only worlds the
     account has characters on that some guild tracks, the linking guild's first, and
@@ -354,7 +313,7 @@ def ensure_raid_rules():
     taken in order up to the room the account's own rules leave.
 
     The answer also says what each rule covers: `regions` (world -> region ids),
-    `areaNames` (id -> name, where the explored areas carry one) and `areaFields`.
+    `explored` (world -> every explored id) and `areaNames` (id -> name).
     """
     b = _json_body()
     credential = b.get("credential")
@@ -370,15 +329,14 @@ def ensure_raid_rules():
         areas = explored.json() if explored.status_code == 200 else []
         # What each world's rule covers; explored worlds don't earn a rule of
         # their own.
-        explored_ids, names, fields = _explored_by_world(areas)
+        explored_ids, names = _explored_by_world(areas)
         explored_by_world = {w.lower(): ids for w, ids in explored_ids.items()}
 
         def regions(world):
-            explored = set(explored_by_world.get(world.lower(), []))
-            return sorted(set(ALL_REGION_IDS) | explored) if RAID_REGIONS == "all" else sorted(explored)
+            return explored_by_world.get(world.lower(), [])
 
-        # A world with no explored region has nothing for an explored-only rule
-        # to cover, so it is left out rather than given an empty rule.
+        # A world with no explored region has nothing for a rule to cover, so it
+        # is left out rather than given an empty rule.
         worlds = [w for w in requested if regions(w)]
         unexplored = [w for w in requested if not regions(w)]
         limit = _rule_limit("maximumRaidNotificationRules")
@@ -409,10 +367,8 @@ def ensure_raid_rules():
         # What each rule covers, for the bot's /observer coverage: the region ids per
         # world that got a rule, every explored area (so the bot can tell when that
         # changes), and whatever name the explored areas carry for an id.
-        # `areaFields` lists the fields an explored area has, so a missing name can
-        # be traced to the shape rather than guessed at.
         extra = {"regions": {w: regions(w) for w in applied}, "explored": explored_ids,
-                 "areaNames": names, "areaFields": fields}
+                 "areaNames": names}
         return _stored(r, applied, skipped, limit, unexplored, extra)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
@@ -433,7 +389,7 @@ def explored_areas():
             return jsonify({"ok": False, "status": "unauthorised"}), 401
         if r.status_code != 200:
             return jsonify({"ok": False, "status_code": r.status_code}), 502
-        explored, names, _ = _explored_by_world(r.json())
+        explored, names = _explored_by_world(r.json())
         return jsonify({"ok": True, "status_code": 200, "explored": explored, "areaNames": names})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502

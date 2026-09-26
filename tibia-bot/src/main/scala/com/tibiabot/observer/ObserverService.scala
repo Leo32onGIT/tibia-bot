@@ -526,7 +526,7 @@ final class ObserverService(
 
   /** Keep what a link's raid rules now cover, and any area names that came with
    *  them. An area id that still has no name is logged once: `/observer` can't show
-   *  it until it has one, and the fields Observer sent say where a name could be. */
+   *  it until it has one. */
   private def recordCoverage(t: ObserverToken, result: RulesResult): Unit =
     try {
       result.explored.foreach(explored => exploredSeen.put(keyOf(t), normalise(explored)))
@@ -536,8 +536,7 @@ final class ObserverService(
       val unnamed = result.regions.values.flatten.toSet.filterNot(named.contains).filterNot(reportedUnnamed.contains)
       if (unnamed.nonEmpty) {
         unnamed.foreach(reportedUnnamed.put(_, ()))
-        logger.warn(s"Observer area id(s) ${unnamed.toList.sorted.mkString(", ")} have no name, so /observer can't " +
-          s"show them; its explored areas carry the fields ${result.areaFields.mkString(", ")}")
+        logger.warn(s"Observer area id(s) ${unnamed.toList.sorted.mkString(", ")} have no name, so /observer can't show them")
       }
       val unlisted = result.areaNames.values.toSet.filterNot(n => ObserverAreas.raidAreas.exists(_.equalsIgnoreCase(n)))
         .filterNot(reportedUnlisted.contains)

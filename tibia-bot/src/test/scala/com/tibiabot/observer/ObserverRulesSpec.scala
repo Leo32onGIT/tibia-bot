@@ -42,7 +42,7 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
       case Some(JsString("explorer")) => answer(exchange, 200,
         """{"ok": true, "status_code": 200, "worlds": ["Victoris"], "skipped": [], "limit": 15,
           | "regions": {"Victoris": [3, 11, 23]}, "areaNames": {"3": "Carlin", "11": ""},
-          | "areaFields": ["areaId", "areaName"], "explored": {"Victoris": [3, 11, 23], "Xyla": [7]},
+          | "explored": {"Victoris": [3, 11, 23], "Xyla": [7]},
           | "unchanged": true}""".stripMargin)
       case _ => answer(exchange, 200,
         """{"ok": false, "status_code": 400, "worlds": [], "skipped": [], "limit": 15, "error": "too many rules"}""")
@@ -101,7 +101,6 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
     result.regions shouldBe Map("Victoris" -> List(3, 11, 23))
     // A blank name is no name.
     result.areaNames shouldBe Map(3 -> "Carlin")
-    result.areaFields shouldBe List("areaId", "areaName")
     result.explored shouldBe Some(Map("Victoris" -> List(3, 11, 23), "Xyla" -> List(7)))
     result.unchanged shouldBe true
   }

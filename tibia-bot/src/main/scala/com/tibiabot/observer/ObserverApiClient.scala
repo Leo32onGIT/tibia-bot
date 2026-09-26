@@ -52,13 +52,12 @@ object RenewResult {
  *
  *  For raid rules it also says what they cover: `regions`, the area ids each
  *  applied world's rule takes in; `explored`, every area the account has explored
- *  (absent from a sidecar that doesn't send it); `areaNames`, the names Observer
- *  gave any of them; and `areaFields`, the fields its explored areas carry. */
+ *  (absent from a sidecar that doesn't send it); and `areaNames`, the names
+ *  Observer gave any of them. */
 final case class RulesResult(ok: Boolean, applied: List[String], skipped: List[String],
                              limit: Option[Int], detail: String,
                              regions: Map[String, List[Int]] = Map.empty,
                              areaNames: Map[Int, String] = Map.empty,
-                             areaFields: List[String] = Nil,
                              explored: Option[Map[String, List[Int]]] = None,
                              unchanged: Boolean = false)
 
@@ -111,7 +110,6 @@ final class ObserverApiClient(
         (code.toList ++ str(o, "error")).mkString(": "),
         regions = idsByWorld(o, "regions"),
         areaNames = areaNames(o),
-        areaFields = strings(o, "areaFields"),
         explored = o.fields.get("explored").map(_ => idsByWorld(o, "explored")),
         unchanged = bool(o, "unchanged"))
   }
@@ -153,7 +151,7 @@ final class ObserverApiClient(
   private def strings(o: JsObject, key: String): List[String] =
     o.fields.get(key).collect { case JsArray(xs) => xs.collect { case JsString(s) => s }.toList }.getOrElse(Nil)
 
-  /** Exchange a 5-char access token (case-sensitive, single-use) for a durable link. */
+  /** Exchange a 5-char access token (single-use) for a durable link. */
   def link(accessToken: String): LinkResult =
     post("/link", JsObject(
       "accessToken" -> JsString(accessToken),
