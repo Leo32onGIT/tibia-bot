@@ -1816,7 +1816,10 @@ class TibiaBot(
             } else {
               existing.map { m =>
                 // Every embed, not just the first: one message carries several.
-                tracking.OnlineListMessage(Some(m.getId), presentation.OnlineListEmbeds.blocksOf(m))
+                tracking.OnlineListMessage(
+                  Some(m.getId),
+                  m.getEmbeds.asScala.toList.map(e => Option(e.getDescription).getOrElse(""))
+                )
               }
             }
           onlineListState.seed(channel.getId, seeded)
@@ -1848,10 +1851,21 @@ class TibiaBot(
     val channelId = channel.getId
     val lastIndex = messages.size - 1
 
-    // One card per message. The stamp is the whole list's, so it goes on the
-    // final message and nowhere else, taken when the request is actually made.
-    def buildCard(blocks: List[String], last: Boolean): net.dv8tion.jda.api.components.container.Container =
-      presentation.OnlineListEmbeds.card(blocks, if (last) Some(Instant.now()) else None)
+    def buildEmbeds(descriptions: List[String], last: Boolean): List[net.dv8tion.jda.api.entities.MessageEmbed] = {
+      val lastEmbed = descriptions.size - 1
+      descriptions.zipWithIndex.map { case (description, embedIndex) =>
+        val embed = new EmbedBuilder()
+        embed.setDescription(description)
+        embed.setColor(3092790)
+        // The stamp is the whole list's, so it goes on the final embed of the
+        // final message and nowhere else.
+        if (last && embedIndex == lastEmbed) {
+          embed.setFooter("Last updated")
+          embed.setTimestamp(OffsetDateTime.now())
+        }
+        embed.build()
+      }
+    }
     def failed(ex: Throwable): Unit = {
       // Whatever went wrong, our picture of the channel may no longer match
       // it — drop the cache so the next cycle rebuilds from history.
@@ -1862,7 +1876,7 @@ class TibiaBot(
     def enqueueSend(index: Int, descriptions: List[String]): Unit = {
       worldMetrics.incrementEdits()
       onlineListSender.enqueue("send", Some(s"$channelId:$index"), Some(channelId)) { () =>
-        try channel.sendMessageComponents(buildCard(descriptions, index == lastIndex)).useComponentsV2().setSuppressedNotifications(true)
+        try channel.sendMessageEmbeds(buildEmbeds(descriptions, index == lastIndex).asJava).setSuppressedNotifications(true)
           .queue(
             message => onlineListState.recordMessageId(channelId, index, message.getId),
             // A send that never lands would otherwise leave its slot pending
@@ -1882,11 +1896,7 @@ class TibiaBot(
       case tracking.EditOnlineListMessage(index, messageId, descriptions) =>
         worldMetrics.incrementEdits()
         onlineListSender.enqueue("editmessage", Some(s"$channelId:$index"), Some(channelId)) { () =>
-          // Clearing the embeds is what lets a message posted before the list
-          // moved to V2 be rewritten as a card in place.
-          try channel.editMessageById(messageId, new net.dv8tion.jda.api.utils.messages.MessageEditBuilder()
-              .setEmbeds(java.util.Collections.emptyList[net.dv8tion.jda.api.entities.MessageEmbed]())
-              .useComponentsV2().setComponents(buildCard(descriptions, index == lastIndex)).build())
+          try channel.editMessageEmbedsById(messageId, buildEmbeds(descriptions, index == lastIndex).asJava)
             .queue(null, onlineListErrorHandler(channelId))
           catch { case ex: Throwable => failed(ex) }
         }
