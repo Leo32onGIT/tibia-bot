@@ -8,7 +8,10 @@ import com.tibiabot.panels.{ListForms, ListPanel, PanelIds, SettingsForms}
 import com.tibiabot.presentation.Embeds
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
+import net.dv8tion.jda.api.components.MessageTopLevelComponent
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
+
+import scala.jdk.CollectionConverters._
 
 
 /** The buttons on the `/settings`, `/hunted`, `/allies` and `/admin` panels.
@@ -72,10 +75,10 @@ object PanelButtons extends StrictLogging {
       // replaces its last message is too — such a message cannot take an embed.
       case PanelIds.Clear =>
         val (players, guilds) = counts(guildId, panel)
-        val answer =
-          if (players == 0 && guilds == 0) ListPanel.notice(s"${Config.noEmoji} The ${panel.noun} is already empty.")
+        val answer: List[MessageTopLevelComponent] =
+          if (players == 0 && guilds == 0) List(ListPanel.notice(s"${Config.noEmoji} The ${panel.noun} is already empty."))
           else ListPanel.confirmClear(panel, players, guilds, Config.noEmoji)
-        event.getHook.editOriginalComponents(answer).useComponentsV2().queue()
+        event.getHook.editOriginalComponents(answer.asJava).useComponentsV2().queue()
 
       // Back out: put the panel back exactly as it was, changing nothing.
       case PanelIds.Cancel =>
@@ -128,7 +131,7 @@ object PanelButtons extends StrictLogging {
     // into it, not the first. Earlier messages are left as they were: nothing
     // holds a reference to them, and they still read correctly.
     val last = PanelCommands.listPagesFor(event.getGuild, panel).last
-    event.getHook.editOriginalComponents(last).useComponentsV2().queue()
+    event.getHook.editOriginalComponents(last.asJava).useComponentsV2().queue()
   }
 
   private def counts(guildId: String, panel: Panel): (Int, Int) =

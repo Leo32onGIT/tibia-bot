@@ -6,8 +6,11 @@ import com.tibiabot.panels.PanelIds.Panel
 import com.tibiabot.panels.{ListPanel, Panels}
 import com.tibiabot.{BotApp, Config}
 import com.tibiabot.presentation.Embeds
+import net.dv8tion.jda.api.components.MessageTopLevelComponent
 import net.dv8tion.jda.api.entities.MessageEmbed
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
+
+import scala.jdk.CollectionConverters._
 
 
 /** `/settings`, `/hunted` and `/allies` — three commands that each answer with a
@@ -51,12 +54,12 @@ object PanelCommands {
         // long enough to need a second message therefore posted the rest of itself
         // to the channel, buttons and all, for everybody to see.
         pages.foreach(page =>
-          event.getHook.sendMessageComponents(page).useComponentsV2().setEphemeral(true).queue())
+          event.getHook.sendMessageComponents(page.asJava).useComponentsV2().setEphemeral(true).queue())
       }
     }
 
-  /** Draw a list panel: the list itself, as a card with its buttons — see
-   *  panels.ListPanel for the layout and how a long list spills onto further
+  /** Draw a list panel: the list itself, as a card with its buttons under it —
+   *  see panels.ListPanel for the layout and how a long list spills onto further
    *  messages, the last of which carries the row of buttons.
    *
    *  The list is the reply rather than something behind a button. It is built
@@ -65,7 +68,7 @@ object PanelCommands {
    *  them the one thing they already knew.
    */
   private[tibiabot] def listPagesFor(guild: net.dv8tion.jda.api.entities.Guild, panel: Panel)
-      : List[net.dv8tion.jda.api.components.container.Container] = {
+      : List[List[MessageTopLevelComponent]] = {
     val which = if (panel == Panel.Hunted) "hunted" else "allies"
     val service = BotApp.huntedAlliedService
     ListPanel.pages(panel, service.guildLines(guild, which),

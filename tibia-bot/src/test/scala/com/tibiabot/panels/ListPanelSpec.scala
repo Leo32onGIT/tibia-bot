@@ -1,7 +1,8 @@
 package com.tibiabot.panels
 
 import com.tibiabot.panels.PanelIds.Panel
-import net.dv8tion.jda.api.components.Component
+import net.dv8tion.jda.api.components.{Component, MessageTopLevelComponent}
+import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.container.{Container, ContainerChildComponentUnion}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -24,7 +25,14 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
 
   private def children(c: Container): List[ContainerChildComponentUnion] = c.getComponents.asScala.toList
 
-  /** Every piece of text in a message, where Discord counts its 4,000. */
+  /** A message's card — every page has exactly one. */
+  private def card(page: List[MessageTopLevelComponent]): Container = {
+    val cards = page.collect { case c: Container => c }
+    cards should have size 1
+    cards.head
+  }
+
+  /** Every piece of text in a card, where Discord counts its 4,000. */
   private def texts(c: Container): List[String] = children(c).flatMap { child =>
     child.getType match {
       case Component.Type.TEXT_DISPLAY => List(child.asTextDisplay.getContent)
@@ -33,29 +41,47 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  /** Discord's count: the container, each child, and everything inside those. */
-  private def componentCount(c: Container): Int = 1 + children(c).map { child =>
-    child.getType match {
-      case Component.Type.SECTION    => 1 + child.asSection.getContentComponents.size + 1
-      case Component.Type.ACTION_ROW => 1 + child.asActionRow.getComponents.size
-      case _                         => 1
-    }
+  private def texts(page: List[MessageTopLevelComponent]): List[String] = texts(card(page))
+
+  /** Discord's count: the container, each child, and everything inside those,
+   *  plus any row of buttons beside the card. */
+  private def componentCount(page: List[MessageTopLevelComponent]): Int = page.map {
+    case row: ActionRow => 1 + row.getComponents.size
+    case c: Container   => 1 + children(c).map { child =>
+      child.getType match {
+        case Component.Type.SECTION    => 1 + child.asSection.getContentComponents.size + 1
+        case Component.Type.ACTION_ROW => 1 + child.asActionRow.getComponents.size
+        case _                         => 1
+      }
+    }.sum
   }.sum
 
-  private def headingButtons(c: Container): List[String] =
-    children(c).filter(_.getType == Component.Type.SECTION).map(_.asSection.getAccessory)
+  private def headingButtons(page: List[MessageTopLevelComponent]): List[String] =
+    children(card(page)).filter(_.getType == Component.Type.SECTION).map(_.asSection.getAccessory)
       .filter(_.getType == Component.Type.BUTTON).map(_.asButton.getCustomId)
 
-  private def footerButtons(c: Container): List[String] =
+  /** Buttons in a row inside the card. */
+  private def rowButtons(c: Container): List[String] =
     children(c).filter(_.getType == Component.Type.ACTION_ROW)
       .flatMap(_.asActionRow.getButtons.asScala.map(_.getCustomId))
 
-  test("a short list is one card: header, Add on each heading, the rest in one row at the foot") {
+  /** Buttons in a row of their own, under the card. */
+  private def footerButtons(page: List[MessageTopLevelComponent]): List[String] =
+    page.collect { case row: ActionRow => row.getButtons.asScala.map(_.getCustomId) }.flatten
+
+  test("a short list is one card: header, Add on each heading, the rest in one row under it") {
     val pages = ListPanel.pages(Panel.Hunted, guilds, small)
     pages should have size 1
     headingButtons(pages.head) shouldBe List(PanelIds.AddGuild, PanelIds.AddPlayer).map(PanelIds.button(Panel.Hunted, _))
     footerButtons(pages.head) shouldBe PanelIds.listFooterActions.map(PanelIds.button(Panel.Hunted, _))
     texts(pages.head).head should startWith("### ☠️ Hunted list\n-# 2 guilds · 3 players")
+  }
+
+  test("the row of buttons sits outside the card, which ends on the list rather than a divider") {
+    val page = ListPanel.pages(Panel.Allies, guilds, small).head
+    page.last shouldBe an[ActionRow]
+    rowButtons(card(page)) shouldBe empty
+    children(card(page)).last.getType shouldBe Component.Type.TEXT_DISPLAY
   }
 
   test("each world gets a small heading above its players") {
@@ -88,9 +114,9 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
   }
 
   test("the header is text alone, with no picture beside it") {
-    val first = children(ListPanel.pages(Panel.Hunted, guilds, small).head).head
+    val first = children(card(ListPanel.pages(Panel.Hunted, guilds, small).head)).head
     first.getType shouldBe Component.Type.TEXT_DISPLAY
-    ListPanel.pages(Panel.Allies, guilds, small).flatMap(children).filter(_.getType == Component.Type.SECTION)
+    ListPanel.pages(Panel.Allies, guilds, small).map(card).flatMap(children).filter(_.getType == Component.Type.SECTION)
       .map(_.asSection.getAccessory.getType) should not contain Component.Type.THUMBNAIL
   }
 
@@ -102,8 +128,9 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
   }
 
   test("Clear All asks before it clears, naming what would go") {
-    val c = ListPanel.confirmClear(Panel.Allies, 5, 1, "<:no:1>")
-    texts(c).head should include("**5 players** and **1 guild** from the allies list")
-    footerButtons(c) shouldBe List(PanelIds.ClearConfirm, PanelIds.Cancel).map(PanelIds.button(Panel.Allies, _))
+    val page = ListPanel.confirmClear(Panel.Allies, 5, 1, "<:no:1>")
+    texts(page).head should include("**5 players** and **1 guild** from the allies list")
+    rowButtons(card(page)) shouldBe empty
+    footerButtons(page) shouldBe List(PanelIds.ClearConfirm, PanelIds.Cancel).map(PanelIds.button(Panel.Allies, _))
   }
 }

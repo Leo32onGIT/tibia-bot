@@ -1,6 +1,7 @@
 package com.tibiabot.panels
 
 import com.tibiabot.panels.PanelIds.Panel
+import net.dv8tion.jda.api.components.MessageTopLevelComponent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.components.container.{Container, ContainerChildComponent}
@@ -17,10 +18,10 @@ import scala.jdk.CollectionConverters._
  *
  *  A header with the list's picture and its counts; the guilds under a heading
  *  that carries **Add guild**; the players, a small heading per world, under one
- *  that carries **Add player**; and at the foot one row for everything that is
- *  about the list as a whole — Remove, Look up, Config and Clear All. An Add on a
- *  heading already knows whether it is adding players or guilds, so its form does
- *  not ask.
+ *  that carries **Add player**; and under the card, outside it the way buttons sit
+ *  under an embed, one row for everything that is about the list as a whole —
+ *  Remove, Look up, Config and Clear All. An Add on a heading already knows
+ *  whether it is adding players or guilds, so its form does not ask.
  *
  *  ==Spilling onto more messages==
  *  A message in this layout holds 4,000 characters of text across all of it,
@@ -37,8 +38,6 @@ object ListPanel {
 
   /** Under Discord's 4,000, with room for the button labels. */
   val TextBudget: Int = 3800
-
-  private val FooterReserve = 100
 
   private def title(panel: Panel): String =
     if (panel == Panel.Hunted) "☠️ Hunted list" else "🤝 Allies list"
@@ -66,12 +65,13 @@ object ListPanel {
     }
   }.asJava)
 
-  /** The list, as however many messages it needs — never none.
+  /** The list, as however many messages it needs — never none. Each message is a
+   *  card; the last is followed by the row of buttons.
    *
    *  @param guilds  one rendered line per guild
    *  @param players each world with its rendered lines, in display order */
   def pages(panel: Panel, guilds: List[String],
-            players: List[(String, List[String])]): List[Container] = {
+            players: List[(String, List[String])]): List[List[MessageTopLevelComponent]] = {
     val pages = ListBuffer.empty[List[ContainerChildComponent]]
     val current = ListBuffer.empty[ContainerChildComponent]
     val pending = new StringBuilder
@@ -137,20 +137,18 @@ object ListPanel {
       lines.foreach(l => line(l, Some(continued)))
     }
 
-    if (room < FooterReserve) newPage()
-    block(divider)
-    block(footer(panel))
     newPage()
-    pages.toList.filter(_.nonEmpty).map(children => Container.of(children.asJava))
+    val cards = pages.toList.filter(_.nonEmpty).map(children => Container.of(children.asJava))
+    cards.init.map(List(_)) :+ List(cards.last, footer(panel))
   }
 
   /** The question Clear All asks before it does anything, in place of the list's
-   *  last message. */
-  def confirmClear(panel: Panel, players: Int, guilds: Int, noEmoji: String): Container =
-    Container.of(
-      TextDisplay.of(
+   *  last message — its buttons under the card, as the list's are. */
+  def confirmClear(panel: Panel, players: Int, guilds: Int, noEmoji: String): List[MessageTopLevelComponent] =
+    List(
+      Container.of(TextDisplay.of(
         s"$noEmoji This clears **${plural(players, "player", "players")}** and " +
-          s"**${plural(guilds, "guild", "guilds")}** from the ${panel.noun}.\n\nThis cannot be undone."),
+          s"**${plural(guilds, "guild", "guilds")}** from the ${panel.noun}.\n\nThis cannot be undone.")),
       ActionRow.of(
         Button.danger(PanelIds.button(panel, PanelIds.ClearConfirm), "Yes, clear it"),
         Button.secondary(PanelIds.button(panel, PanelIds.Cancel), "Cancel")))
