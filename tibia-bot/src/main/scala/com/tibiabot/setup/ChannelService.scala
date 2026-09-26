@@ -334,21 +334,16 @@ final class ChannelService(
   /** Post the cooldown tracker into a guild's notifications channel (done on
    *  every /setup and /repair of that channel): each tracked collectible with a
    *  button that opens the presser's own cooldowns. See CooldownEmbeds.tracker.
-   *  Its id is kept, and `/repair` fetches it by that. */
+   *  Its id is kept, and `/repair` finds it by that. Waits until it is posted, so
+   *  whatever is posted next lands below it. */
   private def postCooldownTracker(channel: TextChannel, guild: Guild): Unit =
-    channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().setSuppressedNotifications(true).queue(
-      (posted: Message) => discordConfigRepository.setTrackerMessage(guild.getId, posted.getId),
-      failedTo("post the cooldown tracker", guild))
+    Try(channel.sendMessageComponents(CooldownEmbeds.tracker()).useComponentsV2().setSuppressedNotifications(true).complete()).fold(
+      failedTo("post the cooldown tracker", guild).accept,
+      (posted: Message) => discordConfigRepository.setTrackerMessage(guild.getId, posted.getId))
 
   /** A failure callback for JDA's `queue` that says what was being done. */
   private def failedTo(doing: String, guild: Guild): Consumer[Throwable] =
     e => logger.warn(s"Failed to $doing for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-
-  /** A message in `channel` by the id kept for it. None when no id is kept, or
-   *  the message has been deleted since. */
-  private def fetchById(channel: TextChannel, id: String): Option[Message] =
-    if (id == null || id.isEmpty || id == "0") None
-    else Try(channel.retrieveMessageById(id).complete()).toOption
 
   /** Bring an existing notifications message up to date, for /repair: keep its
    *  boosted boss and creature, and rebuild everything around them — mini world
@@ -376,33 +371,47 @@ final class ChannelService(
     }
   }
 
-  /** Bring the cooldown tracker in an existing notifications channel up to date,
-   *  for /repair. It is fetched by the id kept when it was posted, and left
-   *  exactly where it is if it is still what would be posted now. Otherwise it is
-   *  replaced: when its text, buttons or pictures have changed, or when it has
-   *  been deleted. True when a tracker was posted.
+  /** Whether a posted cooldown tracker is still what would be posted now. One from
+   *  before the cards, or whose text, buttons or pictures have changed since, is
+   *  replaced by `/repair`. */
+  private def trackerIsCurrent(tracker: Message): Boolean =
+    tracker.isUsingComponentsV2 &&
+      trackerShape(tracker.getComponentTree) == trackerShape(MessageComponentTree.of(CooldownEmbeds.tracker()))
+
+  /** Clear the bot's messages out of a notifications channel and post them all
+   *  again, in the order the channel reads (see `ChannelService.notificationsInOrder`):
+   *  the cooldown tracker, every world's role card, then the boosted message. A
+   *  message posted later only ever lands at the bottom, so this is how `/repair`
+   *  puts back one that is missing or out of date without leaving it out of place.
+   *  `posted` is everything the bot has in the channel, oldest first.
    *
-   *  A tracker posted before ids were kept (25 Sep 2026) has none on record.
-   *  Only then is `recent` looked through, once, for trackers by their cooldown
-   *  buttons, so they can be replaced; the new one's id is kept from then on. */
-  private def refreshCooldownTracker(channel: TextChannel, guild: Guild, recent: => List[Message]): Boolean = {
-    val current = trackerShape(MessageComponentTree.of(CooldownEmbeds.tracker()))
-    val stored = discordRetrieveConfig(guild).getOrElse("tracker_messageid", "0")
-    val existing = fetchById(channel, stored)
-    if (existing.exists(t => t.isUsingComponentsV2 && trackerShape(t.getComponentTree) == current)) false
-    else {
-      val stale = if (stored == "0") recent.filter(isTracker) else existing.toList
-      stale.foreach(_.delete().queue(_ => (), _ => ()))
-      postCooldownTracker(channel, guild)
-      true
+   *  The cards go back in the order they are in now, followed by any that were
+   *  missing. Each is posted from its world's stored roles and level; only the
+   *  world being repaired has had its roles made again. The boosted message keeps
+   *  its boss and creature while it is still there, and becomes `world`'s, as it
+   *  does on any repair. */
+  private def rebuildNotifications(channel: TextChannel, guild: Guild, world: String, posted: List[Message]): Unit = {
+    val storedBoosted = discordRetrieveConfig(guild).getOrElse("boosted_messageid", "0")
+    val boosted = posted.find(_.getId == storedBoosted).map(m => ObserverEmbeds.boostedEmbedsOf(ServerSaveCard.blocksOf(m)))
+    // A card from before ids were kept is placed by the world in its title.
+    def placeOf(w: Worlds): Int =
+      Some(posted.indexWhere(_.getId == w.roleCardMessage)).filter(_ >= 0)
+        .orElse(Some(posted.indexWhere(m => RoleCard.legacyWorldOf(m).exists(_.equalsIgnoreCase(w.name)))).filter(_ >= 0))
+        .getOrElse(Int.MaxValue)
+    val worlds = worldConfig(guild).sortBy(placeOf)
+
+    if (posted.nonEmpty) channel.purgeMessages(posted.asJava)
+    // One at a time, each waited for, so they land in this order.
+    postCooldownTracker(channel, guild)
+    worlds.foreach { w =>
+      postRoleCard(channel, guild, w.name,
+        RoleCard.card(w.name, w.fullblessRole, w.nemesisRole, w.allyPkRole, w.masslogRole, w.bountyRole, w.fullblessLevel.toString))
+    }
+    boosted match {
+      case Some(embeds) => sendBoostedNotifications(channel, guild, world, embeds)
+      case None         => postBoostedNotifications(channel, guild, world)
     }
   }
-
-  /** A tracker from before ids were kept: every one, old or new, carries
-   *  cooldown buttons, and nothing else in that channel does. */
-  private def isTracker(message: Message): Boolean =
-    message.getComponentTree.findAll(classOf[Button]).asScala
-      .exists(button => Option(button.getCustomId).exists(id => com.tibiabot.cooldowns.CooldownIds.parse(id).isDefined))
 
   /** What makes a tracker the one that would be posted now: its text, its buttons
    *  and how many pictures it carries. */
@@ -422,30 +431,61 @@ final class ChannelService(
       creatureEmbed <- boostedService.boostedCreatureEmbed()
     } yield List(bossEmbed, creatureEmbed)
 
-    combinedFutures.map { embeds =>
-      channel
-        .sendMessageComponents(ServerSaveCard.components(serverSaveEmbeds(embeds, world)).asJava)
-        .useComponentsV2().setSuppressedNotifications(true)
-        .queue(
-          (message: Message) => discordUpdateConfig(guild, "", "", "", message.getId, world),
-          (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
-        )
-    }
+    combinedFutures.map(sendBoostedNotifications(channel, guild, world, _))
   }
+
+  /** The notifications message for `world` around a boss and creature already in
+   *  hand, posted and its id kept. */
+  private def sendBoostedNotifications(channel: TextChannel, guild: Guild, world: String, boosted: List[MessageEmbed]): Unit =
+    channel
+      .sendMessageComponents(ServerSaveCard.components(serverSaveEmbeds(boosted, world)).asJava)
+      .useComponentsV2().setSuppressedNotifications(true)
+      .queue(
+        (message: Message) => discordUpdateConfig(guild, "", "", "", message.getId, world),
+        (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
+      )
 
   /** Post a world's role card (see presentation.RoleCard) into the notifications
    *  channel, and keep its id on the world, in the database and in the cache the
-   *  card's buttons read their world from. The world's row must exist already. */
+   *  card's buttons read their world from. The world's row must exist already.
+   *  Waits until it is posted, so whatever is posted next lands below it. */
   private def postRoleCard(channel: TextChannel, guild: Guild, world: String, card: Container): Unit =
-    channel.sendMessageComponents(card).useComponentsV2().setSuppressedNotifications(true).queue(
+    Try(channel.sendMessageComponents(card).useComponentsV2().setSuppressedNotifications(true).complete()).fold(
+      failedTo(s"post the role card for $world", guild).accept,
       (posted: Message) => {
         worldRepairConfig(guild, world, "role_card_message", posted.getId)
         streamState.modifyWorldsData { data =>
           data.get(guild.getId).fold(data)(worlds => data + (guild.getId -> worlds.map(w =>
             if (w.name.equalsIgnoreCase(world)) w.copy(roleCardMessage = posted.getId) else w)))
         }
-      },
-      failedTo(s"post the role card for $world", guild))
+      })
+
+  /** A world's five alert roles, each made again if it has been deleted, with
+   *  their ids kept on the world, in the database and in the cache. Worlds set up
+   *  before bounties existed have '0' for that role, so this is also what gives
+   *  them one for the first time. Used by /repair before it posts the world's
+   *  role card again. */
+  private def ensureWorldRoles(guild: Guild, world: String, config: Map[String, String]): Unit = {
+    def ensure(column: String, name: String, color: Color): String =
+      Option(guild.getRoleById(config.getOrElse(column, "0")))
+        .getOrElse(guild.createRole().setName(s"$world $name").setColor(color).complete())
+        .getId
+    val fullbless = ensure("fullbless_role", "Fullbless", new Color(0, 156, 70))
+    val nemesis = ensure("nemesis_role", "Rare Boss", new Color(164, 76, 230))
+    val allyPk = ensure("allypk_role", "PVP", new Color(220, 0, 0))
+    val masslog = ensure("masslog_role", "Masslog", new Color(219, 175, 72))
+    val bounty = ensure("bounty_role", "Bounty", new Color(139, 69, 19))
+    List("fullbless_role" -> fullbless, "nemesis_role" -> nemesis, "allypk_role" -> allyPk,
+      "masslog_role" -> masslog, "bounty_role" -> bounty)
+      .foreach { case (column, id) => worldRepairConfig(guild, world, column, id) }
+    streamState.modifyWorldsData { data =>
+      data.get(guild.getId).fold(data)(worlds => data + (guild.getId -> worlds.map(w =>
+        if (w.name.equalsIgnoreCase(world))
+          w.copy(fullblessChannel = "0", nemesisChannel = "0", fullblessRole = fullbless, nemesisRole = nemesis,
+            allyPkRole = allyPk, masslogRole = masslog, bountyRole = bounty)
+        else w)))
+    }
+  }
 
   /** Bring a world's role card up to date after `/fullbless` changes the level it
    *  names, fetched by the id kept on the world and edited in place. Nothing
@@ -991,109 +1031,38 @@ final class ChannelService(
       if (boostedChannel != null) {
         if (boostedChannel.canTalk()) {
           val worldConfigData = worldRetrieveConfig(guild, world)
-          // The bot's recent messages in the channel, read only for what was posted
-          // before ids were kept (25 Sep 2026): a role card or tracker with no id on
-          // record is looked for here once, so it can be replaced by one that has.
-          lazy val recent = boostedChannel.getHistory.retrievePast(100).complete().asScala.toList.filter { m =>
-            m.getAuthor.getId.equals(botUser) && !m.isEphemeral
-          }
-          // The world's role card, by the id kept on the world. With none kept, any
-          // card there is an embed from before the cards, and is replaced.
-          val storedRoleCard = worldConfigData.getOrElse("role_card_message", "0")
-          val fullblessMessage = fetchById(boostedChannel, storedRoleCard).isDefined
-          val legacyRoleCard =
-            if (storedRoleCard != "0") None
-            else recent.find(m => RoleCard.legacyWorldOf(m).exists(_.equalsIgnoreCase(worldFormal)))
-          val replacingRoleCard = legacyRoleCard.isDefined
-          legacyRoleCard.foreach(_.delete().queue(_ => (), _ => ()))
-          if (!fullblessMessage){
-            val fullblessLevel = worldConfigData("fullbless_level")
-            val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
-            val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
-            val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-            val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
-            val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-            val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
-            val masslogRoleCheck = guild.getRoleById(worldConfigData("masslog_role"))
-            val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
-            // Worlds set up before bounties existed have '0' here, so this is
-            // also the path that gives them the role for the first time.
-            val bountyRoleCheck = guild.getRoleById(worldConfigData.getOrElse("bounty_role", "0"))
-            val bountyRole = if (bountyRoleCheck == null) guild.createRole().setName(s"$worldFormal Bounty").setColor(new Color(139, 69, 19)).complete() else bountyRoleCheck
-
-            // Fullbless Role
-            postRoleCard(boostedChannel, guild, worldFormal, RoleCard.card(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
-
-            // Update role id if it changed
-            worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
-            worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
-            worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
-            worldRepairConfig(guild, worldFormal, "masslog_role", masslogRole.getId)
-            worldRepairConfig(guild, worldFormal, "bounty_role", bountyRole.getId)
-
-            // update the record in worldsData
-            if (streamState.worldsData.contains(guild.getId)) {
-              val worldsList = streamState.worldsData(guild.getId)
-              val updatedWorldsList = worldsList.map { world =>
-                if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                  world.copy(fullblessChannel = "0", fullblessRole = fullblessRole.getId)
-                } else {
-                  world
-                }
+          val notifications = boostedChannel.getAsMention
+          // Everything the bot has in the channel, oldest first. None when it cannot
+          // read the channel's history, and then it cannot tell what is there.
+          Try(boostedChannel.getHistory.retrievePast(100).complete().asScala.toList
+            .filter(m => m.getAuthor.getId.equals(botUser) && !m.isEphemeral).reverse).toOption match {
+            case None =>
+              embedBuild.setDescription(s"${Config.noEmoji} I can't read the messages in $notifications, so I left them as they are. Grant me **Read Message History** there, then run `/repair $world` again.")
+            case Some(posted) =>
+              val notes = ListBuffer[String]()
+              // The world's role card, by the id kept on the world. With none kept, any
+              // card there is an embed from before the cards, and is replaced.
+              if (!posted.exists(_.getId == worldConfigData.getOrElse("role_card_message", "0"))) {
+                ensureWorldRoles(guild, worldFormal, worldConfigData)
+                notes += (
+                  if (posted.exists(m => RoleCard.legacyWorldOf(m).exists(_.equalsIgnoreCase(worldFormal)))) "The notification message was rebuilt."
+                  else "Missing notification message was recreated.")
               }
-              streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-            }
-            // update the record in worldsData
-            if (streamState.worldsData.contains(guild.getId)) {
-              val worldsList = streamState.worldsData(guild.getId)
-              val updatedWorldsList = worldsList.map { world =>
-                if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                  world.copy(nemesisChannel = "0", nemesisRole = nemesisRole.getId)
-                } else {
-                  world
+              val storedTracker = discordConfig.getOrElse("tracker_messageid", "0")
+              val trackerCurrent = posted.find(_.getId == storedTracker).exists(trackerIsCurrent)
+              if (!trackerCurrent) notes += s"The cooldown tracker in $notifications was rebuilt."
+              if (trackerCurrent && ChannelService.notificationsInOrder(posted.map(_.getId), storedTracker,
+                    worldConfig(guild).map(_.roleCardMessage), boostedMessage)) {
+                // Nothing to post again but the boosted message, whose place is the bottom.
+                posted.find(_.getId == boostedMessage) match {
+                  case Some(existing) => refreshServerSaveEmbeds(existing, guild, worldFormal)
+                  case None           => if (boostedMessage != "0") postBoostedNotifications(boostedChannel, guild, worldFormal)
                 }
+              } else {
+                rebuildNotifications(boostedChannel, guild, worldFormal, posted)
+                notes += s"Everything in $notifications was posted again, in order."
               }
-              streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-            }
-            // update the record in worldsData
-            if (streamState.worldsData.contains(guild.getId)) {
-              val worldsList = streamState.worldsData(guild.getId)
-              val updatedWorldsList = worldsList.map { world =>
-                if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                  world.copy(allyPkRole = allyPkRole.getId)
-                } else {
-                  world
-                }
-              }
-              streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-            }
-            // update the record in worldsData
-            if (streamState.worldsData.contains(guild.getId)) {
-              val worldsList = streamState.worldsData(guild.getId)
-              val updatedWorldsList = worldsList.map { world =>
-                if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                  world.copy(masslogRole = masslogRole.getId, bountyRole = bountyRole.getId)
-                } else {
-                  world
-                }
-              }
-              streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-            }
-            embedBuild.setDescription(
-              if (replacingRoleCard) s"${Config.yesEmoji} The notification message was rebuilt."
-              else s"${Config.yesEmoji} Missing notification message was recreated.")
-          }
-          if (boostedMessage != "0") {
-            Try(boostedChannel.retrieveMessageById(boostedMessage).complete()).toOption match {
-              case Some(existing) => refreshServerSaveEmbeds(existing, guild, worldFormal)
-              case None           => postBoostedNotifications(boostedChannel, guild, worldFormal)
-            }
-          }
-          if (refreshCooldownTracker(boostedChannel, guild, recent)) {
-            val rebuilt = s"${Config.yesEmoji} The cooldown tracker in ${boostedChannel.getAsMention} was rebuilt."
-            val said = embedBuild.getDescriptionBuilder.toString
-            if (said.startsWith(Config.noEmoji)) embedBuild.setDescription(rebuilt)
-            else embedBuild.setDescription(s"$said\n$rebuilt")
+              if (notes.nonEmpty) embedBuild.setDescription(notes.map(note => s"${Config.yesEmoji} $note").mkString("\n"))
           }
         } else {
           embedBuild.setDescription(s"${Config.noEmoji} The bot does not have VIEW/SEND permissions for the channel: **${boostedChannel.getName}**.\nI suggest you delete that channel and run the command again.")
@@ -1281,89 +1250,11 @@ final class ChannelService(
             .deny(Permission.MESSAGE_SEND)
             .complete()
 
-          postCooldownTracker(boostedChannel, guild)
-
-          // Boosted Boss + creature + server-save notifications (use the canonical
-          // world name so the Dream Courts lookup resolves)
-          postBoostedNotifications(boostedChannel, guild, worldFormal)
-
-          val worldConfigData = worldRetrieveConfig(guild, world)
-          val fullblessLevel = worldConfigData("fullbless_level")
-          val fullblessRoleCheck = guild.getRoleById(worldConfigData("fullbless_role"))
-          val fullblessRole = if (fullblessRoleCheck == null) guild.createRole().setName(s"$worldFormal Fullbless").setColor(new Color(0, 156, 70)).complete() else fullblessRoleCheck
-          val nemesisRoleCheck = guild.getRoleById(worldConfigData("nemesis_role"))
-          val nemesisRole = if (nemesisRoleCheck == null) guild.createRole().setName(s"$worldFormal Rare Boss").setColor(new Color(164, 76, 230)).complete() else nemesisRoleCheck
-          val allyPkRoleCheck = guild.getRoleById(worldConfigData("allypk_role"))
-          val allyPkRole = if (allyPkRoleCheck == null) guild.createRole().setName(s"$worldFormal PVP").setColor(new Color(220, 0, 0)).complete() else allyPkRoleCheck
-          val masslogRoleCheck = guild.getRoleById(worldConfigData("masslog_role"))
-          val masslogRole = if (masslogRoleCheck == null) guild.createRole().setName(s"$worldFormal Masslog").setColor(new Color(219, 175, 72)).complete() else masslogRoleCheck
-          val bountyRoleCheck = guild.getRoleById(worldConfigData.getOrElse("bounty_role", "0"))
-          val bountyRole = if (bountyRoleCheck == null) guild.createRole().setName(s"$worldFormal Bounty").setColor(new Color(139, 69, 19)).complete() else bountyRoleCheck
-
-          // Fullbless Role
-          postRoleCard(boostedChannel, guild, worldFormal, RoleCard.card(worldFormal, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, fullblessLevel))
-          // Update role id if it changed
-          worldRepairConfig(guild, worldFormal, "fullbless_role", fullblessRole.getId)
-          // update the record in worldsData
-          if (streamState.worldsData.contains(guild.getId)) {
-            val worldsList = streamState.worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(fullblessChannel = "0", fullblessRole = fullblessRole.getId)
-              } else {
-                world
-              }
-            }
-            streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-          }
-
-          // Update role id if it changed
-          worldRepairConfig(guild, worldFormal, "nemesis_role", nemesisRole.getId)
-
-          // update the record in worldsData
-          if (streamState.worldsData.contains(guild.getId)) {
-            val worldsList = streamState.worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(nemesisChannel = "0", nemesisRole = nemesisRole.getId)
-              } else {
-                world
-              }
-            }
-            streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-          }
-          // Update role id if it changed
-          worldRepairConfig(guild, worldFormal, "allypk_role", allyPkRole.getId)
-
-          // update the record in worldsData
-          if (streamState.worldsData.contains(guild.getId)) {
-            val worldsList = streamState.worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(allyPkRole = allyPkRole.getId)
-              } else {
-                world
-              }
-            }
-            streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-          }
-
-          // Update role id if it changed
-          worldRepairConfig(guild, worldFormal, "masslog_role", masslogRole.getId)
-          worldRepairConfig(guild, worldFormal, "bounty_role", bountyRole.getId)
-
-          // update the record in worldsData
-          if (streamState.worldsData.contains(guild.getId)) {
-            val worldsList = streamState.worldsData(guild.getId)
-            val updatedWorldsList = worldsList.map { world =>
-              if (world.name.toLowerCase == worldFormal.toLowerCase) {
-                world.copy(masslogRole = masslogRole.getId, bountyRole = bountyRole.getId)
-              } else {
-                world
-              }
-            }
-            streamState.modifyWorldsData(_ + (guild.getId -> updatedWorldsList))
-          }
+          // The tracker, every world's card (they went with the old channel) and the
+          // boosted message, in that order. Boosted Boss + creature + server-save
+          // notifications use the canonical world name so the Dream Courts lookup resolves.
+          ensureWorldRoles(guild, worldFormal, worldRetrieveConfig(guild, world))
+          rebuildNotifications(boostedChannel, guild, worldFormal, Nil)
         }
 
         // apply required permissions to the new channel(s)
@@ -1608,5 +1499,22 @@ final class ChannelService(
     // here would take the other bot's setup with it. It goes when that guild asks
     // for it, not when this bot happens to be removed.
     if (!sharedConfigGuilds.contains(guildId)) schemaInitializer.dropGuild(guildId)
+  }
+}
+
+object ChannelService {
+
+  /** Whether the bot's messages in a notifications channel, oldest first, already
+   *  read the way the channel is laid out: the cooldown tracker, then every world's
+   *  role card in any order, then the boosted message — and nothing else. The
+   *  boosted message may be missing: posting it again puts it at the bottom, where
+   *  it belongs, and it is replaced there after every server save anyway. Anything
+   *  else missing or out of place means `/repair` posts the lot again.
+   *
+   *  A card id of "0" is one posted before ids were kept (25 Sep 2026), which is
+   *  never in order, so that card is replaced. */
+  def notificationsInOrder(posted: List[String], tracker: String, cards: List[String], boosted: String): Boolean = {
+    val above = if (posted.lastOption.contains(boosted)) posted.init else posted
+    above.headOption.contains(tracker) && above.tail.sorted == cards.sorted
   }
 }
