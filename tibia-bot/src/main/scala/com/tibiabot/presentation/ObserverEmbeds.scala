@@ -63,9 +63,14 @@ object ObserverEmbeds {
    *  now, to recognise the block in a message posted before then. */
   private val MwcThumbnail = "https://violentbot.xyz/discord/observer/miniworldchange.png"
 
-  /** What the block's first line says after its emoji, and so how it is told
-   *  apart from the other blocks once it has no picture. */
-  private val MwcLead = "Mini World Changes for **"
+  /** The block's title, and so how it is told apart from the other blocks once
+   *  it has no picture: its first line has it, both today's heading and the
+   *  `Mini World Changes for <world>` one it had until 26 Sep 2026. */
+  private val MwcTitle = "Mini World Changes"
+
+  /** What leads the heading. A standard emoji, like the tracker's ⏳, so it takes
+   *  none of the bot's own emoji slots. It was the bot's `:mwc:` until 26 Sep 2026. */
+  private val MwcEmoji = "🌐"
 
   /** Room for the changes. The server-save card (see ServerSaveCard) is one V2
    *  message, and Discord allows 4,000 characters of text across the whole of
@@ -73,18 +78,19 @@ object ObserverEmbeds {
   val MaxMwcDescription = 3000
 
   /** The Mini World Changes block in a guild's server-save notifications message,
-   *  for its world — the same world the Dream Courts block names. It opens on
-   *  `Mini World Changes for <world>` behind its own emoji, then each change: its
-   *  name, linked to its wiki page, with the feed's description as a small grey
-   *  line under it. No picture, so the text has the card's whole width. `None`
-   *  when nothing is active, so a quiet day (or a world no linked member covers,
-   *  which the feed can't tell apart) just leaves the block out. */
+   *  for its world — the same world the Dream Courts block names. It opens the way
+   *  the cooldown tracker and role card above it do: its heading, a small grey line
+   *  saying which world and for how long, and a divider (a blank line here, which
+   *  ServerSaveCard turns into one). Then each change: its name, linked to its wiki
+   *  page, with the feed's description as a small grey line under it. No picture,
+   *  so the text has the card's whole width. `None` when nothing is active, so a
+   *  quiet day (or a world no linked member covers, which the feed can't tell
+   *  apart) just leaves the block out. */
   def serverSaveMwcEmbed(world: String, changes: List[MiniWorldChange],
-                         emoji: String = Config.raidEmoji, leadEmoji: String = Config.mwcEmoji): Option[MessageEmbed] =
+                         emoji: String = Config.raidEmoji): Option[MessageEmbed] =
     if (changes.isEmpty) None
     else {
-      // A ### header, the same size as the cooldown tracker's heading.
-      val lead = s"### $leadEmoji $MwcLead$world**"
+      val heading = s"### $MwcEmoji $MwcTitle\n-# Active on **$world** until the next server save."
       val entries = changes.map { c =>
         val name = s"### $emoji **[${c.title}](${MiniWorldChangeCatalog.wikiUrl(c.title)})**"
         // `-#` only reaches the end of its line, so the body is kept to one.
@@ -92,10 +98,10 @@ object ObserverEmbeds {
         if (body.nonEmpty) s"$name\n-# $body" else name
       }
       // Whole entries only, so a long day can never cut a link in half.
-      val lengths = entries.scanLeft(lead.length)(_ + 1 + _.length).tail
+      val lengths = entries.scanLeft(heading.length + 1)(_ + 1 + _.length).tail
       val kept = entries.zip(lengths).takeWhile(_._2 <= MaxMwcDescription).map(_._1)
       Some(new EmbedBuilder()
-        .setDescription((lead :: kept).mkString("\n"))
+        .setDescription(s"$heading\n\n${kept.mkString("\n")}")
         .setColor(Embeds.BrandColor)
         .build())
     }
@@ -105,7 +111,7 @@ object ObserverEmbeds {
    *  place says nothing. A message from before 25 Sep 2026 has the old wording,
    *  and is told apart by the picture it carried then. */
   def isServerSaveMwcEmbed(embed: MessageEmbed): Boolean =
-    Option(embed.getDescription).flatMap(_.linesIterator.nextOption()).exists(_.contains(MwcLead)) ||
+    Option(embed.getDescription).flatMap(_.linesIterator.nextOption()).exists(_.contains(MwcTitle)) ||
       Option(embed.getThumbnail).exists(_.getUrl == MwcThumbnail)
 
   /** The boosted boss and creature of a posted notifications message: its first

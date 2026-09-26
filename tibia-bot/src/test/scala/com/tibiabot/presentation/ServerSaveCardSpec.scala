@@ -28,7 +28,7 @@ class ServerSaveCardSpec extends AnyFunSuite with Matchers {
     new EmbedBuilder().setDescription(text).setThumbnail(thumbnail).setColor(Embeds.BrandColor).build()
 
   private def mwc(changes: List[MiniWorldChange]): MessageEmbed =
-    ObserverEmbeds.serverSaveMwcEmbed("Antica", changes, "<:raid:1552190974762033254>", "<:mwc:1552847324466913320>").get
+    ObserverEmbeds.serverSaveMwcEmbed("Antica", changes, "<:raid:1552190974762033254>").get
 
   private def daily(label: String, emoji: String, name: String, thumbnail: String): MessageEmbed =
     block(ServerSaveCard.dailyText(label, s"$indent$emoji", name), thumbnail)
@@ -64,15 +64,22 @@ class ServerSaveCardSpec extends AnyFunSuite with Matchers {
     ServerSaveCard.label("Abc xyz-9'!") shouldBe "-# **ABC XYZ-9'!**"
   }
 
-  test("each block becomes one part of a single card, in order, with the button under it") {
+  test("each block becomes part of a single card, in order, with the button under it") {
     val parts = ServerSaveCard.components(day, letter)
     parts should have size 2
     val card = parts.head.asInstanceOf[Container].getComponents.asScala.toList
-    // The mini world changes have no picture, so they are text across the card;
-    // every daily block is a section with its picture beside it.
+    // The mini world changes have no picture, so they are text across the card,
+    // their heading over a divider over the list, as the cooldown tracker and
+    // role card open. Every daily block is a section with its picture beside it.
     card.head shouldBe a[TextDisplay]
+    card(1) shouldBe a[Separator]
+    card(2) shouldBe a[TextDisplay]
+    card.head.asInstanceOf[TextDisplay].getContent shouldBe
+      "### 🌐 Mini World Changes\n-# Active on **Antica** until the next server save."
+    card(2).asInstanceOf[TextDisplay].getContent should startWith("### <:raid:1552190974762033254> **[Fury Gate]")
     card.collect { case s: Section => s } should have size (day.size - 1)
-    card.collect { case s: Separator => s } should have size (day.size - 1)
+    // One between each two blocks, and the one under the changes' heading.
+    card.collect { case s: Separator => s } should have size day.size
     // Blocks and dividers alternate, starting and ending on a block.
     card.zipWithIndex.foreach { case (part, i) =>
       if (i % 2 == 0) part should not be a[Separator] else part shouldBe a[Separator]
@@ -86,6 +93,17 @@ class ServerSaveCardSpec extends AnyFunSuite with Matchers {
     val back = ServerSaveCard.blocksOfCard(ServerSaveCard.components(day, letter))
     back.map(_.getDescription) shouldBe day.map(_.getDescription)
     back.map(b => Option(b.getThumbnail).map(_.getUrl)) shouldBe day.map(b => Option(b.getThumbnail).map(_.getUrl))
+    ObserverEmbeds.boostedEmbedsOf(back).map(_.getDescription) shouldBe List(boss, creature).map(_.getDescription)
+  }
+
+  test("a card posted before the changes had a divider under their heading reads back the same") {
+    val old = new EmbedBuilder().setDescription(List(
+      "### <:mwc:1552847324466913320> Mini World Changes for **Antica**",
+      "### <:raid:1552190974762033254> **[Fury Gate](https://tibia.fandom.com/wiki/Fury_Gates_Mini_World_Change)**",
+      "-# The Fury Gate has opened near Venore.").mkString("\n")).setColor(Embeds.BrandColor).build()
+    val posted = old :: day.tail
+    val back = ServerSaveCard.blocksOfCard(ServerSaveCard.components(posted, letter))
+    back.map(_.getDescription) shouldBe posted.map(_.getDescription)
     ObserverEmbeds.boostedEmbedsOf(back).map(_.getDescription) shouldBe List(boss, creature).map(_.getDescription)
   }
 

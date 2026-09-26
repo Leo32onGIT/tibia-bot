@@ -24,8 +24,9 @@ import scala.jdk.CollectionConverters._
  *  are each a description, and all but the mini world changes a thumbnail too.
  *  Each becomes one block of the card here, in the order given, with a divider
  *  between: a section with its picture on the right, or just its text across
- *  the card's width when it has none. The Server Save Notifications button
- *  goes under the card.
+ *  the card's width when it has none (the mini world changes, whose heading has
+ *  a divider of its own under it). The Server Save Notifications button goes
+ *  under the card.
  *
  *  Each daily block is labelled the same way, by [[dailyText]]: a small grey
  *  line in bold capitals saying what it is, then the name it is about.
@@ -65,20 +66,27 @@ object ServerSaveCard {
   /** The message: `blocks` as one card, then the button. `letterEmoji` defaults
    *  to the configured one; a test passes its own. */
   def components(blocks: List[MessageEmbed], letterEmoji: String = Config.letterEmoji): List[MessageTopLevelComponent] = {
-    val sections = blocks.map(section)
-    val withDividers = sections.zipWithIndex.flatMap { case (part, i) =>
-      if (i == 0) List(part) else List(Separator.createDivider(Separator.Spacing.SMALL), part)
+    val withDividers = blocks.map(parts).zipWithIndex.flatMap { case (block, i) =>
+      if (i == 0) block else divider :: block
     }
     List(Container.of(withDividers.asJava), ActionRow.of(notifyButton(letterEmoji)))
   }
 
+  private def divider: Separator = Separator.createDivider(Separator.Spacing.SMALL)
+
   /** A block with a picture is a section with it on the right; one without is
-   *  just its text. */
-  private def section(block: MessageEmbed): ContainerChildComponent = {
-    val text = TextDisplay.of(Option(block.getDescription).getOrElse(""))
+   *  just its text. A blank line in the text of one without is a divider within
+   *  it: the mini world changes have one under their heading, as the cooldown
+   *  tracker and role card do. */
+  private def parts(block: MessageEmbed): List[ContainerChildComponent] = {
+    val text = Option(block.getDescription).getOrElse("")
     Option(block.getThumbnail).flatMap(t => Option(t.getUrl)) match {
-      case Some(url) => Section.of(Thumbnail.fromUrl(url), text)
-      case None      => text
+      case Some(url) => List(Section.of(Thumbnail.fromUrl(url), TextDisplay.of(text)))
+      case None =>
+        text.split("\n\n", 2).toList.filter(_.nonEmpty).map(TextDisplay.of) match {
+          case List(above, below) => List(above, divider, below)
+          case whole              => whole
+        }
     }
   }
 
@@ -88,18 +96,26 @@ object ServerSaveCard {
     if (message.isUsingComponentsV2) blocksOfCard(message.getComponents.asScala.toList)
     else message.getEmbeds.asScala.toList
 
-  /** The sections of a card, read back into the embeds they were built from. */
-  def blocksOfCard(components: List[MessageTopLevelComponent]): List[MessageEmbed] =
-    components.collect { case card: Container => card }.flatMap(_.getComponents.asScala).collect {
+  /** The sections of a card, read back into the embeds they were built from.
+   *  Text with no picture straight after text with no picture is the rest of the
+   *  same block, below the divider within it (see [[components]]). */
+  def blocksOfCard(components: List[MessageTopLevelComponent]): List[MessageEmbed] = {
+    val parts = components.collect { case card: Container => card }.flatMap(_.getComponents.asScala).collect {
       case s: Section =>
         val text = s.getContentComponents.asScala.collect { case t: TextDisplay => t.getContent }.mkString("\n")
         val picture = s.getAccessory match {
           case t: Thumbnail => Option(t.getUrl)
           case _            => None
         }
-        block(text, picture)
-      case t: TextDisplay => block(t.getContent, None)
+        (text, picture)
+      case t: TextDisplay => (t.getContent, None)
     }
+    val joined = parts.foldLeft(List.empty[(String, Option[String])]) {
+      case ((above, None) :: done, (below, None)) => (s"$above\n\n$below", None) :: done
+      case (done, part)                           => part :: done
+    }
+    joined.reverse.map { case (text, picture) => block(text, picture) }
+  }
 
   private def block(text: String, picture: Option[String]): MessageEmbed = {
     val embed = new EmbedBuilder().setDescription(text).setColor(Embeds.BrandColor)
