@@ -49,7 +49,7 @@ class ObserverRaidEmbedSpec extends AnyFunSuite with Matchers {
   test("the area card is the imminent-raid label over the area, and when the subarea reveals") {
     val card = ObserverEmbeds.areaCard(raid("areaRevealed"), emoji)
     partsOf(card) shouldBe List(lines(
-      "-# ɪᴍᴍɪɴᴇɴᴛ ʀᴀɪᴅ",
+      "-# **IMMINENT RAID**",
       "### <:raid:1> Hrodmir",
       s"-# **Subarea reveals:** <t:${start.minus(ObserverRaidPoller.SubareaLead).getEpochSecond}:R>"))
     card.getAccentColorRaw.intValue shouldBe Embeds.AutomaticColor
@@ -57,7 +57,7 @@ class ObserverRaidEmbedSpec extends AnyFunSuite with Matchers {
 
   test("the subarea card is the subarea-revealed label over the subarea, and when the raid starts") {
     partsOf(ObserverEmbeds.subareaCard(raid("subareaRevealed", Some("Krimhorn")), emoji)) shouldBe List(lines(
-      "-# sᴜʙᴀʀᴇᴀ ʀᴇᴠᴇᴀʟᴇᴅ",
+      "-# **SUBAREA REVEALED**",
       "### <:raid:1> Krimhorn",
       s"-# **Raid starts:** <t:${start.getEpochSecond}:R>"))
   }
@@ -70,21 +70,21 @@ class ObserverRaidEmbedSpec extends AnyFunSuite with Matchers {
     val card = ObserverEmbeds.startedCard(raid("raidStarted", Some("Krimhorn"), 289), WinterWolves, emoji)
     partsOf(card) shouldBe List(
       lines(
-        "-# ʀᴀɪᴅ sᴛᴀʀᴛᴇᴅ",
+        "-# **RAID STARTED**",
         "### <:raid:1> [Winter Wolves near Krimhorn](https://tibia.fandom.com/wiki/Svargrond_Raids#Winter_Wolf_Raid_near_Krimhorn)",
         "-# **Krimhorn**",
         s"-# **Raid started:** <t:${start.getEpochSecond}:R>"),
       "picture:https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Winter_Wolf.gif",
       "---",
       lines(
-        "-# ᴄʀᴇᴀᴛᴜʀᴇs",
+        "-# **CREATURES**",
         "• [Winter Wolf](https://tibia.fandom.com/wiki/Winter_Wolf)"))
     card.getAccentColorRaw.intValue shouldBe Embeds.AutomaticColor
   }
 
   test("a start the catalogue doesn't know has the subarea as its header, with no picture or creatures") {
     partsOf(ObserverEmbeds.startedCard(raid("raidStarted", Some("Krimhorn"), 9999), None, emoji)) shouldBe List(lines(
-      "-# ʀᴀɪᴅ sᴛᴀʀᴛᴇᴅ",
+      "-# **RAID STARTED**",
       "### <:raid:1> Krimhorn",
       s"-# **Raid started:** <t:${start.getEpochSecond}:R>"))
   }

@@ -53,15 +53,15 @@ class ServerSaveCardSpec extends AnyFunSuite with Matchers {
 
   test("each daily block is its label in small grey small caps, then its name") {
     boss.getDescription shouldBe List(
-      "-# ʙᴏᴏsᴛᴇᴅ ʙᴏss",
+      "-# **BOOSTED BOSS**",
       s"### $indent<:archfoe:1024710113728155738> **[Ferumbras Mortal Shell](https://tibia.fandom.com/wiki/Ferumbras_Mortal_Shell)**"
     ).mkString("\n")
-    dream.getDescription.linesIterator.next() shouldBe "-# ᴅʀᴇᴀᴍ ᴄᴏᴜʀᴛs ʙᴏss ɪɴ ᴀɴᴛɪᴄᴀ"
-    rashid.getDescription.linesIterator.next() shouldBe "-# ʀᴀsʜɪᴅ ᴄᴀɴ ʙᴇ ғᴏᴜɴᴅ ɪɴ"
+    dream.getDescription.linesIterator.next() shouldBe "-# **DREAM COURTS BOSS IN ANTICA**"
+    rashid.getDescription.linesIterator.next() shouldBe "-# **RASHID CAN BE FOUND IN**"
   }
 
-  test("small caps cover a to z and leave everything else alone") {
-    ServerSaveCard.smallCaps("Abc XYZ-9'!") shouldBe "ᴀʙᴄ xʏᴢ-9'!"
+  test("a label is a small grey line in bold capitals, whatever it holds") {
+    ServerSaveCard.label("Abc xyz-9'!") shouldBe "-# **ABC XYZ-9'!**"
   }
 
   test("each block becomes one part of a single card, in order, with the button under it") {

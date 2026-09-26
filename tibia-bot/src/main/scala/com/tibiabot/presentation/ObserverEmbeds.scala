@@ -146,7 +146,7 @@ object ObserverEmbeds {
   // says which raid it is at the start, so the first two never name it.
   //
   // Each is a Components V2 card, gold-edged as the raid embeds before it were:
-  // the stage as a small grey label in small caps (as the server-save card's
+  // the stage as a small grey label in bold capitals (as the server-save card's
   // blocks are labelled), the place as a header behind the `:raid:` emoji, and
   // when the next thing happens as a small grey line with its label in bold.
   // The broadcast lines stay embeds.
@@ -188,14 +188,14 @@ object ObserverEmbeds {
         val creatures =
           if (rt.creatures.isEmpty) Nil
           else List(Separator.createDivider(Separator.Spacing.SMALL),
-            TextDisplay.of(s"-# ${ServerSaveCard.smallCaps("Creatures")}\n${rt.creatures.map(creatureBullet).mkString("\n")}"))
+            TextDisplay.of(s"${ServerSaveCard.label("Creatures")}\n${rt.creatures.map(creatureBullet).mkString("\n")}"))
         stageCard(top :: creatures: _*)
     }
   }
 
   /** A stage card's text: its label, its header, then its lines. */
   private def stageText(label: String, header: String, lines: List[String]): String =
-    (s"-# ${ServerSaveCard.smallCaps(label)}" :: s"### $header" :: lines).mkString("\n")
+    (ServerSaveCard.label(label) :: s"### $header" :: lines).mkString("\n")
 
   /** When the next thing happens, as a countdown on a small grey line. */
   private def timeLine(what: String, at: Instant): String = s"-# **$what:** <t:${at.getEpochSecond}:R>"

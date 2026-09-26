@@ -48,7 +48,7 @@ object StatisticsCard {
 
   /** A section: its label as a small grey line in bold capitals, then its
    *  rows. Discord's grey subtext comes in one size, and bold capitals are the
-   *  largest it reads (small caps until 26 Sep 2026). `icon` goes in front of
+   *  largest it reads, as `ServerSaveCard.label` says. `icon` goes in front of
    *  the label and is left as it is. */
   def section(label: String, rows: List[String], icon: String = ""): String = {
     val lead = if (icon.isEmpty) "" else s"$icon "

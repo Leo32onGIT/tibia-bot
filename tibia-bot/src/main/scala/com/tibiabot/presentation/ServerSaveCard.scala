@@ -13,6 +13,8 @@ import net.dv8tion.jda.api.components.thumbnail.Thumbnail
 import net.dv8tion.jda.api.entities.{Message, MessageEmbed}
 import net.dv8tion.jda.api.entities.emoji.Emoji
 
+import java.util.Locale
+
 import scala.jdk.CollectionConverters._
 
 /** The server-save message in a guild's notifications channel, as one card.
@@ -26,7 +28,7 @@ import scala.jdk.CollectionConverters._
  *  goes under the card.
  *
  *  Each daily block is labelled the same way, by [[dailyText]]: a small grey
- *  line in small caps saying what it is, then the name it is about.
+ *  line in bold capitals saying what it is, then the name it is about.
  *
  *  Kept as embeds up to the last moment because the message is also read back.
  *  `/repair` and the mini world change watcher both rebuild it around the boss
@@ -45,18 +47,17 @@ object ServerSaveCard {
   def dreamCourtsLabel(world: String): String = s"Dream Courts boss in $world"
   val DromeLabel = "Drome cycle ends"
 
-  private val SmallLetters = "ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"
+  /** A small grey label in bold capitals. Discord's grey subtext comes in one
+   *  size and bold capitals are the largest it reads, so every card's labels
+   *  are set this way — this card's, the raid cards' and the statistics
+   *  cards' (small caps until 26 Sep 2026). */
+  def label(text: String): String = s"-# **${text.toUpperCase(Locale.ROOT)}**"
 
-  /** `text` in small caps, the lettering the bot's channel names use. Only a
-   *  to z have them; everything else is left as it is. */
-  def smallCaps(text: String): String =
-    text.toLowerCase.map(c => if (c >= 'a' && c <= 'z') SmallLetters.charAt(c - 'a') else c)
-
-  /** One daily block's text: its label as a small grey line in small caps, then
-   *  what it names under it. `mark` is what goes before the name — the indent
-   *  and the block's own emoji. */
-  def dailyText(label: String, mark: String, name: String): String =
-    s"-# ${smallCaps(label)}\n### $mark $name"
+  /** One daily block's text: its [[label]], then what it names under it.
+   *  `mark` is what goes before the name — the indent and the block's own
+   *  emoji. */
+  def dailyText(what: String, mark: String, name: String): String =
+    s"${label(what)}\n### $mark $name"
 
   def notifyButton(letterEmoji: String): Button =
     Button.primary("boosted list", "Server Save Notifications").withEmoji(Emoji.fromFormatted(letterEmoji))
