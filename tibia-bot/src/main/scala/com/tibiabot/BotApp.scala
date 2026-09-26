@@ -180,6 +180,8 @@ object BotApp extends App with StrictLogging {
     new persistence.jdbc.JdbcObserverRepository(connectionProvider)
   val observerRaidRepository: persistence.ObserverRaidRepository =
     new persistence.jdbc.JdbcObserverRaidRepository(connectionProvider)
+  private val observerCoverageRepository: persistence.ObserverCoverageRepository =
+    new persistence.jdbc.JdbcObserverCoverageRepository(connectionProvider)
 
   // Let the games begin
   logger.info("Starting up")
@@ -274,7 +276,10 @@ object BotApp extends App with StrictLogging {
     },
     // Then every world any guild tracks, on any bot: the feeds are pooled, so a
     // member's account covers the worlds of Discords they aren't in too.
-    trackedWorlds = () => worldConfigRepository.allTrackedWorldNames())
+    trackedWorlds = () => worldConfigRepository.allTrackedWorldNames(),
+    // What each link's raid rules cover, for the coverage /observer shows. Written
+    // where the rules are set, read by every bot.
+    coverage = observerCoverageRepository)
 
   val observerFeed = new observer.ObserverFeed(
     observerMode,

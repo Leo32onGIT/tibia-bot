@@ -19,8 +19,6 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
   private val answers = Map(
     "/ensure-rules" -> (200,
       """{"ok": true, "status_code": 200, "worlds": ["Victoris", "Ombra"], "skipped": ["Xyla"], "limit": 2}"""),
-    "/ensure-raid-rules" -> (200,
-      """{"ok": false, "status_code": 400, "worlds": [], "skipped": [], "limit": 15, "error": "too many rules"}"""),
     "/mwc" -> (200,
       """{"ok": true, "status_code": 200, "miniWorldChanges": [
         |  {"world": "Victoris", "title": "Fury Gate", "body": "Near Venore."},
@@ -37,6 +35,18 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
     exchange.close()
   }
   answers.foreach { case (path, (code, body)) => server.createContext(path, exchange => answer(exchange, code, body)) }
+  // Raid rules answer by the credential: refused for "jwt", set for "explorer".
+  server.createContext("/ensure-raid-rules", exchange => {
+    val body = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8).parseJson.asJsObject
+    body.fields.get("credential") match {
+      case Some(JsString("explorer")) => answer(exchange, 200,
+        """{"ok": true, "status_code": 200, "worlds": ["Victoris"], "skipped": [], "limit": 15,
+          | "regions": {"Victoris": [3, 11, 23]}, "areaNames": {"3": "Carlin", "11": ""},
+          | "areaFields": ["areaId", "areaName"]}""".stripMargin)
+      case _ => answer(exchange, 200,
+        """{"ok": false, "status_code": 400, "worlds": [], "skipped": [], "limit": 15, "error": "too many rules"}""")
+    }
+  })
   // A renewal answers by the credential it was asked to renew.
   server.createContext("/renew", exchange => {
     val body = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8).parseJson.asJsObject
@@ -75,6 +85,14 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
     val result = client(new ApiCallMetrics()).ensureRaidRules("jwt", List("Victoris"))
     result.ok shouldBe false
     result.detail shouldBe "status 400: too many rules"
+  }
+
+  test("set raid rules say which areas each world's rule covers, and the names that came with them") {
+    val result = client(new ApiCallMetrics()).ensureRaidRules("explorer", List("Victoris"))
+    result.regions shouldBe Map("Victoris" -> List(3, 11, 23))
+    // A blank name is no name.
+    result.areaNames shouldBe Map(3 -> "Carlin")
+    result.areaFields shouldBe List("areaId", "areaName")
   }
 
   test("asking for no MWC worlds sets nothing and makes no request") {

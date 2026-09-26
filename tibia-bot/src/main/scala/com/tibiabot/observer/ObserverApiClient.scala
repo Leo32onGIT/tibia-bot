@@ -46,9 +46,16 @@ object RenewResult {
 /** What setting one kind of rule on an account came to. The API caps how many
  *  rules an account holds, so `applied` can be fewer worlds than were asked for;
  *  `skipped` are the ones left without a rule, and `limit` the cap. `detail` says
- *  why it failed, when it did. */
+ *  why it failed, when it did.
+ *
+ *  For raid rules it also says what they cover: `regions`, the area ids each
+ *  applied world's rule takes in; `areaNames`, the names Observer gave any of
+ *  them; and `areaFields`, the fields its explored areas carry. */
 final case class RulesResult(ok: Boolean, applied: List[String], skipped: List[String],
-                             limit: Option[Int], detail: String)
+                             limit: Option[Int], detail: String,
+                             regions: Map[String, List[Int]] = Map.empty,
+                             areaNames: Map[Int, String] = Map.empty,
+                             areaFields: List[String] = Nil)
 
 /** Talks to the local Observer sidecar (see `observer-sidecar/`), which owns the
  *  browser-TLS Cloudflare pass and the CipSoft request shapes. Everything here is a
@@ -92,8 +99,22 @@ final class ObserverApiClient(
       val code = o.fields.get("status_code").collect { case JsNumber(n) => s"status ${n.toInt}" }
       RulesResult(bool(o, "ok"), strings(o, "worlds"), strings(o, "skipped"),
         o.fields.get("limit").collect { case JsNumber(n) => n.toInt },
-        (code.toList ++ str(o, "error")).mkString(": "))
+        (code.toList ++ str(o, "error")).mkString(": "),
+        regions = objectOf(o, "regions").map { case (world, ids) =>
+          world -> (ids match {
+            case JsArray(xs) => xs.collect { case JsNumber(n) => n.toInt }.toList
+            case _           => Nil
+          })
+        },
+        areaNames = objectOf(o, "areaNames").flatMap {
+          case (id, JsString(name)) if name.nonEmpty => id.toIntOption.map(_ -> name)
+          case _                                     => None
+        },
+        areaFields = strings(o, "areaFields"))
   }
+
+  private def objectOf(o: JsObject, key: String): Map[String, JsValue] =
+    o.fields.get(key).collect { case JsObject(fields) => fields }.getOrElse(Map.empty)
 
   private def str(o: JsObject, key: String): Option[String] =
     o.fields.get(key).collect { case JsString(s) if s.nonEmpty => s }

@@ -97,10 +97,11 @@ object ButtonHandler extends StrictLogging {
       event.replyModal(modal).queue()
     } else if (button == "observer remove") {
       event.deferEdit().queue()
-      Option(event.getGuild).foreach(guild => BotApp.observerService.unlink(guild.getId, event.getUser.getId))
-      val token = Option(event.getGuild).flatMap(guild => BotApp.observerService.statusFor(guild.getId, event.getUser.getId))
-      event.getHook.editOriginalEmbeds(presentation.ObserverEmbeds.panel(token))
-        .setComponents(presentation.ObserverEmbeds.controls(token)).queue()
+      Option(event.getGuild).foreach { guild =>
+        BotApp.observerService.unlink(guild.getId, event.getUser.getId)
+        val view = BotApp.observerService.panel(guild.getId, event.getUser.getId)
+        event.getHook.editOriginalComponents(presentation.ObserverEmbeds.panel(view).asJava).useComponentsV2().queue()
+      }
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
         val world = presentation.RoleCard.worldOf(event.getMessage, BotApp.worldsData.getOrElse(guild.getId, List())).getOrElse("")

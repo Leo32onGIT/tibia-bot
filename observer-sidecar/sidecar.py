@@ -204,14 +204,16 @@ def _rule_limit(key):
     return DEFAULT_LIMITS[key]
 
 
-def _stored(r, applied, skipped, limit, unexplored=None):
+def _stored(r, applied, skipped, limit, unexplored=None, extra=None):
     """The answer to a settings store: which worlds got a rule, which were left out
     for want of room, which (raids only) had nothing explored to cover, and the
-    upstream's own words when it refused."""
+    upstream's own words when it refused. `extra` is added as it is."""
     ok = r.status_code == 200
     out = {"ok": ok, "status_code": r.status_code, "worlds": applied, "skipped": skipped, "limit": limit}
     if unexplored:
         out["unexplored"] = unexplored
+    if extra:
+        out.update(extra)
     if not ok:
         out["error"] = (r.text or "")[:300]
     return jsonify(out)
@@ -290,6 +292,9 @@ def ensure_raid_rules():
     /Raids feed carries every stage; the bot filters by `category`. Like MWC
     rules, raid rules are capped (`maximumRaidNotificationRules`), so worlds are
     taken in order up to the room the account's own rules leave.
+
+    The answer also says what each rule covers: `regions` (world -> region ids),
+    `areaNames` (id -> name, where the explored areas carry one) and `areaFields`.
     """
     b = _json_body()
     credential = b.get("credential")
@@ -338,7 +343,19 @@ def ensure_raid_rules():
         } for w in applied]
         settings["raidNotificationRules"] = kept + managed
         r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
-        return _stored(r, applied, skipped, limit, unexplored)
+        # What each rule covers, for the bot's /observer coverage: the region ids per
+        # world that got a rule, and whatever name the explored areas carry for an
+        # id. `areaFields` lists the fields an explored area has, so a missing name
+        # can be traced to the shape rather than guessed at.
+        names, fields = {}, set()
+        for entry in areas:
+            for area in entry.get("exploredAreas") or []:
+                fields.update(area.keys())
+                name = area.get("areaName") or area.get("name")
+                if name and area.get("areaId") is not None:
+                    names[str(area["areaId"])] = name
+        extra = {"regions": {w: regions(w) for w in applied}, "areaNames": names, "areaFields": sorted(fields)}
+        return _stored(r, applied, skipped, limit, unexplored, extra)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
 

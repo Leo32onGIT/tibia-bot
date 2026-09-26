@@ -292,6 +292,25 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |PRIMARY KEY (guildid, raid_id, category)
            |);""".stripMargin
 
+      // The areas each link's raid rules cover, per world — which raids it can
+      // see — so /observer can show a guild's coverage. Replaced whenever the rules
+      // are set; a link that stops working drops out by its status, not here.
+      val createObserverLinkAreasTable =
+        s"""CREATE TABLE IF NOT EXISTS observer_link_areas (
+           |guildid VARCHAR(255) NOT NULL,
+           |userid VARCHAR(255) NOT NULL,
+           |world VARCHAR(255) NOT NULL,
+           |area_id INT NOT NULL,
+           |PRIMARY KEY (guildid, userid, world, area_id)
+           |);""".stripMargin
+
+      // The names Observer gives its area ids, as they come in with the rules.
+      val createObserverAreaNamesTable =
+        s"""CREATE TABLE IF NOT EXISTS observer_area_names (
+           |area_id INT PRIMARY KEY,
+           |name VARCHAR(255) NOT NULL
+           |);""".stripMargin
+
       // What each character's standing in each highscore list was at the last
       // snapshot, so the next one can tell an advance from a character simply
       // entering a list only a thousand deep. World-scoped like deaths and
@@ -479,6 +498,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
       newStatement.executeUpdate(createObserverTokensTable)
       newStatement.executeUpdate(createObserverRaidChannelsTable)
       newStatement.executeUpdate(createObserverPostedRaidsTable)
+      newStatement.executeUpdate(createObserverLinkAreasTable)
+      newStatement.executeUpdate(createObserverAreaNamesTable)
 
       newStatement.executeUpdate(createHighscoreValueTable)
       newStatement.executeUpdate(createHighscoreEventsTable)

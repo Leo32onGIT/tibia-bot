@@ -2,7 +2,7 @@ package com.tibiabot.observer
 
 import com.sun.net.httpserver.HttpServer
 import com.tibiabot.domain.{ObserverStatus, ObserverToken}
-import com.tibiabot.persistence.ObserverRepository
+import com.tibiabot.persistence.{CoveredArea, ObserverCoverageRepository, ObserverRepository}
 import com.tibiabot.tracking.ApiCallMetrics
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
@@ -12,6 +12,7 @@ import spray.json._
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.time.{Duration, Instant}
+import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ListBuffer
 
 /** Which worlds an account's rules are set on: those it has characters on that
@@ -32,7 +33,9 @@ class ObserverRuleScopeSpec extends AnyFunSuite with Matchers with BeforeAndAfte
       val credential = body.fields.get("credential").collect { case JsString(c) => c }.getOrElse("")
       val worlds = body.fields.get("worlds").collect { case JsArray(ws) => ws.collect { case JsString(w) => w }.toList }
       calls.synchronized(calls += ((path, credential, worlds.getOrElse(Nil))))
-      val answer = s"""{"ok": true, "status_code": 200, "worlds": ${JsArray(worlds.getOrElse(Nil).map(JsString(_)): _*)}, "skipped": [], "limit": 15}"""
+      // Every raid rule covers area 3 (Carlin).
+      val regions = JsObject(worlds.getOrElse(Nil).map(w => w -> JsArray(JsNumber(3))).toMap)
+      val answer = s"""{"ok": true, "status_code": 200, "worlds": ${JsArray(worlds.getOrElse(Nil).map(JsString(_)): _*)}, "skipped": [], "limit": 15, "regions": $regions}"""
       val bytes = answer.getBytes(StandardCharsets.UTF_8)
       exchange.sendResponseHeaders(200, bytes.length.toLong)
       exchange.getResponseBody.write(bytes)
@@ -67,12 +70,24 @@ class ObserverRuleScopeSpec extends AnyFunSuite with Matchers with BeforeAndAfte
     def deleteUser(guildId: String, userId: String): Unit = ???
   }
 
+  /** What the service kept about each link's coverage. */
+  private final class Coverage extends ObserverCoverageRepository {
+    val areas = TrieMap.empty[(String, String), Map[String, List[Int]]]
+    val cleared = ListBuffer.empty[(String, String)]
+    def setAreas(guildId: String, userId: String, a: Map[String, List[Int]]): Unit = areas.put((guildId, userId), a)
+    def clearLink(guildId: String, userId: String): Unit = cleared.synchronized(cleared += (guildId -> userId))
+    def clearGuild(guildId: String): Unit = ()
+    def liveAreas(worlds: List[String]): List[CoveredArea] = Nil
+    def setNames(names: Map[Int, String]): Unit = ()
+    def names(): Map[Int, String] = Map.empty
+  }
+
   private def service(tokens: List[ObserverToken], guildWorlds: String => List[String],
-                      tracked: () => List[String]) =
+                      tracked: () => List[String], coverage: ObserverCoverageRepository = ObserverCoverageRepository.None) =
     new ObserverService(new Links(tokens), crypto,
       new ObserverApiClient(s"http://127.0.0.1:${server.getAddress.getPort}", sharedToken = "",
         deviceIdentification = "Violent Bot", clientVersion = "1.1.6", metrics = new ApiCallMetrics()),
-      enabled = true, guildWorlds = guildWorlds, trackedWorlds = tracked)
+      enabled = true, guildWorlds = guildWorlds, trackedWorlds = tracked, coverage = coverage)
 
   private def recorded(work: => Unit): List[(String, String, List[String])] = {
     calls.synchronized(calls.clear())
@@ -99,6 +114,19 @@ class ObserverRuleScopeSpec extends AnyFunSuite with Matchers with BeforeAndAfte
   test("an account none of whose worlds any guild tracks has the bot's rules taken off") {
     val sent = recorded(service(List(token("g1", "u1", "Victoris")), _ => List("Antica"), () => List("Antica")).reapplyRules())
     sent shouldBe List(("/clear-rules", credential("g1", "u1"), Nil))
+  }
+
+  test("the areas each world's raid rule covers are kept for the link") {
+    val coverage = new Coverage
+    recorded(service(List(token("g1", "u1", "Ombra, Victoris")), _ => List("Victoris"), () => List("Ombra", "Victoris"),
+      coverage).reapplyRules())
+    coverage.areas.toMap shouldBe Map(("g1", "u1") -> Map("Victoris" -> List(3), "Ombra" -> List(3)))
+  }
+
+  test("an account whose rules come off forgets what it covered") {
+    val coverage = new Coverage
+    recorded(service(List(token("g1", "u1", "Victoris")), _ => List("Antica"), () => List("Antica"), coverage).reapplyRules())
+    coverage.cleared.toList shouldBe List("g1" -> "u1")
   }
 
   test("rules are left as they are when the worlds can't be read") {

@@ -6,6 +6,8 @@ import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 
+import scala.jdk.CollectionConverters._
+
 /** The form behind the `/observer` **Add** button: takes the 5-char Tibia Observer
  *  token, links it for this member, and ensures a raids channel for every world the
  *  server tracks that the account has characters on — the world context comes from
@@ -36,9 +38,12 @@ object ObserverModals extends StrictLogging {
             try {
               BotApp.observerService.link(guild.getId, event.getUser.getId, token) match {
                 case LinkOutcome.Ok(stored, _) =>
+                  // Just linked, so the account's own areas aren't in the coverage yet:
+                  // its rules are set just after this answer.
+                  val view = BotApp.observerService.panel(guild.getId, event.getUser.getId)
                   event.getHook
-                    .sendMessageEmbeds(ObserverEmbeds.panel(Some(stored)))
-                    .setComponents(ObserverEmbeds.controls(Some(stored)))
+                    .sendMessageComponents(ObserverEmbeds.panel(view).asJava)
+                    .useComponentsV2()
                     .setEphemeral(true)
                     .queue(_ => (), _ => ())
                   ensureRaidsChannels(guild, stored)

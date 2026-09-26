@@ -2,7 +2,7 @@ package com.tibiabot.observer
 
 import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
 import com.tibiabot.domain.time.Clock
-import com.tibiabot.persistence.ObserverRepository
+import com.tibiabot.persistence.{ObserverCoverageRepository, ObserverRepository}
 import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
@@ -56,7 +56,10 @@ final class ObserverService(
   /** The latest server save at or before an instant: mini world changes hold until
    *  the next one, which is how long an account's last good share of them lasts. */
   lastServerSave: Instant => Instant = at =>
-    ServerSaveSchedule.lastServerSave(at.atZone(Clock.Berlin)).toInstant
+    ServerSaveSchedule.lastServerSave(at.atZone(Clock.Berlin)).toInstant,
+  /** What each link's raid rules cover, kept when the rules are set, for the
+   *  coverage `/observer` shows (see [[panel]]). */
+  coverage: ObserverCoverageRepository = ObserverCoverageRepository.None
 ) extends StrictLogging {
   import ObserverService.RuleScope
 
@@ -419,18 +422,23 @@ final class ObserverService(
   private def applyRules(t: ObserverToken, credential: String, scope: RuleScope,
                          worldsOf: String => List[String]): Unit = {
     val who = s"'${t.userId}' in guild '${t.guildId}'"
-    def report(kind: String, attempt: => RulesResult): Unit =
+    def report(kind: String, attempt: => RulesResult): Option[RulesResult] =
       try {
         val result = attempt
-        if (!result.ok) logger.warn(s"Observer $kind rules were not set for $who: ${result.detail}")
-        else {
+        if (!result.ok) {
+          logger.warn(s"Observer $kind rules were not set for $who: ${result.detail}")
+          None
+        } else {
           val left = if (result.skipped.isEmpty) ""
             else s"; no room (limit ${result.limit.getOrElse("?")}) for ${result.skipped.mkString(", ")}"
           logger.info(s"Observer $kind rules set for $who on ${result.applied.size} world(s): " +
             s"${result.applied.mkString(", ")}$left")
+          Some(result)
         }
       } catch {
-        case ex: Throwable => logger.warn(s"Observer $kind rules failed for $who", ex)
+        case ex: Throwable =>
+          logger.warn(s"Observer $kind rules failed for $who", ex)
+          None
       }
     val worlds =
       try Some(wanted(t, scope, worldsOf))
@@ -442,18 +450,53 @@ final class ObserverService(
     worlds.foreach { ws =>
       if (ws.nonEmpty) {
         report("MWC", apiClient.ensureRules(credential, ws))
-        report("raid", apiClient.ensureRaidRules(credential, ws))
+        report("raid", apiClient.ensureRaidRules(credential, ws)).foreach(recordCoverage(t, _))
       } else {
         val cleared = try apiClient.clearRules(credential) catch {
           case ex: Throwable =>
             logger.warn(s"Observer rules could not be cleared for $who", ex)
             false
         }
-        if (cleared) logger.info(s"Observer rules cleared for $who: no guild tracks any of the account's worlds " +
-          s"(${if (t.worlds.isEmpty) "none known" else t.worlds.mkString(", ")})")
+        if (cleared) {
+          logger.info(s"Observer rules cleared for $who: no guild tracks any of the account's worlds " +
+            s"(${if (t.worlds.isEmpty) "none known" else t.worlds.mkString(", ")})")
+          forgetCoverage(t.guildId, t.userId)
+        }
       }
     }
   }
+
+  /** Keep what a link's raid rules now cover, and any area names that came with
+   *  them. An area id that still has no name is logged once: `/observer` can't show
+   *  it until it has one, and the fields Observer sent say where a name could be. */
+  private def recordCoverage(t: ObserverToken, result: RulesResult): Unit =
+    try {
+      coverage.setAreas(t.guildId, t.userId, result.regions)
+      coverage.setNames(result.areaNames)
+      val named = ObserverAreas.KnownNames ++ coverage.names()
+      val unnamed = result.regions.values.flatten.toSet.filterNot(named.contains).filterNot(reportedUnnamed.contains)
+      if (unnamed.nonEmpty) {
+        unnamed.foreach(reportedUnnamed.put(_, ()))
+        logger.warn(s"Observer area id(s) ${unnamed.toList.sorted.mkString(", ")} have no name, so /observer can't " +
+          s"show them; its explored areas carry the fields ${result.areaFields.mkString(", ")}")
+      }
+      val unlisted = result.areaNames.values.toSet.filterNot(n => ObserverAreas.raidAreas.exists(_.equalsIgnoreCase(n)))
+        .filterNot(reportedUnlisted.contains)
+      if (unlisted.nonEmpty) {
+        unlisted.foreach(reportedUnlisted.put(_, ()))
+        logger.info(s"Observer named area(s) the raid catalogue has no raids in, so /observer doesn't list them: " +
+          unlisted.toList.sorted.mkString(", "))
+      }
+    } catch {
+      case ex: Throwable => logger.warn(s"Could not keep what the Observer rules cover for '${t.userId}' in guild '${t.guildId}'", ex)
+    }
+
+  private val reportedUnnamed = TrieMap.empty[Int, Unit]
+  private val reportedUnlisted = TrieMap.empty[String, Unit]
+
+  private def forgetCoverage(guildId: String, userId: String): Unit =
+    try coverage.clearLink(guildId, userId)
+    catch { case ex: Throwable => logger.warn(s"Could not forget what the Observer link for '$userId' in guild '$guildId' covered", ex) }
 
   /** The worlds an account gets rules for, most wanted first. The bot's rules on
    *  an account are one set, so every link that is probably the same account (see
@@ -552,7 +595,10 @@ final class ObserverService(
           logger.warn(s"Failed to delete Observer token for '$userId' in guild '$guildId'", ex)
           false
       }
-    if (removed) tokens.remove(keyOf(guildId, userId))
+    if (removed) {
+      tokens.remove(keyOf(guildId, userId))
+      forgetCoverage(guildId, userId)
+    }
     removed
   }
 
@@ -561,6 +607,8 @@ final class ObserverService(
     try repository.deleteGuild(guildId)
     catch { case ex: Throwable => logger.warn(s"Failed to delete Observer tokens for guild '$guildId'", ex) }
     tokens.filterInPlace { case ((g, _), _) => g != guildId }
+    try coverage.clearGuild(guildId)
+    catch { case ex: Throwable => logger.warn(s"Failed to forget the Observer coverage for guild '$guildId'", ex) }
   }
 
   /** Drop a link for a member who has left the guild. */
@@ -568,8 +616,51 @@ final class ObserverService(
     try repository.deleteUser(guildId, userId)
     catch { case ex: Throwable => logger.warn(s"Failed to delete Observer token for '$userId' in guild '$guildId'", ex) }
     tokens.remove(keyOf(guildId, userId))
+    forgetCoverage(guildId, userId)
+  }
+
+  /** What `/observer` shows a member: their link, and the raid-area coverage of
+   *  the worlds this guild has set up — every one of them with no working link to
+   *  go by, or only those the linked account has characters on. An area counts as
+   *  covered when any working link, in any guild, has a raid rule over it on that
+   *  world; the member's own are marked. Read from the shared tables, so any bot
+   *  can answer. A read that fails shows no coverage rather than failing the
+   *  reply. */
+  def panel(guildId: String, userId: String): ObserverPanel = {
+    val token = statusFor(guildId, userId)
+    val setUp =
+      try guildWorlds(guildId).distinctBy(_.toLowerCase)
+      catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not read which worlds guild '$guildId' has set up for /observer", ex)
+          Nil
+      }
+    val shown = token match {
+      case Some(t) if t.status != ObserverStatus.Pending => setUp.filter(w => t.worlds.exists(_.equalsIgnoreCase(w)))
+      case _                                             => setUp
+    }
+    val (areas, names) =
+      try (coverage.liveAreas(shown), ObserverAreas.KnownNames ++ coverage.names())
+      catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not read the Observer coverage for guild '$guildId'", ex)
+          (Nil, ObserverAreas.KnownNames)
+      }
+    ObserverPanel(token, shown.map { world =>
+      val here = areas.filter(_.world.equalsIgnoreCase(world))
+      val covered = here.flatMap(a => names.get(a.areaId).map(_.toLowerCase -> (a.guildId == guildId && a.userId == userId)))
+        .groupMapReduce(_._1)(_._2)(_ || _)
+      WorldCoverage(world, ObserverAreas.raidAreas.flatMap(area => covered.get(area.toLowerCase).map(area -> _)).toMap)
+    })
   }
 }
+
+/** A world's raid areas that some working link covers, by the raid catalogue's name
+ *  for each, and whether the member looking is one of those links. */
+final case class WorldCoverage(world: String, covered: Map[String, Boolean])
+
+/** What `/observer` shows a member (see ObserverService.panel). */
+final case class ObserverPanel(token: Option[ObserverToken], worlds: List[WorldCoverage])
 
 object ObserverService {
 

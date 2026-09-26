@@ -2,12 +2,14 @@ package com.tibiabot.presentation
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
-import com.tibiabot.observer.{MiniWorldChangeCatalog, RaidCreature, RaidType}
+import com.tibiabot.observer.{MiniWorldChangeCatalog, ObserverAreas, ObserverPanel, RaidCreature, RaidType, WorldCoverage}
 import com.tibiabot.statistics.BossCatalogue
 import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.components.MessageTopLevelComponent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
 import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.components.container.{Container, ContainerChildComponent}
+import net.dv8tion.jda.api.components.mediagallery.{MediaGallery, MediaGalleryItem}
 import net.dv8tion.jda.api.components.section.Section
 import net.dv8tion.jda.api.components.separator.Separator
 import net.dv8tion.jda.api.components.textdisplay.TextDisplay
@@ -18,46 +20,107 @@ import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageCreateDa
 import java.time.Instant
 import scala.jdk.CollectionConverters._
 
-/** The `/observer` panel: a member's own Tibia Observer token status, with the
- *  Add / Remove controls. Ephemeral, so it only ever shows one member their own
- *  link. */
+/** The `/observer` panel — a member's own Tibia Observer link and what it adds to
+ *  this server, with the Add / Remove controls — and the Observer posts: the raid
+ *  stage cards and lines, and the mini world changes block. The panel is
+ *  ephemeral, so it only ever shows one member their own link. */
 object ObserverEmbeds {
 
-  private val tokenPage = "https://www.tibia.com/account/?subtopic=accountmanagement&page=tibiaobserver"
+  /** tibia.com's Connect page, where a member gets a token (tibia-bot-resources). */
+  val ConnectPicture = "https://violentbot.xyz/discord/observer/connect.png"
 
-  def panel(token: Option[ObserverToken]): MessageEmbed = {
-    val body = token match {
-      case None =>
-        s"""${Config.noEmoji} You have no **Tibia Observer** token configured.
-           |
-           |Press **Add** and paste the token from your [Tibia account]($tokenPage)
-           |(*Account Management → Tibia Observer → Connect*). You'll get mini world change
-           |alerts, and a raids channel for each of your account's worlds this server tracks —
-           |pooled from every linked member.""".stripMargin
-      case Some(t) =>
-        s"""${statusLine(t)}
-           |
-           |Press **Remove** to unlink.""".stripMargin
+  /** All the text a message's components may hold between them. */
+  private val TextLimit = 4000
+
+  /** The `/observer` reply: the card, then Add and Remove. `yes` and `no` are the
+   *  configured emoji; a test passes its own. */
+  def panel(view: ObserverPanel, yes: String = Config.yesEmoji, no: String = Config.noEmoji): List[MessageTopLevelComponent] =
+    List(panelCard(view, yes, no), controls(view.token))
+
+  /** The card. A heading, the member's link, then the raid-area coverage of the
+   *  worlds in `view` — each a label with a checklist of the areas under it — and
+   *  one line under them saying what to make of it. Sections have dividers
+   *  between them. */
+  def panelCard(view: ObserverPanel, yes: String = Config.yesEmoji, no: String = Config.noEmoji): Container = {
+    val status = view.token.map(_.status)
+    val intro = status match {
+      case None | Some(ObserverStatus.Pending) => "Link your Tibia account to add raid alerts and mini world changes for this server."
+      case _                                   => "Raid alerts and mini world changes, pooled from every linked member."
     }
-    new EmbedBuilder()
-      .setTitle("Tibia Observer")
-      .setColor(Embeds.BrandColor)
-      .setDescription(body)
-      .build()
+    val header = s"### 🔭 Tibia Observer\n-# $intro"
+    val statusText = view.token match {
+      // Joined explicitly: a multi-line literal takes the checkout's line endings.
+      case None => List(
+        s"$no You haven't linked a Tibia Observer token.",
+        "-# Click the **Add** button below and enter the token from your Tibia Account.",
+        "-# Account Management → Tibia Observer → Connect").mkString("\n")
+      case Some(t) => linkText(t, view.worlds.map(_.world), yes, no)
+    }
+    val footer = status match {
+      case None                                                    => Some("Link your account to add the areas you've explored.")
+      case Some(ObserverStatus.Linked)                             => Some("The areas in bold are the ones your account covers.")
+      case Some(ObserverStatus.NeedsRelink | ObserverStatus.Error) => Some("Add a fresh token to count your explored areas again.")
+      case Some(ObserverStatus.Pending)                            => None
+    }
+    val linkPart: List[ContainerChildComponent] =
+      if (view.token.isEmpty) List(TextDisplay.of(statusText), MediaGallery.of(MediaGalleryItem.fromUrl(ConnectPicture)))
+      else List(TextDisplay.of(statusText))
+    val coverage = coverageTexts(view.worlds, footer, header.length + statusText.length, yes, no).map(TextDisplay.of)
+    val sections = List(List(TextDisplay.of(header)), linkPart) ++ Option.when(coverage.nonEmpty)(coverage)
+    Container.of(sections.zipWithIndex.flatMap { case (s, i) => if (i == 0) s else divider :: s }.asJava)
   }
 
-  private def statusLine(t: ObserverToken): String = t.status match {
-    case ObserverStatus.Pending =>
-      s"${Config.yesEmoji} Token saved — it will be verified once linking is enabled."
+  private def divider: Separator = Separator.createDivider(Separator.Spacing.SMALL)
+
+  /** A member's link: working, with the worlds it covers here; waiting for a fresh
+   *  token; or stored before linking went live. */
+  private def linkText(t: ObserverToken, worlds: List[String], yes: String, no: String): String = t.status match {
     case ObserverStatus.Linked =>
       val who = t.accountLabel.map(a => s" as **$a**").getOrElse("")
-      val where = t.world.map(w => s" on **$w**").getOrElse("")
-      s"${Config.yesEmoji} Linked$who$where."
+      val here = if (worlds.isEmpty) "None of your worlds is set up here"
+        else s"Covering ${listed(worlds.map(w => s"**$w**"))} for this server"
+      s"$yes Linked$who\n-# $here"
     case ObserverStatus.NeedsRelink =>
-      s"${Config.noEmoji} Your link needs renewing — press **Add** with a fresh token."
+      val whose = t.accountLabel.map(a => s"the link for **$a**").getOrElse("your link")
+      s"$no Your link needs renewing — press **Add** with a fresh token.\n" +
+        s"-# Tibia Observer stopped accepting $whose. Until you add a new token, your explored areas aren't counted."
     case ObserverStatus.Error =>
-      s"${Config.noEmoji} Something went wrong with your link — try **Add** again."
+      s"$no Something went wrong with your link — try **Add** again."
+    case ObserverStatus.Pending =>
+      s"$yes Token saved — it will be verified once linking is enabled."
   }
+
+  private def listed(xs: List[String]): String =
+    if (xs.sizeIs <= 1) xs.mkString else s"${xs.init.mkString(", ")} and ${xs.last}"
+
+  /** One world's coverage: a label saying how many raid areas are covered, then
+   *  every area with `yes` or `no`, the member's own in bold. */
+  def worldCoverageText(w: WorldCoverage, yes: String = Config.yesEmoji, no: String = Config.noEmoji): String = {
+    val areas = ObserverAreas.raidAreas
+    val lines = ServerSaveCard.label(s"${w.world} · ${w.covered.size} of ${areas.size} raid areas") ::
+      areas.map(area => w.covered.get(area) match {
+        case Some(true)  => s"$yes **$area**"
+        case Some(false) => s"$yes $area"
+        case None        => s"$no $area"
+      })
+    lines.mkString("\n")
+  }
+
+  /** The coverage texts, as many worlds as fit in what the message has left after
+   *  `used` characters, then the footer. Should a guild have set up more worlds than
+   *  fit, the ones left out are named in a line of their own. Nothing when there are
+   *  no worlds to show. */
+  private[presentation] def coverageTexts(worlds: List[WorldCoverage], footer: Option[String], used: Int,
+                                          yes: String, no: String): List[String] =
+    if (worlds.isEmpty) Nil
+    else {
+      val texts = worlds.map(w => w.world -> worldCoverageText(w, yes, no))
+      val footerLine = footer.map(f => s"-# $f").toList
+      def more(rest: List[String]) = s"-# ${rest.size} more ${if (rest.sizeIs == 1) "world" else "worlds"} didn't fit: ${rest.mkString(", ")}"
+      def lines(n: Int) = texts.take(n).map(_._2) ++ Option.when(n < texts.size)(more(texts.drop(n).map(_._1))) ++ footerLine
+      val fits = (texts.size to 0 by -1).find(n => used + lines(n).map(_.length).sum <= TextLimit).getOrElse(0)
+      lines(fits)
+    }
 
   /** The mini world change art the block carried until 25 Sep 2026. Only read
    *  now, to recognise the block in a message posted before then. */
