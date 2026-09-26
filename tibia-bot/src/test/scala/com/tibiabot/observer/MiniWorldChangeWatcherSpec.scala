@@ -72,6 +72,18 @@ class MiniWorldChangeWatcherSpec extends AnyFunSuite with Matchers {
     h.amended should have size 1
   }
 
+  test("yesterday's changes going at server save is not a change, and the day's coming in is") {
+    val h = new Harness
+    h.feed = Some(mwc("Antica", "Fury Gate"))
+    h.tickAt(9, 50)
+    h.feed = Some(Map.empty) // the feed holds yesterday's back
+    h.tickAt(10, 1)
+    h.amended shouldBe empty
+    h.feed = Some(mwc("Antica", "Warpath"))
+    h.tickAt(10, 7)
+    h.amended.toList shouldBe List(Set("antica"))
+  }
+
   test("a failed poll is skipped without forgetting the last good set") {
     val h = new Harness
     h.feed = Some(mwc("Antica", "Fury Gate"))

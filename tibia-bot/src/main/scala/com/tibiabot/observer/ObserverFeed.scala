@@ -32,6 +32,13 @@ import scala.util.Try
  *  therefore goes on with the day's changes, and shows none rather than
  *  yesterday's once a server save passes without a fresh copy.
  *
+ *  Being fetched since the server save is not enough on its own, though: the feed
+ *  goes on reporting yesterday's changes for a while after it. So the copy also
+ *  keeps, per world, since when its changes have been what they are, and a world's
+ *  are only handed out once they differ from what it had before the save — see
+ *  `todays`. Until then the world has none, so the server-save message goes out
+ *  without them, and MiniWorldChangeWatcher adds them when they come in.
+ *
  *  Raids change by the minute, so their copy just expires: after
  *  [[ObserverFeed.PublishedFor]], a little over two of the primary's slowest polls.
  *
@@ -65,23 +72,49 @@ final class ObserverFeed(
   private def current(copy: MwcCopy, at: Instant): Boolean =
     !copy.fetchedAt.isBefore(lastServerSave(at))
 
-  /** The mini world changes now, keyed by lower-cased world: fetched (and published)
-   *  on a bot that talks to the API, read from the primary's copy on one that does
-   *  not. None when that failed, or the copy is missing or from before the latest
-   *  server save — the watcher sits such a poll out rather than read it as every
-   *  change ending. */
+  /** The worlds in a copy whose changes are the day's. A copy fetched before the
+   *  latest server save has none. One fetched since has a world's changes once they
+   *  have been what they are only since the save — they moved on from yesterday's,
+   *  or the world had none before it. A world that really does keep yesterday's
+   *  changes gets them from a copy fetched `SameAsYesterdayAfter` past the save,
+   *  when the feed has had its chance to roll over. */
+  private def todays(copy: MwcCopy, at: Instant): Map[String, List[MiniWorldChange]] = {
+    val save = lastServerSave(at)
+    if (copy.fetchedAt.isBefore(save)) Map.empty
+    else if (!copy.fetchedAt.isBefore(save.plus(SameAsYesterdayAfter))) copy.pool
+    else copy.pool.filter { case (world, _) => !copy.seenSince(world).isBefore(save) }
+  }
+
+  /** Since when each world's changes in a fresh pool have been what they are:
+   *  carried over from the last good copy for a world whose changes are the same
+   *  as there, `at` for one whose changes are new. A primary that has not fetched
+   *  since it started carries them over from its own published copy, so a restart
+   *  just after server save does not take yesterday's changes for new ones. */
+  private def seenSince(pool: Map[String, List[MiniWorldChange]], at: Instant): Map[String, Instant] = {
+    val previous = mwcSeen.map(_._2).orElse(if (mode == Publisher) read(MwcKey).flatMap(FeedJson.parseMwc) else None)
+    val before = previous.map(p => MiniWorldChangeWatcher.signatures(p.pool)).getOrElse(Map.empty)
+    MiniWorldChangeWatcher.signatures(pool).map { case (world, changes) =>
+      world -> previous.filter(_ => before.get(world).contains(changes)).map(_.seenSince(world)).getOrElse(at)
+    }
+  }
+
+  /** The day's mini world changes now (see `todays`), keyed by lower-cased world:
+   *  fetched (and published) on a bot that talks to the API, read from the
+   *  primary's copy on one that does not. None when that failed, or the copy is
+   *  missing or from before the latest server save — the watcher sits such a poll
+   *  out rather than read it as every change ending. */
   def refreshMwc(): Option[Map[String, List[MiniWorldChange]]] = {
     val at = now()
     val result = mode match {
       case Off      => None
       case Consumer => readCopy(at)
       case Standalone | Publisher =>
-        val fetched = fetchMwc().map(MwcCopy(at, _))
+        val fetched = fetchMwc().map(pool => MwcCopy(at, pool, seenSince(pool, at)))
         if (mode == Publisher) fetched.foreach(copy => write(MwcKey, FeedJson.mwc(copy), MwcKeptFor))
         fetched
     }
     result.foreach(copy => mwcSeen = Some(at -> copy))
-    result.map(_.pool)
+    result.map(todays(_, at))
   }
 
   /** The primary's copy, when it is current. Whether it is missing, from before the
@@ -116,7 +149,8 @@ final class ObserverFeed(
    *  world's changes to move on. */
   def takeAnsweredWithout(): Boolean = answeredWithout.getAndSet(false)
 
-  /** A world's active mini world changes, for the server-save message. */
+  /** A world's active mini world changes, for the server-save message: none while
+   *  the feed still reports yesterday's (see `todays`). */
   def mwcForWorld(world: String): List[MiniWorldChange] =
     mwcNow().getOrElse(world.toLowerCase, Nil)
 
@@ -127,9 +161,9 @@ final class ObserverFeed(
   private def mwcNow(): Map[String, List[MiniWorldChange]] = {
     val at = now()
     mwcSeen match {
-      case Some((askedAt, copy)) if askedAt.plus(ReuseFor).isAfter(at) && current(copy, at) => copy.pool
+      case Some((askedAt, copy)) if askedAt.plus(ReuseFor).isAfter(at) && current(copy, at) => todays(copy, at)
       case _ =>
-        refreshMwc().orElse(mwcSeen.map(_._2).filter(current(_, at)).map(_.pool)).getOrElse {
+        refreshMwc().orElse(mwcSeen.map(_._2).filter(current(_, at)).map(todays(_, at))).getOrElse {
           answeredWithout.set(true)
           Map.empty
         }
@@ -211,8 +245,19 @@ object ObserverFeed {
   /** How long a pool is reused before asking again. */
   val ReuseFor: Duration = Duration.ofMinutes(2)
 
-  /** A mini world change pool and when it was fetched from the API. */
-  private[observer] final case class MwcCopy(fetchedAt: Instant, pool: Map[String, List[MiniWorldChange]])
+  /** How long after server save a world's changes can still be yesterday's: the
+   *  server-save window, which the watcher polls closely for them to roll over.
+   *  A copy fetched later than this shows a world's changes even when they are the
+   *  same as before the save — that world really does have them again. */
+  val SameAsYesterdayAfter: Duration = Duration.ofMinutes(45)
+
+  /** A mini world change pool, when it was fetched from the API, and since when
+   *  each world's changes have been what they are. A world with no stamp (a copy
+   *  published before copies carried them) counts from when it was fetched. */
+  private[observer] final case class MwcCopy(fetchedAt: Instant, pool: Map[String, List[MiniWorldChange]],
+                                             since: Map[String, Instant] = Map.empty) {
+    def seenSince(world: String): Instant = since.getOrElse(world, fetchedAt)
+  }
 
   /** How the primary's copy read last time, on a secondary. */
   private sealed trait CopyState
@@ -223,8 +268,8 @@ object ObserverFeed {
   }
 }
 
-/** The published copies' wire format: `{fetchedAt, worlds: {world: [change, …]}}`
- *  and `{world: [raid, …]}`. */
+/** The published copies' wire format: `{fetchedAt, worlds: {world: [change, …]},
+ *  since: {world: instant}}` and `{world: [raid, …]}`. */
 private[observer] object FeedJson {
   import ObserverFeed.MwcCopy
 
@@ -237,13 +282,24 @@ private[observer] object FeedJson {
       "worlds" -> JsObject(copy.pool.map { case (world, changes) =>
         world -> JsArray(changes.map(c =>
           JsObject("world" -> JsString(c.world), "title" -> JsString(c.title), "body" -> JsString(c.body))).toVector)
-      })).compactPrint
+      }),
+      "since" -> JsObject(copy.since.map { case (world, at) => world -> JsString(at.toString) })).compactPrint
 
   /** None for a copy with no stamp — one published before copies carried it — as
-   *  well as one that does not parse: there is no telling which day it is from. */
+   *  well as one that does not parse: there is no telling which day it is from. A
+   *  copy without the per-world `since` stamps is fine: its worlds count from when
+   *  it was fetched. */
   def parseMwc(body: String): Option[MwcCopy] =
     Try {
       val root = body.parseJson.asJsObject
+      val since = root.fields.get("since").collect { case o: JsObject =>
+        o.fields.flatMap { case (world, value) =>
+          value match {
+            case JsString(at) => Try(Instant.parse(at)).toOption.map(world -> _)
+            case _            => None
+          }
+        }
+      }.getOrElse(Map.empty)
       for {
         fetchedAt <- str(root, "fetchedAt").flatMap(d => Try(Instant.parse(d)).toOption)
         worlds    <- root.fields.get("worlds").collect { case o: JsObject => o }
@@ -254,7 +310,7 @@ private[observer] object FeedJson {
           }.toList
           case _ => Nil
         })
-      })
+      }, since)
     }.toOption.flatten
 
   def raids(pool: Map[String, List[RaidAnnouncement]]): String =

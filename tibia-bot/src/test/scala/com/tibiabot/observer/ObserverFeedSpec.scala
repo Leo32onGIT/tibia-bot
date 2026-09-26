@@ -132,9 +132,74 @@ class ObserverFeedSpec extends AnyFunSuite with Matchers {
   }
 
   test("a copy keeps when it was fetched, and one without a stamp is not trusted") {
-    val copy = ObserverFeed.MwcCopy(Instant.parse("2026-09-24T08:05:00Z"), antica)
+    val copy = ObserverFeed.MwcCopy(Instant.parse("2026-09-24T08:05:00Z"), antica,
+      Map("antica" -> Instant.parse("2026-09-23T08:03:00Z")))
     FeedJson.parseMwc(FeedJson.mwc(copy)) shouldBe Some(copy)
+    // One from before the per-world stamps counts its worlds from when it was fetched.
+    FeedJson.parseMwc("""{"fetchedAt":"2026-09-24T08:05:00Z","worlds":""" +
+      """{"antica":[{"world":"Antica","title":"Fury Gate","body":"Near Venore."}]}}""")
+      .map(_.seenSince("antica")) shouldBe Some(Instant.parse("2026-09-24T08:05:00Z"))
     FeedJson.parseMwc("""{"antica":[{"world":"Antica","title":"Fury Gate","body":"Near Venore."}]}""") shouldBe None
+  }
+
+  private val anticaToday = Map("antica" -> List(MiniWorldChange("Antica", "Warpath", "Orcs march on Thais.")))
+
+  /** 09:50 and a quarter past server save in Berlin, on the day `Clock` starts. */
+  private val beforeSave = Instant.parse("2026-09-24T07:50:00Z")
+  private val afterSave = Instant.parse("2026-09-24T08:15:00Z")
+
+  test("after server save a world's changes are held back until they move on from yesterday's") {
+    val clock = new Clock
+    clock.at = beforeSave
+    var answer: Option[Map[String, List[MiniWorldChange]]] = Some(antica)
+    val feed = new ObserverFeed(ObserverFeed.Standalone, () => answer, () => Map.empty, new FakeRedis, () => clock.now())
+    feed.refreshMwc() shouldBe Some(antica)
+    clock.at = afterSave // the feed still reports yesterday's
+    feed.refreshMwc() shouldBe Some(Map.empty)
+    feed.mwcForWorld("Antica") shouldBe empty
+    feed.takeAnsweredWithout() shouldBe false
+    answer = Some(anticaToday)
+    clock.at = clock.at.plus(Duration.ofMinutes(4))
+    feed.refreshMwc() shouldBe Some(anticaToday)
+    feed.mwcForWorld("Antica") shouldBe anticaToday("antica")
+  }
+
+  test("a world that keeps yesterday's changes gets them once the server-save window is over") {
+    val clock = new Clock
+    clock.at = beforeSave
+    val feed = new ObserverFeed(ObserverFeed.Standalone, () => Some(antica), () => Map.empty, new FakeRedis, () => clock.now())
+    feed.refreshMwc()
+    clock.at = Instant.parse("2026-09-24T08:44:00Z")
+    feed.refreshMwc() shouldBe Some(Map.empty)
+    clock.at = Instant.parse("2026-09-24T08:45:00Z")
+    feed.refreshMwc() shouldBe Some(antica)
+  }
+
+  test("a world with no changes before server save gets the day's straight away") {
+    val clock = new Clock
+    clock.at = beforeSave
+    var answer: Option[Map[String, List[MiniWorldChange]]] = Some(Map.empty)
+    val feed = new ObserverFeed(ObserverFeed.Standalone, () => answer, () => Map.empty, new FakeRedis, () => clock.now())
+    feed.refreshMwc()
+    answer = Some(antica)
+    clock.at = afterSave
+    feed.refreshMwc() shouldBe Some(antica)
+  }
+
+  test("a primary restarted after server save, and its secondaries, hold yesterday's back too") {
+    val clock = new Clock
+    val redis = new FakeRedis
+    var answer: Option[Map[String, List[MiniWorldChange]]] = Some(antica)
+    clock.at = beforeSave
+    new ObserverFeed(ObserverFeed.Publisher, () => answer, () => Map.empty, redis, () => clock.now()).refreshMwc()
+    clock.at = afterSave
+    val restarted = new ObserverFeed(ObserverFeed.Publisher, () => answer, () => Map.empty, redis, () => clock.now())
+    val secondary = new ObserverFeed(ObserverFeed.Consumer, never, never, redis, () => clock.now())
+    restarted.refreshMwc() shouldBe Some(Map.empty)
+    secondary.refreshMwc() shouldBe Some(Map.empty)
+    answer = Some(anticaToday)
+    restarted.refreshMwc() shouldBe Some(anticaToday)
+    secondary.refreshMwc() shouldBe Some(anticaToday)
   }
 
   test("an answer with no changes to give is remembered once, for the watcher") {

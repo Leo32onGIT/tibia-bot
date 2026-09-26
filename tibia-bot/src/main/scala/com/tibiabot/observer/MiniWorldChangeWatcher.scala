@@ -10,18 +10,20 @@ import java.time.{Duration, Instant, ZonedDateTime}
  *  world's set changes.
  *
  *  The notifications message posts once TibiaData reports the new boosted boss and
- *  creature, but the Observer feed may roll over to the new day's changes at a
- *  different moment — possibly only once the game server is back up, several
- *  minutes after 10:00. So rather than trust whatever the feed said at posting time,
- *  this polls it (every `FastInterval` through the server-save window, every
+ *  creature, but the Observer feed rolls over to the new day's changes at a
+ *  different moment — several minutes after 10:00. Until it does, the feed holds a
+ *  world's changes back (see ObserverFeed.todays), so the message goes out without
+ *  them. This polls it (every `FastInterval` through the server-save window, every
  *  `SlowInterval` otherwise) and hands `amend` the worlds whose changes differ from
- *  the previous poll. Each update is logged with its offset from server save, which
- *  is what shows when the feed actually rolls over.
+ *  the previous poll, which is what adds them. Each update is logged with its
+ *  offset from server save, which is what shows when the feed actually rolls over.
  *
  *  The first poll only records what is active: there is nothing to compare it with,
- *  and the message it would amend was built from the same feed. A poll that failed
- *  (`fetch` returns `None`) is skipped without forgetting the last good set, so a
- *  sidecar hiccup never reads as every change ending.
+ *  and the message it would amend was built from the same feed. A poll after a
+ *  server save is compared with nothing rather than the poll before it: yesterday's
+ *  changes going is the save, not a change, and today's message never had them. A
+ *  poll that failed (`fetch` returns `None`) is skipped without forgetting the last
+ *  good set, so a sidecar hiccup never reads as every change ending.
  *
  *  A message can also go out while there are no changes to be had at all — right
  *  after server save, before a fresh pool is in, or while the feed is down.
@@ -43,7 +45,8 @@ final class MiniWorldChangeWatcher(
 ) extends StrictLogging {
   import MiniWorldChangeWatcher._
 
-  @volatile private var seen: Option[Map[String, Set[(String, String)]]] = None
+  /** The last good poll: when it ran and what was active then. */
+  @volatile private var seen: Option[(Instant, Map[String, Set[(String, String)]])] = None
   @volatile private var lastPoll: Instant = Instant.EPOCH
 
   def tick(): Unit =
@@ -61,9 +64,12 @@ final class MiniWorldChangeWatcher(
   private def poll(at: ZonedDateTime): Unit =
     fetch().foreach { byWorld =>
       val current = signatures(byWorld)
-      val moved = seen.map(changedWorlds(_, current)).getOrElse(Set.empty)
+      val save = ServerSaveSchedule.lastServerSave(at)
+      val moved = seen.map { case (polledAt, previous) =>
+        changedWorlds(if (polledAt.isBefore(save.toInstant)) Map.empty else previous, current)
+      }.getOrElse(Set.empty)
       if (moved.nonEmpty) {
-        val sinceSave = Duration.between(ServerSaveSchedule.lastServerSave(at), at).toMinutes
+        val sinceSave = Duration.between(save, at).toMinutes
         logger.info(s"Mini world changes updated ${sinceSave}m after server save on ${moved.size} world(s): " +
           moved.toList.sorted.mkString(", "))
       }
@@ -71,7 +77,7 @@ final class MiniWorldChangeWatcher(
       if (missed.nonEmpty)
         logger.info(s"Adding mini world changes to messages posted without them on ${missed.size} world(s)")
       if (moved.nonEmpty || missed.nonEmpty) amend(moved ++ missed)
-      seen = Some(current)
+      seen = Some(at.toInstant -> current)
     }
 }
 
