@@ -55,7 +55,7 @@ class ObserverPanelSpec extends AnyFunSuite with Matchers {
 
   test("linked: the account, the worlds it covers here, and each one's checklist with the member's areas in bold") {
     val p = parts(ObserverPanel(Some(token(ObserverStatus.Linked)), List(victoris)))
-    p.take(3) shouldBe List(heading, "divider", ":yes: Linked as **Keeper of Tibia**\n-# Covering **Victoris** for this server")
+    p.take(3) shouldBe List(heading, "divider", ":yes: Observer Token linked\n-# Covering **Victoris** for this server")
     p.last shouldBe "-# The areas in bold are the ones your account covers."
     // The coverage heading, right under the divider with nothing between.
     p(3) shouldBe "divider"
@@ -71,12 +71,12 @@ class ObserverPanelSpec extends AnyFunSuite with Matchers {
 
   test("two worlds covered here are named together") {
     parts(ObserverPanel(Some(token(ObserverStatus.Linked)), List(victoris, WorldCoverage("Antica", Map.empty))))(2) shouldBe
-      ":yes: Linked as **Keeper of Tibia**\n-# Covering **Victoris** and **Antica** for this server"
+      ":yes: Observer Token linked\n-# Covering **Victoris** and **Antica** for this server"
   }
 
   test("linked with no world set up here: no coverage at all") {
     parts(ObserverPanel(Some(token(ObserverStatus.Linked)), Nil)) shouldBe
-      List(heading, "divider", ":yes: Linked as **Keeper of Tibia**\n-# None of your worlds is set up here")
+      List(heading, "divider", ":yes: Observer Token linked\n-# None of your worlds is set up here")
   }
 
   test("a token that was unlinked or expired says so, then how to add one, as with none") {

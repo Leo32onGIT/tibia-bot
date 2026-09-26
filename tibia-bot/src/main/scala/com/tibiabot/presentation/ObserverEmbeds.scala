@@ -134,11 +134,11 @@ object ObserverEmbeds {
    *  Observer's side or expired, with how to add a fresh token; or stored before
    *  linking went live. */
   private def linkText(t: ObserverToken, worlds: List[String], yes: String, no: String): String = t.status match {
+    // Not the account's name in Observer: that's nothing players use or recognise.
     case ObserverStatus.Linked =>
-      val who = t.accountLabel.map(a => s" as **$a**").getOrElse("")
       val here = if (worlds.isEmpty) "None of your worlds is set up here"
         else s"Covering ${listed(worlds.map(w => s"**$w**"))} for this server"
-      s"$yes Linked$who\n-# $here"
+      s"$yes Observer Token linked\n-# $here"
     case ObserverStatus.NeedsRelink =>
       s"$no Your Observer token has been unlinked or has expired.\n$HowToLink"
     case ObserverStatus.Error =>
