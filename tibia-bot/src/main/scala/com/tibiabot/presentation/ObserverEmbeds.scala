@@ -32,15 +32,18 @@ object ObserverEmbeds {
   /** All the text a message's components may hold between them. */
   private val TextLimit = 4000
 
+  /** Over the worlds' checklists, in the same section. */
+  private val CoverageHeading = "### 🗺️ Raid Coverage"
+
   /** The `/observer` reply: the card, then Add and Remove. `yes` and `no` are the
    *  configured emoji; a test passes its own. */
   def panel(view: ObserverPanel, yes: String = Config.yesEmoji, no: String = Config.noEmoji): List[MessageTopLevelComponent] =
     List(panelCard(view, yes, no), controls(view.token))
 
   /** The card. A heading, the member's link, then the raid-area coverage of the
-   *  worlds in `view` — each a label with a checklist of the areas under it — and
-   *  one line under them saying what to make of it. Sections have dividers
-   *  between them. */
+   *  worlds in `view` under a heading of its own — each world a label with a
+   *  checklist of the areas under it — and one line under them saying what to make
+   *  of it. Sections have dividers between them. */
   def panelCard(view: ObserverPanel, yes: String = Config.yesEmoji, no: String = Config.noEmoji): Container = {
     val status = view.token.map(_.status)
     val intro = status match {
@@ -65,7 +68,10 @@ object ObserverEmbeds {
     val linkPart: List[ContainerChildComponent] =
       if (view.token.isEmpty) List(TextDisplay.of(statusText), MediaGallery.of(MediaGalleryItem.fromUrl(ConnectPicture)))
       else List(TextDisplay.of(statusText))
-    val coverage = coverageTexts(view.worlds, footer, header.length + statusText.length, yes, no).map(TextDisplay.of)
+    val coverage = coverageTexts(view.worlds, footer, header.length + statusText.length + CoverageHeading.length, yes, no) match {
+      case Nil   => Nil
+      case texts => (CoverageHeading :: texts).map(TextDisplay.of)
+    }
     val sections = List(List(TextDisplay.of(header)), linkPart) ++ Option.when(coverage.nonEmpty)(coverage)
     Container.of(sections.zipWithIndex.flatMap { case (s, i) => if (i == 0) s else divider :: s }.asJava)
   }

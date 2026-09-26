@@ -48,6 +48,7 @@ class ObserverPanelSpec extends AnyFunSuite with Matchers {
         "-# Account Management → Tibia Observer → Connect",
       "https://violentbot.xyz/discord/observer/connect.png",
       "divider",
+      "### 🗺️ Raid Coverage",
       ObserverEmbeds.worldCoverageText(victoris, ":yes:", ":no:"),
       "-# Link your account to add the areas you've explored.")
   }
@@ -56,7 +57,10 @@ class ObserverPanelSpec extends AnyFunSuite with Matchers {
     val p = parts(ObserverPanel(Some(token(ObserverStatus.Linked)), List(victoris)))
     p.take(3) shouldBe List(heading, "divider", ":yes: Linked as **Keeper of Tibia**\n-# Covering **Victoris** for this server")
     p.last shouldBe "-# The areas in bold are the ones your account covers."
-    val lines = p(4).split("\n").toList
+    // The coverage heading, right under the divider with nothing between.
+    p(3) shouldBe "divider"
+    p(4) shouldBe "### 🗺️ Raid Coverage"
+    val lines = p(5).split("\n").toList
     lines.head shouldBe "-# **VICTORIS · 2 OF 15 RAID AREAS**"
     lines.tail shouldBe ObserverAreas.raidAreas.map {
       case "Carlin" => ":yes: **Carlin**"
