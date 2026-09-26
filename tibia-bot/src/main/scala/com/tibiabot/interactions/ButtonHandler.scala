@@ -185,21 +185,14 @@ object ButtonHandler extends StrictLogging {
       // only names a death description links to a character page — so the press
       // reads them back out rather than relying on anything the bot still
       // remembers about a death it may have posted weeks ago.
-      val embeds = event.getMessage.getEmbeds
-      if (!embeds.isEmpty) {
-        val original = embeds.get(0)
-        val description = Option(original.getDescription).getOrElse("")
-        val section = presentation.ExivaList.sectionFor(description)
-        if (section.isEmpty) {
-          // Two people pressed at once, or the post names nobody to chase. The
-          // button has nothing to add either way.
-          event.getHook.editOriginalComponents().queue()
-        } else {
-          val updated = new EmbedBuilder(original).setDescription(description + section).build()
-          // The block stays once written, so the button is done. It is the only
-          // component an ally death carries, hence clearing rather than filtering.
-          event.getHook.editOriginalEmbeds(updated).setComponents().queue()
-        }
+      val charName = button.split("_").lift(2).getOrElse("")
+      presentation.DeathCard.read(event.getMessage, charName).foreach { post =>
+        val section = presentation.ExivaList.sectionFor(post.description)
+        // Empty when two people pressed at once, or the post names nobody to
+        // chase. Either way the button has nothing to add, so it goes; the block
+        // stays once written, so it goes then too.
+        val updated = if (section.isEmpty) post else post.copy(description = post.description + section)
+        event.getHook.editOriginal(presentation.DeathCard.edit(updated, None, Nil)).queue()
       }
     } else if (button.startsWith("death_screenshot_")) {
       val buttonParts = button.split("_")
@@ -288,29 +281,14 @@ object ButtonHandler extends StrictLogging {
 
             val currentScreenshot = screenshots(newIndex)
 
-            // Copy the existing death embed, only swapping the image/footer
-            val originalEmbed = event.getMessage.getEmbeds.get(0)
-            val embed = new EmbedBuilder(originalEmbed)
-              .setImage(currentScreenshot.screenshotUrl)
-              .setFooter(s"Screenshot added by ${currentScreenshot.addedName} • ${newIndex + 1}/${screenshots.length}")
-              .build()
-
-            val components = if (screenshots.length > 1) {
-              val baseButtons = List(
-                Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
-                Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
-                Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${screenshots.length}").asDisabled(),
-                Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
-              )
-              val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-              List(ActionRow.of(buttonsWithDelete.asJava))
-            } else {
-              val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
-              val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-              List(ActionRow.of(buttonsWithDelete.asJava))
+            // The same post, only the screenshot and its line swapped.
+            presentation.DeathCard.read(event.getMessage, charName).foreach { post =>
+              val shown = post.copy(screenshot = Some(presentation.DeathCard.Screenshot(currentScreenshot.screenshotUrl,
+                s"Screenshot added by ${currentScreenshot.addedName} • ${newIndex + 1}/${screenshots.length}")))
+              val row = presentation.DeathCard.screenshotRow(charName, deathTime, messageId, newIndex, screenshots.length, deletable = true)
+              event.getHook.editOriginal(presentation.DeathCard.edit(
+                shown, Some(presentation.DeathCard.cameraButton(charName, deathTime, messageId)), row)).queue()
             }
-
-            event.getHook.editOriginalEmbeds(embed).setComponents(components: _*).queue()
           }
         }
       }
@@ -334,44 +312,20 @@ object ButtonHandler extends StrictLogging {
 
           if (BotApp.deleteDeathScreenshot(guild.getId, charName, deathTime, screenshotToDelete.screenshotUrl, user.getId)) {
             val updatedScreenshots = BotApp.getDeathScreenshots(guild.getId, guild.getName, charName, deathTime)
-            val embeds = originalMessage.getEmbeds
+            val camera = Some(presentation.DeathCard.cameraButton(charName, deathTime, messageId))
 
-            if (embeds.size() > 0 && updatedScreenshots.nonEmpty) {
-              val newIndex = Math.min(currentIndex, updatedScreenshots.length - 1)
-              val newCurrentScreenshot = updatedScreenshots(newIndex)
-
-              val originalEmbed = embeds.get(0)
-              val updatedEmbed = new EmbedBuilder(originalEmbed)
-                .setImage(newCurrentScreenshot.screenshotUrl)
-                .setFooter(s"Screenshot added by ${newCurrentScreenshot.addedName} • ${newIndex + 1}/${updatedScreenshots.length}")
-                .build()
-
-              val components = if (updatedScreenshots.length > 1) {
-                val baseButtons = List(
-                  Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"),
-                  Button.primary(s"prev_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "◀"),
-                  Button.secondary(s"screenshot_info_${charName}_${deathTime}_${messageId}", s"${newIndex + 1}/${updatedScreenshots.length}").asDisabled(),
-                  Button.primary(s"next_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "▶")
-                )
-                val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-                List(ActionRow.of(buttonsWithDelete.asJava))
+            presentation.DeathCard.read(originalMessage, charName).foreach { post =>
+              if (updatedScreenshots.nonEmpty) {
+                val newIndex = Math.min(currentIndex, updatedScreenshots.length - 1)
+                val newCurrentScreenshot = updatedScreenshots(newIndex)
+                val shown = post.copy(screenshot = Some(presentation.DeathCard.Screenshot(newCurrentScreenshot.screenshotUrl,
+                  s"Screenshot added by ${newCurrentScreenshot.addedName} • ${newIndex + 1}/${updatedScreenshots.length}")))
+                val row = presentation.DeathCard.screenshotRow(charName, deathTime, messageId, newIndex, updatedScreenshots.length, deletable = true)
+                event.getHook.editOriginal(presentation.DeathCard.edit(shown, camera, row)).queue()
               } else {
-                val baseButtons = List(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot"))
-                val buttonsWithDelete = baseButtons :+ Button.danger(s"delete_screenshot_${charName}_${deathTime}_${messageId}_${newIndex}", "🗑️")
-                List(ActionRow.of(buttonsWithDelete.asJava))
+                // No screenshots left: the picture and its paging go, the camera stays
+                event.getHook.editOriginal(presentation.DeathCard.edit(post.copy(screenshot = None), camera, Nil)).queue()
               }
-
-              event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(components: _*).queue()
-            } else {
-              // No screenshots left: drop the image and show only the add button
-              val originalEmbed = embeds.get(0)
-              val updatedEmbed = new EmbedBuilder(originalEmbed)
-                .setImage(null)
-                .setFooter(null)
-                .build()
-
-              val addButton = List(ActionRow.of(Button.secondary(s"death_screenshot_${charName}_${deathTime}_${messageId}", "Add Screenshot")))
-              event.getHook.editOriginalEmbeds(updatedEmbed).setComponents(addButton: _*).queue()
             }
           } else {
             // deleteDeathScreenshot rejects anyone but the uploader or a server admin

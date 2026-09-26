@@ -1305,7 +1305,10 @@ class TibiaBot(
                   }
                 }
 
-                val limit = 4065
+                // A V2 message holds 4,000 characters across everything on it,
+                // and the card also carries the name, a ping and a screenshot's
+                // line; this leaves them room.
+                val limit = 3750
                 val header = s"$guildText$context <t:$epochSecond:R> at level ${charDeath.death.level.toInt}"
 
                 // this should only occur to pure suicides on bomb runes, or pure 'assists' deaths in yellow-skull friendy fire or retro/hardcore situations
@@ -1327,7 +1330,7 @@ class TibiaBot(
                 // this is the actual embed description
                 var embedText = s"$header\nby $killerText."
 
-                // if the length is over 4065 truncate it
+                // if the length is over the limit truncate it
                 if (embedText.length > limit) {
                   val newlineIndex = embedText.lastIndexOf('\n', limit)
                   embedText = embedText.substring(0, newlineIndex) + "\n:scissors: `out of space`"
@@ -1337,10 +1340,11 @@ class TibiaBot(
                 val showAlliesDeaths = worldData.headOption.map(_.showAlliesDeaths).getOrElse("true")
                 val showEnemiesDeaths = worldData.headOption.map(_.showEnemiesDeaths).getOrElse("true")
                 val embedCheck = presentation.DeathEmbeds.shouldShow(embedColor, showNeutralDeaths, showAlliesDeaths, showEnemiesDeaths)
-                val embed = presentation.DeathEmbeds.build(charName, charDeath.char.character.character.vocation, embedText, embedThumbnail, embedColor)
-
-                // return embed + poke
-                (embed, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond, charDeath.char.character.character.vocation, killer)
+                val post = presentation.DeathCard.Post(
+                  presentation.DeathCard.title(charName, charDeath.char.character.character.vocation),
+                  embedText, Some(embedThumbnail), embedColor)
+                // return the post + poke
+                (post, notablePoke, charName, embedText, charDeath.death.level.toInt, embedCheck, epochSecond, charDeath.char.character.character.vocation, killer)
               }
               val fullblessLevel = worldData.headOption.map(_.fullblessLevel).getOrElse(250)
               val minimumLevel = worldData.headOption.map(_.deathsMin).getOrElse(20)
@@ -1381,46 +1385,31 @@ class TibiaBot(
                     BotApp.attachDeathMessage(guildId, world, embed._3,
                       java.time.Instant.ofEpochSecond(embed._7), message.getId)
                 try {
-                  // Create screenshot button
-                  val screenshotButton = Button.secondary(
-                    s"death_screenshot_${embed._3}_${embed._7}_placeholder",
-                    "Add Screenshot"
-                  )
-                  val actionRow = ActionRow.of(screenshotButton)
-
+                  // Each death is one card, sent as a V2 message (see
+                  // presentation.DeathCard). A ping goes at its top; a plain death
+                  // is sent silently, as it always was.
+                  def send(ping: Option[String], button: Option[Button], silent: Boolean = false): Unit = {
+                    val action = deathsTextChannel.sendMessage(presentation.DeathCard.create(embed._1.copy(ping = ping), button))
+                    (if (silent) action.setSuppressedNotifications(true) else action).queue(noteDeathMessage)
+                  }
+                  // An enemy's player kill takes screenshots; the camera is the
+                  // whole button, on the name's line.
+                  val cameraButton = presentation.DeathCard.cameraButton(embed._3, embed._7)
                   // An ally death names people worth chasing, but only somebody
                   // about to chase them wants the list — so it is a press away
                   // rather than four lines every death carries. Nothing but the
                   // exiva icon on it: what it does is the icon.
-                  val exivaRow = ActionRow.of(
-                    Button.secondary(s"death_exiva_${embed._3}_${embed._7}", Emoji.fromFormatted(Config.exivaEmoji))
-                  )
+                  val exivaButton = presentation.DeathCard.exivaButton(embed._3, embed._7, Config.exivaEmoji)
 
                   // nemesis and enemy fullbless ignore the level filter
                   if (embed._2 == "nemesis") {
                     val shouldPing = guild.getRoleById(nemesisRole) != null && canPing(deathsTextChannel.getId)
-                    if (shouldPing) {
-                      deathsTextChannel.sendMessage(s"<@&$nemesisRole>")
-                        .setEmbeds(embed._1.build())
-                        .queue(noteDeathMessage)
-                    } else {
-                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                        .queue(noteDeathMessage)
-                    }
+                    send(Option.when(shouldPing)(s"<@&$nemesisRole>"), None)
                     recordDeath(embed._3, embed._5, embed._8, embed._9)
                   } else if (embed._2 == "allypk") {
                     if (embed._5 >= minimumLevel) {
                       val shouldPing = guild.getRoleById(allyHelpRole) != null && canPing(deathsTextChannel.getId)
-                      if (shouldPing) {
-                        deathsTextChannel.sendMessage(s"<@&$allyHelpRole>")
-                          .setEmbeds(embed._1.build())
-                          .setComponents(exivaRow)
-                          .queue(noteDeathMessage)
-                      } else {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .setComponents(exivaRow)
-                          .queue(noteDeathMessage)
-                      }
+                      send(Option.when(shouldPing)(s"<@&$allyHelpRole>"), Some(exivaButton))
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
                   } else if (embed._2 == "fullbless") {
@@ -1431,29 +1420,19 @@ class TibiaBot(
                       // belongs to one control now, the button an ally death
                       // carries, rather than being a line here and a button
                       // there. The name is in the title to copy either way.
-                      if (embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null) { // only poke for 250+
-                        deathsTextChannel.sendMessage(s"<@&$fullblessRole>")
-                          .setEmbeds(embed._1.build())
-                          .queue(noteDeathMessage)
-                      } else {
-                        deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                          .queue(noteDeathMessage)
-                      }
+                      val shouldPing = embed._5 >= fullblessLevel && guild.getRoleById(fullblessRole) != null // only poke for 250+
+                      send(Option.when(shouldPing)(s"<@&$fullblessRole>"), None)
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
                   } else if (embed._2 == "screenshot") {
                     if (embed._5 >= minimumLevel) {
-                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                        .setComponents(actionRow)
-                        .queue(noteDeathMessage)
+                      send(None, Some(cameraButton))
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
-                      }
+                    }
                   } else {
                     // for regular deaths check if level > /filter deaths <level>
                     if (embed._5 >= minimumLevel) {
-                      deathsTextChannel.sendMessageEmbeds(embed._1.build())
-                        .setSuppressedNotifications(true)
-                        .queue(noteDeathMessage)
+                      send(None, None, silent = true)
                       recordDeath(embed._3, embed._5, embed._8, embed._9)
                     }
                   }
