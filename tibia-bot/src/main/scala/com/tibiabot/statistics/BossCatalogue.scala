@@ -19,7 +19,12 @@ import scala.util.Try
  *
  *  `predict` is false for the seventeen whose cycle is not a fixed window. They
  *  are still recorded — a kill is a fact regardless — and simply will not be
- *  predicted. */
+ *  predicted.
+ *
+ *  `creature` is true for the three that TibiaWiki files as bestiary creatures
+ *  rather than bosses — Yeti, Albino Dragon, Midnight Panther. They spawn on a
+ *  cycle like the rest, so they belong here; the flag only changes the icon the
+ *  Bosses Due card gives them, which would otherwise be the nemesis one. */
 final case class Boss(
     name: String,
     raceName: Option[String],
@@ -27,7 +32,8 @@ final case class Boss(
     windowMin: Int,
     windowMax: Int,
     spawnPoints: Int,
-    category: String
+    category: String,
+    creature: Boolean = false
 ) {
 
   /** The name to look for in a kill statistics entry. */
@@ -78,8 +84,10 @@ object BossCatalogue extends StrictLogging {
             windowMax <- c.downField("windowMax").as[Int]
             spawnPoints <- c.downField("spawnPoints").as[Option[Int]].map(_.getOrElse(1))
             category <- c.downField("category").as[Option[String]].map(_.getOrElse(""))
+            // Absent means a boss; only the three creatures carry it.
+            creature <- c.downField("creature").as[Option[Boolean]].map(_.getOrElse(false))
           } yield Boss(name.trim, raceName.map(_.trim).filter(_.nonEmpty), predict,
-            windowMin, windowMax, spawnPoints, category.trim)
+            windowMin, windowMax, spawnPoints, category.trim, creature)
         })
       ).left.map(_.getMessage)
     } yield bosses

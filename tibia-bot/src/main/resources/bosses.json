@@ -1,5 +1,5 @@
 {
-  "_source": "Spawn windows from github.com/kik-tibia/boss-tracker (MIT, (c) 2023 kik-tibia), data-example/boss-list.json. windowMin/windowMax are days between spawns; spawnPoints is how many places the boss can appear; raceName is how the boss is named in tibia.com kill statistics when that differs from its own name; predict:false marks a boss whose cycle is not a fixed window. Corrected against the live endpoint on 2026-09-09: upstream mapped Rotworm Queen to \"Rotworm Queens\", which tibia.com does not use — the singular is the race name, verified present on Antica, Vunira, Secura, Refugia and Harmonia while the plural appears on no world. \"yetis\", \"midnight panthers\" and \"albino dragons\" were checked the same way and are correct.",
+  "_source": "Spawn windows from github.com/kik-tibia/boss-tracker (MIT, (c) 2023 kik-tibia), data-example/boss-list.json. windowMin/windowMax are days between spawns; spawnPoints is how many places the boss can appear; raceName is how the boss is named in tibia.com kill statistics when that differs from its own name; predict:false marks a boss whose cycle is not a fixed window. creature:true marks one that TibiaWiki counts as a bestiary creature rather than a boss (checked 2026-09-26: Yeti, Albino Dragon and Midnight Panther, the only three), which the Bosses Due card marks with the charm icon instead of the nemesis one. Corrected against the live endpoint on 2026-09-09: upstream mapped Rotworm Queen to \"Rotworm Queens\", which tibia.com does not use — the singular is the race name, verified present on Antica, Vunira, Secura, Refugia and Harmonia while the plural appears on no world. \"yetis\", \"midnight panthers\" and \"albino dragons\" were checked the same way and are correct.",
   "bosses": [
     {
       "name": "Ferumbras",
@@ -102,6 +102,7 @@
     {
       "name": "Yeti",
       "raceName": "yetis",
+      "creature": true,
       "windowMin": 18,
       "windowMax": 25,
       "spawnPoints": 1,
@@ -322,6 +323,7 @@
     {
       "name": "Albino Dragon",
       "raceName": "albino dragons",
+      "creature": true,
       "predict": false,
       "windowMin": 1,
       "windowMax": 1,
@@ -403,6 +405,7 @@
     {
       "name": "Midnight Panther",
       "raceName": "midnight panthers",
+      "creature": true,
       "predict": false,
       "windowMin": 2,
       "windowMax": 4,

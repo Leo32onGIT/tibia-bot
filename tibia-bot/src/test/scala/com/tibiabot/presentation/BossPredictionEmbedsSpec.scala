@@ -13,15 +13,17 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
   private val day = LocalDate.of(2026, 9, 10)
   private val title = "<:boss:1195770698401075281>"
   private val icon = "<:nemesis:1024708740810821662>"
+  private val charm = "<:charm:1553322090973634601>"
 
-  private def boss(name: String, min: Int = 12, max: Int = 28, spawnPoints: Int = 1) =
-    Boss(name, scala.None, predict = true, min, max, spawnPoints, "Profitable")
+  private def boss(name: String, min: Int = 12, max: Int = 28, spawnPoints: Int = 1, creature: Boolean = false) =
+    Boss(name, scala.None, predict = true, min, max, spawnPoints, "Profitable", creature)
 
   /** A prediction built the way the predictor builds one, so the window instants
    *  are derived rather than asserted into place. */
-  private def prediction(name: String, daysSince: Int, min: Int = 12, max: Int = 28, spawns: Int = 1) =
+  private def prediction(name: String, daysSince: Int, min: Int = 12, max: Int = 28, spawns: Int = 1,
+                         creature: Boolean = false) =
     BossPredictor.predict(
-      boss(name, min, max, spawns),
+      boss(name, min, max, spawns, creature),
       List.fill(spawns)((day.minusDays(daysSince.toLong), 1)),
       day).get
 
@@ -32,7 +34,7 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
   /** Stands in for the wiki lookup: everything resolves but "Nowiki". */
   private val wiki: String => Option[String] = name => if (name == "Nowiki") scala.None else Some(name)
 
-  private def card(r: DailyReport) = BossPredictionEmbeds.build(r, title, icon, wiki)
+  private def card(r: DailyReport) = BossPredictionEmbeds.build(r, title, icon, charm, wiki)
 
   private def build(r: DailyReport) = card(r).get
 
@@ -77,6 +79,14 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
       row should startWith(icon)
       row should not include title
     }
+  }
+
+  test("a rare creature is led by the charm icon, not the nemesis one") {
+    // Yeti is a bestiary creature that spawns on a cycle, not a boss.
+    val text = build(report(List(furyosa, prediction("Yeti", 20, 18, 25, creature = true)))).text
+    text should include(s"$charm **[Yeti](https://tibia.fandom.com/wiki/Yeti)**")
+    text should not include s"$icon **[Yeti]"
+    text should include(s"$icon **[Furyosa]")
   }
 
   test("a boss's name links to its wiki page") {

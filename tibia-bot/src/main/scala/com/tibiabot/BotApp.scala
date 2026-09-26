@@ -1871,7 +1871,7 @@ object BotApp extends App with StrictLogging {
         report, Config.creatureEmoji, Config.specialKillEmojis.getOrElse(_, ""),
         Config.creatureWiki.titleFor).toList :::
       presentation.BossPredictionEmbeds.build(
-        report, Config.bossEmoji, Config.nemesisEmoji, Config.creatureWiki.titleFor).toList
+        report, Config.bossEmoji, Config.nemesisEmoji, Config.charmEmoji, Config.creatureWiki.titleFor).toList
 
   /** The statistics channel for one target, if this bot can write to it. */
   private def statisticsChannelFor(

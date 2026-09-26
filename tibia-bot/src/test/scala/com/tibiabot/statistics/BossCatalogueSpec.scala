@@ -61,6 +61,12 @@ class BossCatalogueSpec extends AnyFunSuite with Matchers {
     BossCatalogue.byRace.get("players") shouldBe None
   }
 
+  test("exactly the three bestiary creatures are marked as creatures") {
+    // Per TibiaWiki, checked 26 Sep 2026: every other entry is a boss.
+    BossCatalogue.bosses.filter(_.creature).map(_.name) should contain theSameElementsAs
+      List("Yeti", "Albino Dragon", "Midnight Panther")
+  }
+
   test("the world bosses carry the long windows that make them worth predicting") {
     val ferumbras = BossCatalogue.bosses.find(_.name == "Ferumbras")
     ferumbras.map(_.windowMin) shouldBe Some(161)

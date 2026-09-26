@@ -43,18 +43,20 @@ object BossPredictionEmbeds {
    *  @param titleIcon the icon on the heading — the boosted-boss one, which
    *                   reads as "bosses" in general rather than as any one of them
    *  @param bossIcon  the icon that leads every boss row
+   *  @param creatureIcon the icon that leads a row for a rare creature rather
+   *                   than a boss — Yeti, say — which the boss one misnames
    *  @param bossTitle the wiki's page title for a boss, by name, to link it to;
    *                   None for one the wiki lookup does not match, which reads
    *                   unlinked
    */
-  def build(report: DailyReport, titleIcon: String, bossIcon: String,
+  def build(report: DailyReport, titleIcon: String, bossIcon: String, creatureIcon: String,
             bossTitle: String => Option[String]): Option[Part] = {
     val due = report.dueBosses
     if (due.isEmpty && report.predictions.isEmpty && report.awaitingSighting == 0) None
     else {
       val heading = s"## $titleIcon Bosses Due"
       val blocks =
-        if (due.nonEmpty) heading :: groups(due, bossIcon, bossTitle)
+        if (due.nonEmpty) heading :: groups(due, Icons(bossIcon, creatureIcon), bossTitle)
         else if (report.predictions.nonEmpty)
           List(s"$heading\n*No boss is inside a spawn window today, out of ${report.predictions.size} being tracked.*")
         else List(s"$heading\n*Not enough history yet to predict anything — see below.*")
@@ -62,13 +64,19 @@ object BossPredictionEmbeds {
     }
   }
 
+  /** What leads a row: the boss icon, or the creature one for the few rare
+   *  creatures the catalogue tracks alongside the bosses. */
+  private final case class Icons(boss: String, creature: String) {
+    def of(prediction: BossPrediction): String = if (prediction.boss.creature) creature else boss
+  }
+
   /** The due bosses, high chance then low, each group under its dot. */
-  private def groups(due: List[BossPrediction], bossIcon: String, bossTitle: String => Option[String]): List[String] =
+  private def groups(due: List[BossPrediction], icons: Icons, bossTitle: String => Option[String]): List[String] =
     List(
       (Chance.High, ":green_circle:", "High chance"),
       (Chance.Low, ":yellow_circle:", "Low chance")
     ).flatMap { case (chance, dot, label) =>
-      val rows = due.filter(_.best == chance).map(line(_, bossIcon, bossTitle))
+      val rows = due.filter(_.best == chance).map(line(_, icons, bossTitle))
       Option.when(rows.nonEmpty)(section(label, rows, icon = dot))
     }
 
@@ -78,13 +86,13 @@ object BossPredictionEmbeds {
    *  A boss with several spawn points says how many of them are up, since "two
    *  of four Rotworm Queens are due" is a different trip from one. The count
    *  sits outside the link. */
-  private def line(prediction: BossPrediction, bossIcon: String, bossTitle: String => Option[String]): String = {
+  private def line(prediction: BossPrediction, icons: Icons, bossTitle: String => Option[String]): String = {
     val leading = prediction.leading
     val spawns = if (leading.sizeIs > 1) s" ×${leading.size}" else ""
     val when = leading.headOption.map(timing).getOrElse("")
     val name = prediction.boss.name
     val shown = bossTitle(name).fold(name)(page => s"[$name](${CreatureWiki.urlForTitle(page)})")
-    s"$bossIcon **$shown**$spawns${StatLines.Dot}$when"
+    s"${icons.of(prediction)} **$shown**$spawns${StatLines.Dot}$when"
   }
 
   /** What the window is doing, as a relative timestamp.

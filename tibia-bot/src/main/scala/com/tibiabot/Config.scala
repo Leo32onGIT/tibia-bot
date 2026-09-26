@@ -292,6 +292,7 @@ object Config {
 
  val bossEmoji: String = discord.getString("boss-emoji")
  val creatureEmoji: String = discord.getString("creature-emoji")
+ val charmEmoji: String = discord.getString("charm-emoji")
  val torchOnEmoji: String = discord.getString("torch-on-emoji")
  val torchOffEmoji: String = discord.getString("torch-off-emoji")
  val satchelEmoji: String = discord.getString("satchel-emoji")
