@@ -445,6 +445,22 @@ final class ChannelService(
         (e: Throwable) => logger.warn(s"Failed to send boosted boss/creature message for Guild ID: '${guild.getId}' Guild Name: '${guild.getName}':", e)
       )
 
+  /** Put the boosted message back at the bottom of the notifications channel, below
+   *  a role card `/setup` has just posted: posted again with the same boss and
+   *  creature, still for the world it was for, and the old one deleted. Nothing
+   *  happens when it is gone; the next server save posts it. `fallbackWorld` is
+   *  only for a guild with no world on record for it. */
+  private def moveBoostedToBottom(channel: TextChannel, guild: Guild, fallbackWorld: String): Unit = {
+    val config = discordRetrieveConfig(guild)
+    val world = config.get("last_world").flatMap(Option(_)).filter(_.nonEmpty).getOrElse(fallbackWorld)
+    config.get("boosted_messageid").filter(id => id != null && id != "0")
+      .flatMap(id => Try(channel.retrieveMessageById(id).complete()).toOption)
+      .foreach { existing =>
+        sendBoostedNotifications(channel, guild, world, ObserverEmbeds.boostedEmbedsOf(ServerSaveCard.blocksOf(existing)))
+        existing.delete().queue(_ => (), _ => ())
+      }
+  }
+
   /** Post a world's role card (see presentation.RoleCard) into the notifications
    *  channel, and keep its id on the world, in the database and in the cache the
    *  card's buttons read their world from. The world's row must exist already.
@@ -789,6 +805,9 @@ final class ChannelService(
       val masslogRole = getOrCreateRole(guild, s"$world Masslog", new Color(219, 175, 72))
       val bountyRole = getOrCreateRole(guild, s"$world Bounty", new Color(139, 69, 19))
 
+      // The notifications channel, when this /setup makes it. Its boosted message
+      // waits until the world's role card is up, so the card sits above it.
+      var madeNotifications: Option[TextChannel] = None
       // see if admin channels exist
       val discordConfig = discordRetrieveConfig(guild)
       if (discordConfig.isEmpty) {
@@ -812,8 +831,7 @@ final class ChannelService(
         discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
         postCooldownTracker(boostedChannel, guild)
-
-        postBoostedNotifications(boostedChannel, guild, world)
+        madeNotifications = Some(boostedChannel)
       } else {
         var adminCategoryCheck = guild.getCategoryById(discordConfig("admin_category"))
         val adminChannelCheck = guild.getTextChannelById(discordConfig("admin_channel"))
@@ -845,11 +863,12 @@ final class ChannelService(
           discordUpdateConfig(guild, "", "", boostedChannel.getId, "", world)
 
           postCooldownTracker(boostedChannel, guild)
-
-          postBoostedNotifications(boostedChannel, guild, world)
+          madeNotifications = Some(boostedChannel)
         }
       }
       if (!paywallService.canAssignSeat(event.getUser.getId, guild.getId, world)) {
+        // No card is coming, so nothing to wait for.
+        madeNotifications.foreach(postBoostedNotifications(_, guild, world))
         s"${Config.noEmoji} You've used all **${paywallService.effectiveSeatLimit(event.getUser.getId)}** of your Patreon seats. Free one up with `/remove` on another world, then try again."
       } else {
         // captured before worldCreateConfig runs below, since afterward this
@@ -892,6 +911,9 @@ final class ChannelService(
         Option(guild.getTextChannelById(discordRetrieveConfig(guild)("boosted_channel"))).filter(_.canTalk()).foreach { notifications =>
           postRoleCard(notifications, guild, world,
             RoleCard.card(world, fullblessRole.getId, nemesisRole.getId, allyPkRole.getId, masslogRole.getId, bountyRole.getId, "250"))
+          // The boosted message goes below the card, at the bottom of the channel.
+          if (madeNotifications.isDefined) postBoostedNotifications(notifications, guild, world)
+          else moveBoostedToBottom(notifications, guild, world)
         }
         paywallService.assignSeat(event.getUser.getId, event.getUser.getName, guild.getId, world)
         if (isFirstWorldForGuild) {
