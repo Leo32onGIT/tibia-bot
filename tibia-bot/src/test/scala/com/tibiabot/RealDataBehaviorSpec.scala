@@ -1,6 +1,6 @@
 package com.tibiabot
 
-import com.tibiabot.presentation.{BoostedEmbeds, DeathCard}
+import com.tibiabot.presentation.{BoostedEmbeds, DeathEmbeds}
 import com.tibiabot.tibiadata.JsonSupport
 import com.tibiabot.tibiadata.response._
 import com.tibiabot.tracking.{LevelRecord, LevelTracker, OnlineTracker}
@@ -46,16 +46,15 @@ class RealDataBehaviorSpec extends AnyFunSuite with Matchers with JsonSupport {
     tracker.shouldRecord(name, level, lastLogin.plusHours(1)) shouldBe true
   }
 
-  test("a real character death renders through the production death card") {
+  test("a real character death renders through the production death embed") {
     val sheet = fixture("character.json").parseJson.convertTo[CharacterResponse].character
     val ch = sheet.character
     val death = sheet.deaths.getOrElse(Nil).headOption.getOrElse(fail("fixture character has no deaths"))
 
-    val post = DeathCard.Post(DeathCard.title(ch.name, ch.vocation), death.reason, Some("https://x/t.gif"), 3092790)
-    post.title should include(ch.name)             // production title = vocation emoji + real name
-    post.description shouldBe death.reason         // real TibiaData death reason flows through
-    post.description should not be empty
-    DeathCard.create(post, None).isUsingComponentsV2 shouldBe true
+    val embed = DeathEmbeds.build(ch.name, ch.vocation, death.reason, "https://x/t.gif", 3092790).build()
+    embed.getTitle should include(ch.name)         // production title = vocation emoji + real name
+    embed.getDescription shouldBe death.reason     // real TibiaData death reason flows through
+    embed.getDescription should not be empty
   }
 
   test("real death killers from the API drive the production killer-text logic") {

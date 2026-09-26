@@ -2,10 +2,8 @@ package com.tibiabot.interactions
 
 import com.tibiabot.{BotApp, Config}
 import com.tibiabot.domain.PendingScreenshot
-import com.tibiabot.presentation.DeathCard
 import com.typesafe.scalalogging.StrictLogging
 import net.dv8tion.jda.api.EmbedBuilder
-import net.dv8tion.jda.api.entities.Message
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import net.dv8tion.jda.api.components.actionrow.ActionRow
@@ -52,7 +50,46 @@ object ScreenshotMessageHandler extends StrictLogging {
               val channel = guild.getTextChannelById(pending.channelId)
               if (channel != null) {
                 channel.retrieveMessageById(pending.messageId).queue(message => {
-                  if (showLatest(message, pending, user.getId, user.getName, imageUrl)) {
+                  val embeds = message.getEmbeds
+                  if (embeds.size() > 0) {
+                    val originalEmbed = embeds.get(0)
+                    val updatedEmbed = new EmbedBuilder(originalEmbed)
+
+                    val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
+                    val screenshotCount = screenshots.length
+                    val latestIndex = Math.max(0, screenshotCount - 1) // screenshots are stored oldest-first, so the last one is newest
+
+                    val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
+                    if (latestScreenshot != null) {
+                      updatedEmbed.setImage(latestScreenshot.screenshotUrl)
+                        .setFooter(s"Screenshot added by ${latestScreenshot.addedName} • ${screenshotCount}/${screenshotCount}")
+                    } else {
+                      updatedEmbed.setImage(imageUrl)
+                        .setFooter(s"Screenshot added by ${user.getName}")
+                    }
+
+                    val buttons = if (screenshotCount > 1) {
+                      val baseButtons = List(
+                        Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", Emoji.fromUnicode("📷")),
+                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
+                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
+                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
+                      )
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
+                    } else {
+                      val baseButtons = List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", Emoji.fromUnicode("📷")))
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
+                    }
+
+                    message.editMessageEmbeds(updatedEmbed.build()).setComponents(ActionRow.of(buttons.asJava)).queue()
 
                     // Confirm with a reaction, then remove the user's upload message
                     event.getMessage.addReaction(Emoji.fromUnicode("✅")).queue(_ => {
@@ -104,7 +141,46 @@ object ScreenshotMessageHandler extends StrictLogging {
               val channel = guild.getTextChannelById(pending.channelId)
               if (channel != null) {
                 channel.retrieveMessageById(pending.messageId).queue(message => {
-                  if (showLatest(message, pending, user.getId, user.getName, imageUrl)) {
+                  val embeds = message.getEmbeds
+                  if (embeds.size() > 0) {
+                    val originalEmbed = embeds.get(0)
+                    val updatedEmbed = new EmbedBuilder(originalEmbed)
+
+                    val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
+                    val screenshotCount = screenshots.length
+                    val latestIndex = Math.max(0, screenshotCount - 1) // screenshots are stored oldest-first, so the last one is newest
+
+                    val latestScreenshot = if (screenshots.nonEmpty) screenshots.last else null
+                    if (latestScreenshot != null) {
+                      updatedEmbed.setImage(latestScreenshot.screenshotUrl)
+                        .setFooter(s"Screenshot added by ${latestScreenshot.addedName} • ${screenshotCount}/${screenshotCount}")
+                    } else {
+                      updatedEmbed.setImage(imageUrl)
+                        .setFooter(s"Screenshot added by ${user.getName}")
+                    }
+
+                    val buttons = if (screenshotCount > 1) {
+                      val baseButtons = List(
+                        Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", Emoji.fromUnicode("📷")),
+                        Button.primary(s"prev_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "◀"),
+                        Button.secondary(s"screenshot_info_${pending.charName}_${pending.deathTime}_${pending.messageId}", s"${screenshotCount}/${screenshotCount}").asDisabled(),
+                        Button.primary(s"next_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "▶")
+                      )
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
+                    } else {
+                      val baseButtons = List(Button.secondary(s"death_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}", Emoji.fromUnicode("📷")))
+                      if (latestScreenshot != null && latestScreenshot.addedBy == user.getId) {
+                        baseButtons :+ Button.danger(s"delete_screenshot_${pending.charName}_${pending.deathTime}_${pending.messageId}_${latestIndex}", "🗑️")
+                      } else {
+                        baseButtons
+                      }
+                    }
+
+                    message.editMessageEmbeds(updatedEmbed.build()).setComponents(ActionRow.of(buttons.asJava)).queue()
 
                     logger.info(s"Screenshot uploaded successfully via DM for ${pending.charName} death at ${pending.deathTime} in guild ${guild.getName}")
                   }
@@ -144,24 +220,4 @@ object ScreenshotMessageHandler extends StrictLogging {
       }
     }
   }
-
-  /** Show the newest screenshot on the death post, with its paging, and delete
-   *  for whoever added it. False when the message is not a death post. */
-  private def showLatest(message: Message, pending: PendingScreenshot, userId: String, userName: String,
-                         imageUrl: String): Boolean =
-    DeathCard.read(message, pending.charName) match {
-      case None => false
-      case Some(post) =>
-        val screenshots = BotApp.getDeathScreenshots(pending.guildId, pending.world, pending.charName, pending.deathTime)
-        val count = screenshots.length
-        val latestIndex = math.max(0, count - 1) // screenshots are stored oldest-first, so the last one is newest
-        val latest = screenshots.lastOption
-        val shot = latest.fold(DeathCard.Screenshot(imageUrl, s"Screenshot added by $userName"))(newest =>
-          DeathCard.Screenshot(newest.screenshotUrl, s"Screenshot added by ${newest.addedName} • $count/$count"))
-        val row = DeathCard.screenshotRow(pending.charName, pending.deathTime, pending.messageId, latestIndex, count,
-          deletable = latest.exists(_.addedBy == userId))
-        message.editMessage(DeathCard.edit(post.copy(screenshot = Some(shot)),
-          Some(DeathCard.cameraButton(pending.charName, pending.deathTime, pending.messageId)), row)).queue()
-        true
-    }
 }
