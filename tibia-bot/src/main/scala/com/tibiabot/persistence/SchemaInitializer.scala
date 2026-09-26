@@ -1,5 +1,6 @@
 package com.tibiabot.persistence
 
+import com.tibiabot.domain.CooldownKind
 import com.tibiabot.persistence.jdbc.JdbcSupport
 import com.typesafe.scalalogging.StrictLogging
 
@@ -182,7 +183,8 @@ final class SchemaInitializer(connectionProvider: ConnectionProvider) extends St
            |userid VARCHAR(255) NOT NULL,
            |time VARCHAR(255) NOT NULL,
            |tag VARCHAR(255),
-           |bot_id VARCHAR(255) NOT NULL DEFAULT ''
+           |bot_id VARCHAR(255) NOT NULL DEFAULT '',
+           |kind VARCHAR(32) NOT NULL DEFAULT '${CooldownKind.Satchel.id}'
            |);""".stripMargin
 
       // Which incoming world transfers have already been announced. World-scoped

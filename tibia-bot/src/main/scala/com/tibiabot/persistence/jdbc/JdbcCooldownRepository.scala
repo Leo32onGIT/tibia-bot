@@ -102,6 +102,8 @@ final class JdbcCooldownRepository(connectionProvider: ConnectionProvider) exten
 
   def del(user: String, kind: CooldownKind, tag: String): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val ensure = conn.createStatement(); ensureTable(ensure); ensure.close()
+
       val deleteStatement =
         conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND COALESCE(tag, '') = ? AND kind = ?;")
       deleteStatement.setString(1, user)
@@ -114,6 +116,8 @@ final class JdbcCooldownRepository(connectionProvider: ConnectionProvider) exten
 
   def delAll(user: String, kind: CooldownKind): Unit =
     JdbcSupport.withConnection(connectionProvider.cache) { conn =>
+      val ensure = conn.createStatement(); ensureTable(ensure); ensure.close()
+
       val deleteStatement = conn.prepareStatement("DELETE FROM satchel WHERE userid = ? AND kind = ?;")
       deleteStatement.setString(1, user)
       deleteStatement.setString(2, kind.id)
