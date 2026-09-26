@@ -1,7 +1,7 @@
 package com.tibiabot.presentation
 
 import com.tibiabot.domain.{ObserverStatus, ObserverToken}
-import com.tibiabot.observer.{ObserverAreas, ObserverPanel, WorldCoverage}
+import com.tibiabot.observer.{MemberCoverage, ObserverAreas, ObserverMembers, ObserverPanel, WorldCoverage, WorldSummary}
 import net.dv8tion.jda.api.components.buttons.Button
 import net.dv8tion.jda.api.components.container.Container
 import net.dv8tion.jda.api.components.mediagallery.MediaGallery
@@ -94,6 +94,59 @@ class ObserverPanelSpec extends AnyFunSuite with Matchers {
     texts.map(_.length).sum should be <= 4000
     texts.exists(_.startsWith("-# ")) shouldBe true
     texts.find(_.contains("didn't fit")).get should include("World20")
+  }
+
+  test("a member who can manage the server gets the ℹ️ button after Remove; nobody else does") {
+    val row = ObserverEmbeds.controls(Some(token(ObserverStatus.Linked)), manager = true).getComponents.asScala.toList
+      .collect { case b: Button => b }
+    row.map(_.getCustomId) shouldBe List("observer add", "observer remove", "observer members")
+    row.last.getEmoji.getName shouldBe "ℹ️"
+    ObserverEmbeds.controls(Some(token(ObserverStatus.Linked))).getComponents.asScala.map(_.toString)
+      .exists(_.contains("observer members")) shouldBe false
+  }
+
+  private def memberParts(view: ObserverMembers): List[String] =
+    ObserverEmbeds.membersCard(view, ":yes:", ":no:").getComponents.asScala.toList.map {
+      case t: TextDisplay => t.getContent
+      case _: Separator   => "divider"
+      case other          => other.toString
+    }
+
+  private val listHeading =
+    "### 👥 Linked Members\n-# Members of this server with a Tibia Observer token added, and the raid areas each covers."
+
+  test("the members list: each member and their areas, then the coverage and what other Discords add") {
+    val view = ObserverMembers(
+      List(MemberCoverage("1", working = true, List("Victoris" -> List("Carlin", "Edron", "Quirefang"))),
+        MemberCoverage("2", working = true, List("Victoris" -> Nil)),
+        MemberCoverage("3", working = true, Nil),
+        MemberCoverage("4", working = false, Nil)),
+      List(WorldSummary("Victoris", 8, 2, List("Ab'Dendriel", "Yalahar"))))
+    memberParts(view) shouldBe List(
+      listHeading,
+      "divider",
+      List(":yes: <@1>", "-# **VICTORIS** · Carlin, Edron, Quirefang",
+        ":yes: <@2>", "-# **VICTORIS** · Nothing explored yet",
+        ":yes: <@3>", "-# No characters on this server's worlds",
+        ":no: <@4>", "-# Token unlinked or expired").mkString("\n"),
+      "divider",
+      "-# 8 of 15 raid areas covered on Victoris\n-# 2 accounts from other Discords cover Ab'Dendriel, Yalahar")
+  }
+
+  test("one account from another Discord is said so, and with two worlds each line names its world") {
+    val view = ObserverMembers(Nil, List(WorldSummary("Victoris", 4, 1, List("Yalahar")), WorldSummary("Antica", 0, 0, Nil)))
+    memberParts(view) shouldBe List(listHeading, "divider", "-# Nobody in this server has added a token yet.", "divider",
+      "-# 4 of 15 raid areas covered on Victoris\n-# 1 account from another Discord covers Yalahar on Victoris\n" +
+        "-# 0 of 15 raid areas covered on Antica")
+  }
+
+  test("members that don't fit in a message are counted rather than cut off") {
+    val many = (1 to 200).map(i => MemberCoverage(s"10000000000000000$i", working = true,
+      List("Victoris" -> List("Carlin", "Edron", "Hrodmir", "Venore")))).toList
+    val texts = ObserverEmbeds.membersCard(ObserverMembers(many, List(WorldSummary("Victoris", 4, 0, Nil))), ":yes:", ":no:")
+      .getComponents.asScala.collect { case t: TextDisplay => t.getContent }
+    texts.map(_.length).sum should be <= 4000
+    texts.exists(_.contains("more members")) shouldBe true
   }
 
   test("with no token, only Add") {

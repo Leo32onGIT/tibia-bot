@@ -4,6 +4,7 @@ import com.tibiabot.observer.LinkOutcome
 import com.tibiabot.presentation.{Embeds, ObserverEmbeds}
 import com.tibiabot.{BotApp, Config}
 import com.typesafe.scalalogging.StrictLogging
+import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 
 import scala.jdk.CollectionConverters._
@@ -41,8 +42,9 @@ object ObserverModals extends StrictLogging {
                   // Just linked, so the account's own areas aren't in the coverage yet:
                   // its rules are set just after this answer.
                   val view = BotApp.observerService.panel(guild.getId, event.getUser.getId)
+                  val manager = Option(event.getMember).exists(_.hasPermission(Permission.MANAGE_SERVER))
                   event.getHook
-                    .sendMessageComponents(ObserverEmbeds.panel(view).asJava)
+                    .sendMessageComponents(ObserverEmbeds.panel(view, manager).asJava)
                     .useComponentsV2()
                     .setEphemeral(true)
                     .queue(_ => (), _ => ())

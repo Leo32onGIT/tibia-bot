@@ -8,7 +8,7 @@ import com.tibiabot.state.StreamState
 import com.typesafe.scalalogging.StrictLogging
 
 import java.time.ZonedDateTime
-import net.dv8tion.jda.api.EmbedBuilder
+import net.dv8tion.jda.api.{EmbedBuilder, Permission}
 import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.entities.channel.concrete.PrivateChannel
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent
@@ -26,6 +26,18 @@ import com.tibiabot.presentation.Names
  *  role toggles). Moved verbatim from BotListener.onButtonInteraction; the
  *  shared pendingScreenshots map is passed in. */
 object ButtonHandler extends StrictLogging {
+
+  private def managesServer(event: ButtonInteractionEvent): Boolean =
+    Option(event.getMember).exists(_.hasPermission(Permission.MANAGE_SERVER))
+
+  /** Put the presser's own `/observer` card back in the message, the ℹ️ button
+   *  with it for a manager. Already deferred. */
+  private def showObserverPanel(event: ButtonInteractionEvent, guildId: String): Unit = {
+    val view = BotApp.observerService.panel(guildId, event.getUser.getId)
+    event.getHook.editOriginalComponents(presentation.ObserverEmbeds.panel(view, managesServer(event)).asJava)
+      .useComponentsV2().queue()
+  }
+
   def handle(event: ButtonInteractionEvent, pendingScreenshots: mutable.Map[String, PendingScreenshot], streamState: StreamState): Unit = {
     val embed = event.getInteraction.getMessage.getEmbeds
     val title = if (!embed.isEmpty) embed.get(0).getTitle else ""
@@ -99,9 +111,23 @@ object ButtonHandler extends StrictLogging {
       event.deferEdit().queue()
       Option(event.getGuild).foreach { guild =>
         BotApp.observerService.unlink(guild.getId, event.getUser.getId)
-        val view = BotApp.observerService.panel(guild.getId, event.getUser.getId)
-        event.getHook.editOriginalComponents(presentation.ObserverEmbeds.panel(view).asJava).useComponentsV2().queue()
+        showObserverPanel(event, guild.getId)
       }
+    } else if (button == presentation.ObserverEmbeds.MembersButton) {
+      // Only offered to managers, and checked again here: an old reply keeps the
+      // button after the member loses the permission.
+      Option(event.getGuild) match {
+        case Some(g) if managesServer(event) =>
+          event.deferEdit().queue()
+          val view = BotApp.observerService.members(g.getId)
+          event.getHook.editOriginalComponents(presentation.ObserverEmbeds.members(view).asJava).useComponentsV2().queue()
+        case _ =>
+          event.replyEmbeds(presentation.Embeds.response(
+            s"${Config.noEmoji} Only members who can manage this server can see who's linked.")).setEphemeral(true).queue()
+      }
+    } else if (button == presentation.ObserverEmbeds.BackButton) {
+      event.deferEdit().queue()
+      Option(event.getGuild).foreach(g => showObserverPanel(event, g.getId))
     } else if (button == "fullbless") {
         event.deferReply(true).queue()
         val world = presentation.RoleCard.worldOf(event.getMessage, BotApp.worldsData.getOrElse(guild.getId, List())).getOrElse("")

@@ -2,6 +2,7 @@ package com.tibiabot.commands.handlers
 
 import com.tibiabot.presentation.{Embeds, ObserverEmbeds}
 import com.tibiabot.{BotApp, Config}
+import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 
 import scala.jdk.CollectionConverters._
@@ -20,7 +21,8 @@ object ObserverCommands {
         reply(event, s"${Config.noEmoji} Tibia Observer isn't set up on this bot yet.")
       case Some(guild) =>
         val view = BotApp.observerService.panel(guild.getId, event.getUser.getId)
-        event.getHook.sendMessageComponents(ObserverEmbeds.panel(view).asJava).useComponentsV2().queue()
+        val manager = Option(event.getMember).exists(_.hasPermission(Permission.MANAGE_SERVER))
+        event.getHook.sendMessageComponents(ObserverEmbeds.panel(view, manager).asJava).useComponentsV2().queue()
     }
 
   private def reply(event: SlashCommandInteractionEvent, message: String): Unit =

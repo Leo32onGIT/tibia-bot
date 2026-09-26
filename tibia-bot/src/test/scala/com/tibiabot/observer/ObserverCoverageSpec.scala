@@ -69,6 +69,19 @@ class ObserverCoverageSpec extends AnyFunSuite with Matchers {
     service(List(token("g1", "u1", "Xyla"))).panel("g1", "u1").worlds shouldBe Nil
   }
 
+  test("the members list: this guild's links with their areas, working first, and what other guilds add") {
+    val view = service(List(token("g1", "u5", "Victoris", ObserverStatus.NeedsRelink), token("g1", "u1", "Ombra, Victoris")))
+      .members("g1")
+    view.members shouldBe List(
+      MemberCoverage("u1", working = true, List("Victoris" -> List("Carlin", "Hrodmir"))),
+      MemberCoverage("u5", working = false, Nil))
+    // On Victoris the other guild adds Thais (its Carlin is covered here, and area
+    // 99 has no name); on Antica, Venore.
+    view.worlds shouldBe List(
+      WorldSummary("Victoris", 3, 1, List("Thais")),
+      WorldSummary("Antica", 1, 1, List("venore")))
+  }
+
   test("the raid areas are the catalogue's, alphabetical") {
     ObserverAreas.raidAreas.size shouldBe 15
     ObserverAreas.raidAreas.take(3) shouldBe List("Ab'Dendriel", "Carlin", "Edron")

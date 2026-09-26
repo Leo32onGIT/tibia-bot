@@ -2,7 +2,7 @@ package com.tibiabot.presentation
 
 import com.tibiabot.Config
 import com.tibiabot.domain.{MiniWorldChange, ObserverStatus, ObserverToken, RaidAnnouncement}
-import com.tibiabot.observer.{MiniWorldChangeCatalog, ObserverAreas, ObserverPanel, RaidCreature, RaidType, WorldCoverage}
+import com.tibiabot.observer.{MiniWorldChangeCatalog, ObserverAreas, ObserverMembers, ObserverPanel, RaidCreature, RaidType, WorldCoverage}
 import com.tibiabot.statistics.BossCatalogue
 import net.dv8tion.jda.api.EmbedBuilder
 import net.dv8tion.jda.api.components.MessageTopLevelComponent
@@ -15,6 +15,7 @@ import net.dv8tion.jda.api.components.separator.Separator
 import net.dv8tion.jda.api.components.textdisplay.TextDisplay
 import net.dv8tion.jda.api.components.thumbnail.Thumbnail
 import net.dv8tion.jda.api.entities.MessageEmbed
+import net.dv8tion.jda.api.entities.emoji.Emoji
 import net.dv8tion.jda.api.utils.messages.{MessageCreateBuilder, MessageCreateData}
 
 import java.time.Instant
@@ -35,10 +36,56 @@ object ObserverEmbeds {
   /** Over the worlds' checklists, in the same section. */
   private val CoverageHeading = "### 🗺️ Raid Coverage"
 
-  /** The `/observer` reply: the card, then Add and Remove. `yes` and `no` are the
-   *  configured emoji; a test passes its own. */
-  def panel(view: ObserverPanel, yes: String = Config.yesEmoji, no: String = Config.noEmoji): List[MessageTopLevelComponent] =
-    List(panelCard(view, yes, no), controls(view.token))
+  /** The `/observer` reply: the card, then Add and Remove, and for a member who
+   *  can manage the server (`manager`) the ℹ️ button to the members list. `yes`
+   *  and `no` are the configured emoji; a test passes its own. */
+  def panel(view: ObserverPanel, manager: Boolean = false, yes: String = Config.yesEmoji,
+            no: String = Config.noEmoji): List[MessageTopLevelComponent] =
+    List(panelCard(view, yes, no), controls(view.token, manager))
+
+  /** What the ℹ️ button shows: the members list, then Back to the member's own
+   *  card. */
+  def members(view: ObserverMembers, yes: String = Config.yesEmoji, no: String = Config.noEmoji): List[MessageTopLevelComponent] =
+    List(membersCard(view, yes, no), ActionRow.of(Button.secondary(BackButton, "⤶ Back")))
+
+  val MembersButton = "observer members"
+  val BackButton = "observer back"
+
+  /** The members list: a heading, every member linked in this server with the areas
+   *  they cover on each of its worlds, then per world how many raid areas are
+   *  covered and what accounts from other Discords add. Members that don't fit in
+   *  a message are counted in a line of their own. */
+  def membersCard(view: ObserverMembers, yes: String = Config.yesEmoji, no: String = Config.noEmoji): Container = {
+    val header = "### 👥 Linked Members\n-# Members of this server with a Tibia Observer token added, and the raid areas each covers."
+    val entries = view.members.map { m =>
+      val who = s"<@${m.userId}>"
+      if (!m.working) s"$no $who\n-# Token unlinked or expired"
+      else if (m.worlds.isEmpty) s"$yes $who\n-# No characters on this server's worlds"
+      else (s"$yes $who" :: m.worlds.map { case (world, areas) =>
+        s"-# **${world.toUpperCase(java.util.Locale.ROOT)}** · ${if (areas.isEmpty) "Nothing explored yet" else areas.mkString(", ")}"
+      }).mkString("\n")
+    }
+    val several = view.worlds.sizeIs > 1
+    val footer = view.worlds.flatMap { w =>
+      s"-# ${w.raidCovered} of ${ObserverAreas.raidAreas.size} raid areas covered on ${w.world}" ::
+        Option.when(w.otherAreas.nonEmpty) {
+          val who = if (w.otherAccounts == 1) "1 account from another Discord covers"
+            else s"${w.otherAccounts} accounts from other Discords cover"
+          s"-# $who ${w.otherAreas.mkString(", ")}${if (several) s" on ${w.world}" else ""}"
+        }.toList
+    }.mkString("\n")
+    val list =
+      if (entries.isEmpty) "-# Nobody in this server has added a token yet."
+      else {
+        def more(n: Int) = s"-# …and $n more ${if (n == 1) "member" else "members"}"
+        def text(n: Int) = (entries.take(n) ++ Option.when(n < entries.size)(more(entries.size - n))).mkString("\n")
+        val fits = (entries.size to 0 by -1).find(n => header.length + footer.length + text(n).length <= TextLimit).getOrElse(0)
+        text(fits)
+      }
+    val parts = List[ContainerChildComponent](TextDisplay.of(header), divider, TextDisplay.of(list)) ++
+      (if (footer.isEmpty) Nil else List(divider, TextDisplay.of(footer)))
+    Container.of(parts.asJava)
+  }
 
   /** The card. A heading, the member's link, then the raid-area coverage of the
    *  worlds in `view` under a heading of its own — each world a label with a
@@ -301,11 +348,14 @@ object ObserverEmbeds {
   /** Add is offered when there is no token, or one that needs replacing — the
    *  panel tells its member to press it; Remove whenever there is one. A button
    *  not offered is shown disabled so the panel always reads as a pair (as
-   *  `/boosted` does). */
-  def controls(token: Option[ObserverToken]): ActionRow = {
+   *  `/boosted` does). A member who can manage the server also gets ℹ️, the
+   *  members list; nobody else sees it at all. */
+  def controls(token: Option[ObserverToken], manager: Boolean = false): ActionRow = {
     val replaceable = token.forall(t => t.status == ObserverStatus.NeedsRelink || t.status == ObserverStatus.Error)
-    ActionRow.of(
+    val buttons = List(
       Button.success("observer add", "Add").withDisabled(!replaceable),
-      Button.danger("observer remove", "Remove").withDisabled(token.isEmpty))
+      Button.danger("observer remove", "Remove").withDisabled(token.isEmpty)) ++
+      Option.when(manager)(Button.secondary(MembersButton, Emoji.fromUnicode("ℹ️")))
+    ActionRow.of(buttons.asJava)
   }
 }

@@ -673,6 +673,51 @@ final class ObserverService(
     forgetCoverage(guildId, userId)
   }
 
+  /** What the ℹ️ list shows a guild's managers: every member linked here — those
+   *  whose token works first, in the order they linked, then those it stopped
+   *  working for — with the areas each covers on the worlds the guild has set up;
+   *  then, per world, how many raid areas any working link covers, and what
+   *  accounts linked in other guilds add that nobody here covers. Those are only
+   *  counted, never named: their members didn't link here. A read that fails shows
+   *  the members without their areas rather than failing the reply. */
+  def members(guildId: String): ObserverMembers = {
+    val setUp =
+      try guildWorlds(guildId).distinctBy(_.toLowerCase)
+      catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not read which worlds guild '$guildId' has set up for the Observer members list", ex)
+          Nil
+      }
+    val here = storedTokens().filter(t => t.guildId == guildId && t.status != ObserverStatus.Pending)
+      .sortBy(t => (t.status != ObserverStatus.Linked, t.createdAt, t.id))
+    val (rows, names) =
+      try (coverage.liveAreas(setUp), ObserverAreas.KnownNames ++ coverage.names())
+      catch {
+        case ex: Throwable =>
+          logger.warn(s"Could not read the Observer coverage for guild '$guildId'", ex)
+          (Nil, ObserverAreas.KnownNames)
+      }
+    def named(ids: List[Int]): List[String] = ids.flatMap(names.get).distinctBy(_.toLowerCase).sortBy(_.toLowerCase)
+    val list = here.map { t =>
+      if (t.status != ObserverStatus.Linked) MemberCoverage(t.userId, working = false, Nil)
+      else MemberCoverage(t.userId, working = true, setUp.filter(w => t.worlds.exists(_.equalsIgnoreCase(w))).map { w =>
+        w -> named(rows.filter(r => r.guildId == guildId && r.userId == t.userId && r.world.equalsIgnoreCase(w)).map(_.areaId))
+      })
+    }
+    val summaries = setUp.map { w =>
+      val onWorld = rows.filter(_.world.equalsIgnoreCase(w))
+      val raidCovered = named(onWorld.map(_.areaId)).count(a => ObserverAreas.raidAreas.exists(_.equalsIgnoreCase(a)))
+      val coveredHere = named(onWorld.filter(_.guildId == guildId).map(_.areaId)).map(_.toLowerCase).toSet
+      val elsewhere = onWorld.filter(_.guildId != guildId)
+      val extra = named(elsewhere.map(_.areaId)).filterNot(a => coveredHere.contains(a.toLowerCase))
+      // Counted by the accounts behind the areas listed, not every account linked elsewhere.
+      val accounts = elsewhere.filter(r => names.get(r.areaId).exists(n => extra.exists(_.equalsIgnoreCase(n))))
+        .map(r => (r.guildId, r.userId)).distinct.size
+      WorldSummary(w, raidCovered, accounts, extra)
+    }
+    ObserverMembers(list, summaries)
+  }
+
   /** What `/observer` shows a member: their link, and the raid-area coverage of
    *  the worlds this guild has set up — every one of them with no working link to
    *  go by, or only those the linked account has characters on. An area counts as
@@ -708,6 +753,19 @@ final class ObserverService(
     })
   }
 }
+
+/** One member of a guild on the ℹ️ list: whether their token works, and for each
+ *  world the guild has set up that their account has characters on, the areas they
+ *  cover there by name (all they've explored, not only raid areas). */
+final case class MemberCoverage(userId: String, working: Boolean, worlds: List[(String, List[String])])
+
+/** One of a guild's worlds on the ℹ️ list: how many raid areas are covered there by
+ *  any working link, and the areas accounts linked in other guilds cover that
+ *  nobody linked here does, with how many accounts those come from. */
+final case class WorldSummary(world: String, raidCovered: Int, otherAccounts: Int, otherAreas: List[String])
+
+/** What the ℹ️ list shows a guild's managers (see ObserverService.members). */
+final case class ObserverMembers(members: List[MemberCoverage], worlds: List[WorldSummary])
 
 /** A world's raid areas that some working link covers, by the raid catalogue's name
  *  for each, and whether the member looking is one of those links. */
