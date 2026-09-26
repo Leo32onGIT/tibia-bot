@@ -95,6 +95,7 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
       rows.put(("g1", userId), t -> crypto.encrypt(credential))
     }
     def status(userId: String): ObserverStatus = rows(("g1", userId))._1.status
+    def linked(userId: String): Boolean = rows.contains(("g1", userId))
     def credential(userId: String): String = crypto.decrypt(rows(("g1", userId))._2)
 
     def all(): List[ObserverToken] = rows.values.map(_._1).toList.sortBy(_.id)
@@ -133,7 +134,7 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
 
   private def askedFor(credential: String): List[String] = asked.synchronized(asked.toList).collect { case (p, `credential`) => p }
 
-  test("a dead link is marked for relinking and no longer holds up everyone else's changes") {
+  test("a dead link is removed and no longer holds up everyone else's changes") {
     val h = new Harness
     h.store.add("u1", "Victoris", "a")
     h.store.add("u2", "Antica", "b")
@@ -142,7 +143,7 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
     renewals.put("b", Rejects)
 
     h.mwc() shouldBe Some(Map("victoris" -> List("Fury Gate")))
-    h.store.status("u2") shouldBe ObserverStatus.NeedsRelink
+    h.store.linked("u2") shouldBe false
 
     asked.synchronized(asked.clear())
     h.mwc() shouldBe Some(Map("victoris" -> List("Fury Gate")))
@@ -160,7 +161,7 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
     feeds.put("b", Refuses)
     renewals.put("b", Rejects)
     h.mwc() shouldBe Some(Map("victoris" -> List("Fury Gate"), "antica" -> List("Nomads")))
-    h.store.status("u2") shouldBe ObserverStatus.NeedsRelink
+    h.store.linked("u2") shouldBe false
     h.mwc() shouldBe Some(Map("victoris" -> List("Fury Gate"), "antica" -> List("Nomads")))
 
     h.clock = nextSave.plusSeconds(60)
@@ -195,7 +196,7 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
     h.store.status("u1") shouldBe ObserverStatus.Linked
   }
 
-  test("the API refusing every link at once is its own trouble: none is marked, and the pool waits") {
+  test("the API refusing every link at once is its own trouble: none is removed, and the pool waits") {
     val h = new Harness
     h.store.add("u1", "Victoris", "a")
     h.store.add("u2", "Antica", "b")
@@ -215,10 +216,10 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
     renewals.put("b", Rejects)
 
     h.service.fetchPooledRaids().keySet shouldBe Set("Victoris")
-    h.store.status("u2") shouldBe ObserverStatus.NeedsRelink
+    h.store.linked("u2") shouldBe false
   }
 
-  test("the renewal sweep links a lapsed link again when its credential works, and marks one it can't renew") {
+  test("the renewal sweep links an old lapsed link again when its credential works, and removes one it can't renew") {
     val h = new Harness
     h.store.add("u1", "Victoris", "a")
     h.store.add("u2", "Antica", "b", ObserverStatus.NeedsRelink)
@@ -228,14 +229,14 @@ class ObserverPoolSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll 
     renewals.put("c", RenewsTo("c2"))
 
     h.service.renewAll()
-    h.store.status("u1") shouldBe ObserverStatus.NeedsRelink
+    h.store.linked("u1") shouldBe false
     h.store.status("u2") shouldBe ObserverStatus.Linked
     h.store.credential("u2") shouldBe "b2"
     h.store.status("u3") shouldBe ObserverStatus.Linked
     h.store.credential("u3") shouldBe "c2"
   }
 
-  test("a member's panel shows the link as stored, so a secondary sees it marked") {
+  test("a member's panel shows the link as stored, so a secondary sees what the primary did") {
     val h = new Harness
     h.store.add("u1", "Victoris", "a")
     h.service.load()

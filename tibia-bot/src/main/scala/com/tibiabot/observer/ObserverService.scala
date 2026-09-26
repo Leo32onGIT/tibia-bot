@@ -35,8 +35,8 @@ object LinkOutcome {
  *  With `enabled` off (the `observer-api` mode gate) a token is stored
  *  `Pending` without contacting the API. With it on, linking
  *  exchanges it for a durable credential and sets the account's rules (see
- *  `applyRules`). A link whose credential the API refuses for good is marked
- *  `NeedsRelink` and stops being polled (see `pollEach`). */
+ *  `applyRules`). A link whose credential the API refuses for good is removed
+ *  (see `pollEach`). */
 final class ObserverService(
   repository: ObserverRepository,
   crypto: TokenCrypto,
@@ -83,8 +83,8 @@ final class ObserverService(
     tokens.contains(keyOf(guildId, userId))
 
   /** A member's link as it is stored — read from the shared table, since the
-   *  primary is what marks a link for relinking and a secondary's cache would never
-   *  hear of it. Falls back to the cache if the read fails. */
+   *  primary is what removes a dead link and a secondary's cache would never hear
+   *  of it. Falls back to the cache if the read fails. */
   def statusFor(guildId: String, userId: String): Option[ObserverToken] = {
     val key = keyOf(guildId, userId)
     try {
@@ -206,24 +206,29 @@ final class ObserverService(
    *  rather than their links dying: every one of two or more at once. */
   private def refusedAllAtOnce(refused: Int, asked: Int): Boolean = asked > 1 && refused == asked
 
-  /** Mark the links the API refused for good as needing a fresh token — unless it
-   *  refused them all at once (see [[refusedAllAtOnce]]): members don't revoke
-   *  their links together. A marked link stops being polled; its member sees it on
-   *  `/observer`, and the renewal sweep links it again if its credential turns out
-   *  to work after all. */
-  private def markRefused(refused: List[ObserverToken], asked: Int, during: String): Unit =
+  /** Remove the links the API refused for good — unlinked on Observer's side, or
+   *  expired — as their member would with Remove, bar clearing the rules, which
+   *  the dead credential can't. Unless it refused them all at once (see
+   *  [[refusedAllAtOnce]]): members don't revoke their links together, and a
+   *  removed link is gone for good. A link stored again since it was read (its
+   *  member added a fresh token meanwhile) is left alone. Its member sees
+   *  `/observer` as if they had never linked, and can add a token again. */
+  private def removeRefused(refused: List[ObserverToken], asked: Int, during: String): Unit =
     if (refused.nonEmpty) {
       if (refusedAllAtOnce(refused.size, asked))
         logger.warn(s"The Observer API refused all $asked linked accounts at once during $during; " +
-          "taking that for trouble on its side and marking none of them for relinking")
+          "taking that for trouble on its side and removing none of them")
       else refused.foreach { t =>
         try {
-          repository.setStatus(t.id, ObserverStatus.NeedsRelink, t.world)
-          tokens.put(keyOf(t), t.copy(status = ObserverStatus.NeedsRelink))
-          logger.warn(s"The Observer API refused the link for '${t.userId}' in guild '${t.guildId}' during $during, " +
-            "and would not renew it; it needs a fresh token")
+          val same = repository.forUser(t.guildId, t.userId).exists(_.updatedAt == t.updatedAt)
+          if (same && repository.delete(t.guildId, t.userId)) {
+            tokens.remove(keyOf(t))
+            forgetCoverage(t.guildId, t.userId)
+            logger.warn(s"The Observer API refused the link for '${t.userId}' in guild '${t.guildId}' during $during, " +
+              "and would not renew it: unlinked or expired, so it was removed")
+          }
         } catch {
-          case ex: Throwable => logger.warn(s"Could not mark the Observer link for '${t.userId}' in guild '${t.guildId}' for relinking", ex)
+          case ex: Throwable => logger.warn(s"Could not remove the dead Observer link for '${t.userId}' in guild '${t.guildId}'", ex)
         }
       }
     }
@@ -231,7 +236,7 @@ final class ObserverService(
   /** Ask each link's feed with `ask`. A credential the API refuses is renewed and
    *  asked again with the fresh one, since a refusal can be the API's own hiccup;
    *  when the renewal is refused too, the link is dead — revoked, or expired — and
-   *  is marked for relinking (see [[markRefused]]). A refused link answers
+   *  is removed (see [[removeRefused]]). A refused link answers
    *  `Unauthorised` either way, so a caller can leave it out without taking it for
    *  a failure worth waiting on — except when every link was refused at once,
    *  which is the API's trouble, and they all answer `Failed`. */
@@ -263,7 +268,7 @@ final class ObserverService(
         }
       t -> result
     }
-    markRefused(refused.toList, links.size, s"the $what poll")
+    removeRefused(refused.toList, links.size, s"the $what poll")
     if (!refusedAllAtOnce(refused.size, links.size)) results
     else results.map {
       case (t, FeedResult.Unauthorised) => t -> FeedResult.Failed
@@ -288,8 +293,9 @@ final class ObserverService(
    *  An account that cannot be fetched keeps its share from its last good fetch
    *  while that was since the latest server save, since the changes hold until the
    *  next one: its worlds' changes neither vanish mid-day nor hold up everyone
-   *  else's. That goes for a link marked for relinking too, until the save; after
-   *  it, nobody can see that account's worlds any more. Only a failure with no share
+   *  else's. That goes for a link that is gone too — removed by its member, or by
+   *  the bot once its token stopped working — until the save; after it, nobody can
+   *  see that account's worlds any more. Only a failure with no share
    *  since the save to fall back on makes the whole pool `None` (and not a refused
    *  credential, which will not come back by asking again): a partial pool then
    *  would read as that account's changes ending, or, just after the save, would
@@ -302,11 +308,11 @@ final class ObserverService(
       val save = lastServerSave(at)
       def share(t: ObserverToken): Option[List[MiniWorldChange]] =
         mwcShares.get(keyOf(t)).collect { case (fetchedAt, changes) if !fetchedAt.isBefore(save) => changes }
-      val stored = storedTokens()
-      // An unlinked account's changes go with it.
-      val kept = stored.map(keyOf).toSet
-      mwcShares.keys.toList.filterNot(kept).foreach(mwcShares.remove)
-      val (live, lapsed) = stored.partition(_.status == ObserverStatus.Linked)
+      // A share lasts until the save whatever became of its link: the changes it
+      // saw still hold. Only one from before the save goes.
+      mwcShares.filterInPlace { case (_, (fetchedAt, _)) => !fetchedAt.isBefore(save) }
+      val live = storedTokens().filter(_.status == ObserverStatus.Linked)
+      val liveKeys = live.map(keyOf).toSet
       var incomplete = false
       val polled = pollEach(live, "MWC")(apiClient.mwc).map {
         case (t, FeedResult.Fetched(changes)) =>
@@ -319,8 +325,9 @@ final class ObserverService(
             Nil
           }
       }
+      val gone = mwcShares.toList.collect { case (key, (_, changes)) if !liveKeys.contains(key) => changes }
       if (incomplete) None
-      else Some((polled ++ lapsed.flatMap(share)).flatten
+      else Some((polled ++ gone).flatten
         .filter(c => c.world.nonEmpty && c.title.nonEmpty)
         .groupBy(_.world.toLowerCase)
         .view.mapValues(_.distinctBy(_.title.toLowerCase).sortBy(_.title.toLowerCase)).toMap)
@@ -398,13 +405,12 @@ final class ObserverService(
    *  fails leaves the old credential in place (still valid until its own expiry)
    *  to try again next sweep.
    *
-   *  A link marked for relinking is tried too, and is live again — its rules set
-   *  again — when its credential works after all: it was refused while the API was
-   *  having trouble. A live one the API refuses here is marked (see
-   *  `markRefused`). Run only by a bot that talks to the API. */
+   *  One the API refuses here is removed (see `removeRefused`). A link stored as
+   *  needing a fresh token, from before dead links were removed, is tried too: live
+   *  again — its rules set again — when its credential works after all, removed
+   *  when it doesn't. Run only by a bot that talks to the API. */
   def renewAll(): Unit = if (enabled) {
     val candidates = storedTokens().filter(t => t.status == ObserverStatus.Linked || t.status == ObserverStatus.NeedsRelink)
-    val live = candidates.count(_.status == ObserverStatus.Linked)
     val refused = ListBuffer.empty[ObserverToken]
     val revived = ListBuffer.empty[ObserverToken]
     var renewed = 0
@@ -418,14 +424,14 @@ final class ObserverService(
               logger.info(s"The Observer link for '${t.userId}' in guild '${t.guildId}' works again; linked")
               revived += t.copy(status = ObserverStatus.Linked)
             }
-          case RenewResult.Rejected => if (t.status == ObserverStatus.Linked) refused += t
+          case RenewResult.Rejected => refused += t
           case RenewResult.Failed   => ()
         }
       } catch {
         case ex: Throwable => logger.warn(s"Observer renew failed for '${t.userId}' in guild '${t.guildId}'", ex)
       }
     }
-    markRefused(refused.toList, live, "the renewal sweep")
+    removeRefused(refused.toList, candidates.size, "the renewal sweep")
     if (revived.nonEmpty) ruleScope().foreach(scope => applyEach(revived.toList, scope))
     if (candidates.nonEmpty) logger.info(s"Observer credential renewal: $renewed/${candidates.size} renewed")
   }

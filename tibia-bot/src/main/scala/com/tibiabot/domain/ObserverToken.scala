@@ -25,10 +25,10 @@ final case class ObserverToken(
 }
 
 /** Lifecycle of a stored link. With the Observer API off a token is only stored,
- *  `Pending`; linking it live makes it `Linked`. `NeedsRelink` is a link whose
- *  credential the API refused and would not renew — revoked, or expired — which
- *  is no longer polled until its member adds a fresh token (or a later renewal
- *  finds it works after all). */
+ *  `Pending`; linking it live makes it `Linked`. `NeedsRelink` was a link whose
+ *  credential the API refused and would not renew; such a link is now removed
+ *  instead, and the status is only read from a row stored before that (the
+ *  renewal sweep removes it, or links it again if it works after all). */
 sealed trait ObserverStatus { def code: String }
 
 object ObserverStatus {
