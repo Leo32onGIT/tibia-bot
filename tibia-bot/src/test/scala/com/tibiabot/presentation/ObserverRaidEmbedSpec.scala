@@ -66,13 +66,13 @@ class ObserverRaidEmbedSpec extends AnyFunSuite with Matchers {
     partsOf(ObserverEmbeds.subareaCard(raid("subareaRevealed"), emoji)).head should include("### <:raid:1> Hrodmir\n")
   }
 
-  test("the start card names the raid over the subarea in bold, with its picture, then its creatures") {
+  test("the start card names the raid over the subarea in bold behind a map, with its picture, then its creatures") {
     val card = ObserverEmbeds.startedCard(raid("raidStarted", Some("Krimhorn"), 289), WinterWolves, emoji)
     partsOf(card) shouldBe List(
       lines(
         "-# **RAID STARTED**",
         "### <:raid:1> [Winter Wolves near Krimhorn](https://tibia.fandom.com/wiki/Svargrond_Raids#Winter_Wolf_Raid_near_Krimhorn)",
-        "-# **Krimhorn**",
+        "-# **🗺️ Krimhorn**",
         s"-# **Raid started:** <t:${start.getEpochSecond}:R>"),
       "picture:https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Winter_Wolf.gif",
       "---",

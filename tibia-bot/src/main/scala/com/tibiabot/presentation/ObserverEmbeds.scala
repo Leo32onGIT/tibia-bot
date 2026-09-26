@@ -168,11 +168,11 @@ object ObserverEmbeds {
   }
 
   /** The start, when the feed says which raid it is: its name as the header,
-   *  linked to its wiki page, over the subarea in bold and when it started, with a
-   *  picture of its boss or lead creature beside them. Under a divider, its
-   *  creatures as wiki-linked bullets. Its broadcast lines follow. A raid the
-   *  catalogue doesn't know has the subarea as its header, as the posts before it
-   *  do, and no picture or creatures. */
+   *  linked to its wiki page, over the subarea in bold behind a map and when it
+   *  started, with a picture of its boss or lead creature beside them. Under a
+   *  divider, its creatures as wiki-linked bullets. Its broadcast lines follow. A
+   *  raid the catalogue doesn't know has the subarea as its header, as the posts
+   *  before it do, and no picture or creatures. */
   def startedCard(raid: RaidAnnouncement, raidType: Option[RaidType],
                   emoji: String = Config.raidEmoji): Container = {
     val started = raid.startDate.map(start => timeLine("Raid started", start)).toList
@@ -182,7 +182,7 @@ object ObserverEmbeds {
         stageCard(TextDisplay.of(stageText("Raid started", s"$emoji $where", started)))
       case Some(rt) =>
         val name = rt.link.fold(rt.name)(url => s"[${rt.name}]($url)")
-        val text = TextDisplay.of(stageText("Raid started", s"$emoji $name", s"-# **$where**" :: started))
+        val text = TextDisplay.of(stageText("Raid started", s"$emoji $name", s"-# **🗺️ $where**" :: started))
         val top = thumbnailUrl(rt.creatures).fold[ContainerChildComponent](text)(url =>
           Section.of(Thumbnail.fromUrl(url), text))
         val creatures =
