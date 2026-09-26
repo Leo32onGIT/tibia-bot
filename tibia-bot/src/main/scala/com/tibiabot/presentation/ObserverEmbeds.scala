@@ -52,11 +52,7 @@ object ObserverEmbeds {
     }
     val header = s"### 🔭 Tibia Observer\n-# $intro"
     val statusText = view.token match {
-      // Joined explicitly: a multi-line literal takes the checkout's line endings.
-      case None => List(
-        s"$no You haven't linked a Tibia Observer token.",
-        "-# Click the **Add** button below and enter the token from your Tibia Account.",
-        "-# Account Management → Tibia Observer → Connect").mkString("\n")
+      case None    => s"$no You haven't linked a Tibia Observer token.\n$HowToLink"
       case Some(t) => linkText(t, view.worlds.map(_.world), yes, no)
     }
     val footer = status match {
@@ -65,8 +61,10 @@ object ObserverEmbeds {
       case Some(ObserverStatus.NeedsRelink | ObserverStatus.Error) => Some("Add a fresh token to count your explored areas again.")
       case Some(ObserverStatus.Pending)                            => None
     }
+    // With no token that works, the picture of where to get one goes under how to.
     val linkPart: List[ContainerChildComponent] =
-      if (view.token.isEmpty) List(TextDisplay.of(statusText), MediaGallery.of(MediaGalleryItem.fromUrl(ConnectPicture)))
+      if (status.forall(_ == ObserverStatus.NeedsRelink))
+        List(TextDisplay.of(statusText), MediaGallery.of(MediaGalleryItem.fromUrl(ConnectPicture)))
       else List(TextDisplay.of(statusText))
     val coverage = coverageTexts(view.worlds, footer, header.length + statusText.length + CoverageHeading.length, yes, no) match {
       case Nil   => Nil
@@ -78,8 +76,16 @@ object ObserverEmbeds {
 
   private def divider: Separator = Separator.createDivider(Separator.Spacing.SMALL)
 
-  /** A member's link: working, with the worlds it covers here; waiting for a fresh
-   *  token; or stored before linking went live. */
+  /** How to get a token and add it, under the status when the member has none that
+   *  works. Joined explicitly: a multi-line literal takes the checkout's line
+   *  endings. */
+  private val HowToLink = List(
+    "-# Click the **Add** button below and enter the token from your Tibia Account.",
+    "-# Account Management → Tibia Observer → Connect").mkString("\n")
+
+  /** A member's link: working, with the worlds it covers here; unlinked on
+   *  Observer's side or expired, with how to add a fresh token; or stored before
+   *  linking went live. */
   private def linkText(t: ObserverToken, worlds: List[String], yes: String, no: String): String = t.status match {
     case ObserverStatus.Linked =>
       val who = t.accountLabel.map(a => s" as **$a**").getOrElse("")
@@ -87,9 +93,7 @@ object ObserverEmbeds {
         else s"Covering ${listed(worlds.map(w => s"**$w**"))} for this server"
       s"$yes Linked$who\n-# $here"
     case ObserverStatus.NeedsRelink =>
-      val whose = t.accountLabel.map(a => s"the link for **$a**").getOrElse("your link")
-      s"$no Your link needs renewing — press **Add** with a fresh token.\n" +
-        s"-# Tibia Observer stopped accepting $whose. Until you add a new token, your explored areas aren't counted."
+      s"$no Your Observer token has been unlinked or has expired.\n$HowToLink"
     case ObserverStatus.Error =>
       s"$no Something went wrong with your link — try **Add** again."
     case ObserverStatus.Pending =>

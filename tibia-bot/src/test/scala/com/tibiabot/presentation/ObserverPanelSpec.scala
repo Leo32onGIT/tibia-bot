@@ -79,9 +79,12 @@ class ObserverPanelSpec extends AnyFunSuite with Matchers {
       List(heading, "divider", ":yes: Linked as **Keeper of Tibia**\n-# None of your worlds is set up here")
   }
 
-  test("needing a fresh token says so, and how to count the member's areas again") {
+  test("a token that was unlinked or expired says so, then how to add one, as with none") {
     val p = parts(ObserverPanel(Some(token(ObserverStatus.NeedsRelink)), List(victoris)))
-    p(2) should startWith(":no: Your link needs renewing — press **Add** with a fresh token.")
+    p(2) shouldBe ":no: Your Observer token has been unlinked or has expired.\n" +
+      "-# Click the **Add** button below and enter the token from your Tibia Account.\n" +
+      "-# Account Management → Tibia Observer → Connect"
+    p(3) shouldBe "https://violentbot.xyz/discord/observer/connect.png"
     p.last shouldBe "-# Add a fresh token to count your explored areas again."
   }
 
