@@ -506,7 +506,8 @@ final class ObserverService(
       }
     worlds.foreach { ws =>
       if (ws.nonEmpty) {
-        report("MWC", apiClient.ensureRules(credential, ws))
+        report("MWC", apiClient.ensureRules(credential, ws)).filter(r => !r.unchanged && r.applied.nonEmpty)
+          .foreach(_ => mwcRulesChanged.set(true))
         report("raid", apiClient.ensureRaidRules(credential, ws)).foreach(recordCoverage(t, _))
       } else {
         val cleared = try apiClient.clearRules(credential) catch {
@@ -548,6 +549,15 @@ final class ObserverService(
     } catch {
       case ex: Throwable => logger.warn(s"Could not keep what the Observer rules cover for '${t.userId}' in guild '${t.guildId}'", ex)
     }
+
+  /** Set when an account's mini world change rules were stored changed: its worlds
+   *  may be new to the pool, which otherwise isn't fetched again until the next
+   *  server save. */
+  private val mwcRulesChanged = new AtomicBoolean(false)
+
+  /** Whether mini world change rules have changed since this was last asked (see
+   *  MiniWorldChangeWatcher). Asking clears it. */
+  def takeMwcRulesChanged(): Boolean = mwcRulesChanged.getAndSet(false)
 
   private val reportedUnnamed = TrieMap.empty[Int, Unit]
   private val reportedUnlisted = TrieMap.empty[String, Unit]

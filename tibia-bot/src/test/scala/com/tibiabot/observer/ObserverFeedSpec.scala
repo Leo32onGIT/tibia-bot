@@ -93,8 +93,9 @@ class ObserverFeedSpec extends AnyFunSuite with Matchers {
     new ObserverFeed(ObserverFeed.Consumer, never, never, redis).refreshMwc() shouldBe Some(antica)
   }
 
-  test("changes are reused for two minutes before asking again") {
+  test("through the server-save window, changes are reused for two minutes before asking again") {
     val clock = new Clock
+    clock.at = Instant.parse("2026-09-24T08:05:00Z") // 10:05 in Berlin
     var fetches = 0
     val feed = new ObserverFeed(ObserverFeed.Standalone, () => { fetches += 1; Some(antica) }, () => Map.empty,
       new FakeRedis, () => clock.now())
@@ -103,6 +104,20 @@ class ObserverFeedSpec extends AnyFunSuite with Matchers {
     feed.mwcForWorld("Antica")
     fetches shouldBe 1
     clock.at = clock.at.plus(Duration.ofSeconds(60))
+    feed.mwcForWorld("Antica")
+    fetches shouldBe 2
+  }
+
+  test("once the day's changes have settled, they're reused until the next server save") {
+    val clock = new Clock // 12:00 in Berlin
+    var fetches = 0
+    val feed = new ObserverFeed(ObserverFeed.Standalone, () => { fetches += 1; Some(antica) }, () => Map.empty,
+      new FakeRedis, () => clock.now())
+    feed.mwcForWorld("Antica") should not be empty
+    clock.at = clock.at.plus(Duration.ofHours(11)) // 23:00
+    feed.mwcForWorld("Antica") should not be empty
+    fetches shouldBe 1
+    clock.at = Instant.parse("2026-09-25T08:01:00Z") // 10:01 the next day
     feed.mwcForWorld("Antica")
     fetches shouldBe 2
   }

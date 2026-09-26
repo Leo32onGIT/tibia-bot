@@ -1098,11 +1098,16 @@ object BotApp extends App with StrictLogging {
         fastInterval = java.time.Duration.ofMinutes(1),
         slowInterval = java.time.Duration.ofMinutes(2),
         answeredWithout = () => observerFeed.takeAnsweredWithout())
+      // The bot that asks the API: mini world changes only change at server save,
+      // so outside its window it asks only after a restart, once they've settled,
+      // or when an account's rules changed. The secondary's polls are Redis reads.
       else new observer.MiniWorldChangeWatcher(
         fetch = () => observerFeed.refreshMwc(),
         amend = worlds => amendMwcInBoostedMessages(worlds),
         now = () => ZonedDateTime.now(domain.time.Clock.Berlin),
-        answeredWithout = () => observerFeed.takeAnsweredWithout())
+        answeredWithout = () => observerFeed.takeAnsweredWithout(),
+        quietOutsideWindow = true,
+        rulesChanged = () => observerService.takeMwcRulesChanged())
     actorSystem.scheduler.scheduleWithFixedDelay(1.minute, 1.minute)(() => mwcWatcher.tick())(ex)
   }
 

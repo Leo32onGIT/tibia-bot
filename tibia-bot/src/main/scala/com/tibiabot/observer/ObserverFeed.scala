@@ -156,13 +156,17 @@ final class ObserverFeed(
     mwcNow().getOrElse(world.toLowerCase, Nil)
 
   /** The pool, reused for `ReuseFor` — the server-save repost asks once per
-   *  guild — and refreshed after that. A refresh that fails falls back to the last
+   *  guild — and refreshed after that; one fetched once the day's changes had
+   *  settled, `SameAsYesterdayAfter` past the save, is reused until the next save,
+   *  since they don't change before it. A refresh that fails falls back to the last
    *  good pool while it is from since the latest server save, so a failed fetch at
    *  any point in the day never costs a message the day's changes. */
   private def mwcNow(): Map[String, List[MiniWorldChange]] = {
     val at = now()
+    def settled(copy: MwcCopy) = !copy.fetchedAt.isBefore(lastServerSave(at).plus(SameAsYesterdayAfter))
     mwcSeen match {
-      case Some((askedAt, copy)) if askedAt.plus(ReuseFor).isAfter(at) && current(copy, at) => todays(copy, at)
+      case Some((askedAt, copy)) if current(copy, at) && (askedAt.plus(ReuseFor).isAfter(at) || settled(copy)) =>
+        todays(copy, at)
       case _ =>
         refreshMwc().orElse(mwcSeen.map(_._2).filter(current(_, at)).map(todays(_, at))).getOrElse {
           answeredWithout.set(true)
