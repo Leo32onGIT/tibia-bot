@@ -68,7 +68,7 @@ object PanelCommands {
       : List[net.dv8tion.jda.api.components.container.Container] = {
     val which = if (panel == Panel.Hunted) "hunted" else "allies"
     val service = BotApp.huntedAlliedService
-    ListPanel.pages(panel, service.listThumbnail(which), service.guildLines(guild, which),
+    ListPanel.pages(panel, service.guildLines(guild, which),
       service.playerLines(guild, which))
   }
 

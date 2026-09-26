@@ -375,12 +375,6 @@ final class HuntedAlliedService(
    *  out: the list is the record of who is on it, and a missing sheet is a gap in
    *  what is known about them, not evidence they are not there.
    */
-  /** The picture a list is headed with: an angel statue for allies, a stone
-   *  coffin for the hunted. */
-  def listThumbnail(arg: String): String =
-    if (arg == "allies") "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Angel_Statue.gif"
-    else "https://www.tibiawiki.com.br/wiki/Special:Redirect/file/Stone_Coffin.gif"
-
   /** The players on a list, one rendered line each, grouped by the world they
    *  are on — worlds in order (see presentation.WorldList), each world's players
    *  by vocation then level. Empty for an empty list. */

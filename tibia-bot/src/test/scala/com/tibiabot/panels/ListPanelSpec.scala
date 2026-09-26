@@ -14,7 +14,6 @@ import scala.jdk.CollectionConverters._
  *  what this pins. */
 class ListPanelSpec extends AnyFunSuite with Matchers {
 
-  private val thumb = "https://example/coffin.gif"
 
   private def player(i: Int, world: String) =
     s":fire: **${400 + i}** - **[Somebody Long Named $i $world](https://www.tibia.com/community/?name=x$i)** <:enemyguild:1> <t:1790000000:R>"
@@ -52,7 +51,7 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
       .flatMap(_.asActionRow.getButtons.asScala.map(_.getCustomId))
 
   test("a short list is one card: header, Add on each heading, the rest in one row at the foot") {
-    val pages = ListPanel.pages(Panel.Hunted, thumb, guilds, small)
+    val pages = ListPanel.pages(Panel.Hunted, guilds, small)
     pages should have size 1
     headingButtons(pages.head) shouldBe List(PanelIds.AddGuild, PanelIds.AddPlayer).map(PanelIds.button(Panel.Hunted, _))
     footerButtons(pages.head) shouldBe PanelIds.listFooterActions.map(PanelIds.button(Panel.Hunted, _))
@@ -60,20 +59,20 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
   }
 
   test("each world gets a small heading above its players") {
-    val all = texts(ListPanel.pages(Panel.Allies, thumb, guilds, small).head).mkString("\n")
+    val all = texts(ListPanel.pages(Panel.Allies, guilds, small).head).mkString("\n")
     all should include("-# **ANTICA**")
     all should include("-# **SECURA**")
     all.indexOf("-# **ANTICA**") should be < all.indexOf(player(1, "Antica"))
   }
 
   test("an empty list says so in both halves") {
-    val all = texts(ListPanel.pages(Panel.Hunted, thumb, Nil, Nil).head).mkString("\n")
+    val all = texts(ListPanel.pages(Panel.Hunted, Nil, Nil).head).mkString("\n")
     all should include("*No guilds on the list yet.*")
     all should include("*Nobody on the list yet.*")
   }
 
   test("a long list spills onto more messages, each inside Discord's limits") {
-    val pages = ListPanel.pages(Panel.Hunted, thumb, guilds, large)
+    val pages = ListPanel.pages(Panel.Hunted, guilds, large)
     pages.size should be > 1
     pages.foreach { page =>
       texts(page).map(_.length).sum should be <= 4000
@@ -82,14 +81,21 @@ class ListPanelSpec extends AnyFunSuite with Matchers {
   }
 
   test("nothing is lost when a list spills, and a split world is headed again") {
-    val pages = ListPanel.pages(Panel.Hunted, thumb, guilds, large)
+    val pages = ListPanel.pages(Panel.Hunted, guilds, large)
     val all = pages.flatMap(texts).mkString("\n")
     large.flatMap(_._2).foreach(line => all should include(line))
     all should include(", continued")
   }
 
+  test("the header is text alone, with no picture beside it") {
+    val first = children(ListPanel.pages(Panel.Hunted, guilds, small).head).head
+    first.getType shouldBe Component.Type.TEXT_DISPLAY
+    ListPanel.pages(Panel.Allies, guilds, small).flatMap(children).filter(_.getType == Component.Type.SECTION)
+      .map(_.asSection.getAccessory.getType) should not contain Component.Type.THUMBNAIL
+  }
+
   test("the header leads the first message and the row of buttons closes the last") {
-    val pages = ListPanel.pages(Panel.Hunted, thumb, guilds, large)
+    val pages = ListPanel.pages(Panel.Hunted, guilds, large)
     texts(pages.head).head should startWith("### ☠️ Hunted list")
     pages.init.foreach(page => footerButtons(page) shouldBe empty)
     footerButtons(pages.last) should not be empty

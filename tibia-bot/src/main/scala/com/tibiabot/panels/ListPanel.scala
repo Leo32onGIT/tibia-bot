@@ -7,7 +7,6 @@ import net.dv8tion.jda.api.components.container.{Container, ContainerChildCompon
 import net.dv8tion.jda.api.components.section.Section
 import net.dv8tion.jda.api.components.separator.Separator
 import net.dv8tion.jda.api.components.textdisplay.TextDisplay
-import net.dv8tion.jda.api.components.thumbnail.Thumbnail
 import net.dv8tion.jda.api.entities.emoji.Emoji
 
 import scala.collection.mutable.ListBuffer
@@ -71,7 +70,7 @@ object ListPanel {
    *
    *  @param guilds  one rendered line per guild
    *  @param players each world with its rendered lines, in display order */
-  def pages(panel: Panel, thumbnail: String, guilds: List[String],
+  def pages(panel: Panel, guilds: List[String],
             players: List[(String, List[String])]): List[Container] = {
     val pages = ListBuffer.empty[List[ContainerChildComponent]]
     val current = ListBuffer.empty[ContainerChildComponent]
@@ -112,7 +111,8 @@ object ListPanel {
 
     val playerCount = players.map(_._2.size).sum
     val headerText = s"### ${title(panel)}\n-# ${plural(guilds.size, "guild", "guilds")} · ${plural(playerCount, "player", "players")}"
-    block(Section.of(Thumbnail.fromUrl(thumbnail), TextDisplay.of(headerText)), headerText.length)
+    // No picture beside it (the coffin and the angel statue went on 27 Sep 2026).
+    block(TextDisplay.of(headerText), headerText.length)
 
     val guildLines = if (guilds.isEmpty) List("*No guilds on the list yet.*") else guilds
     block(divider)
