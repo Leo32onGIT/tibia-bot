@@ -34,7 +34,7 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
     showAlliesLevels = "true", showAlliesDeaths = "true",
     showEnemiesLevels = "true", showEnemiesDeaths = "true",
     detectHunteds = "true", levelsMin = 8, deathsMin = 8,
-    activityChannel = "0", onlineCombined = "separate")
+    activityChannel = "0", onlineCombined = "false")
 
   private val one = List(world("Antica"))
   private val several = List(world("Antica"), world("Belobra"), world("Vunira"))
@@ -169,6 +169,18 @@ class PanelFormsSpec extends AnyFunSuite with Matchers {
     for ((worlds, expected) <- List(on -> "on", off -> "off"); field <- List(PanelForms.ActivityField, PanelForms.LeaversField))
       withClue(s"$field stored $expected: ") {
         preselected(ListForms.modal(Panel.Hunted, PanelIds.Config, worlds).get, field) shouldBe List(expected)
+      }
+  }
+
+  /** Stored as "true"/"false". The form once compared it against "combine",
+   *  which it never is, so it always opened on separate — and the submit, taking
+   *  separate as the current value, dropped a switch back to it as unchanged. */
+  test("the online list form opens on the layout in use now") {
+    val combined = List(world("Antica").copy(onlineCombined = "true"))
+    val separate = List(world("Antica").copy(onlineCombined = "false"))
+    for ((worlds, expected) <- List(combined -> "combine", separate -> "separate"))
+      withClue(s"stored ${worlds.head.onlineCombined}: ") {
+        preselected(SettingsForms.modal(PanelIds.Layout, worlds).get, PanelForms.OptionField) shouldBe List(expected)
       }
   }
 

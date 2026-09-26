@@ -90,7 +90,7 @@ object PanelModals extends StrictLogging {
                 .map(v => service.onlineMinLevel(event, name, v, "allies")),
               changed(number(event, PanelForms.NeutralsField), world.onlineNeutralsMin)
                 .map(v => service.onlineMinLevel(event, name, v, "neutrals")),
-              changed(choice(event, PanelForms.OptionField), if (world.onlineCombined == "combine") "combine" else "separate")
+              changed(choice(event, PanelForms.OptionField), PanelForms.layoutOf(world.onlineCombined))
                 .map(v => service.onlineListConfig(event, name, v))
             ).flatten
 

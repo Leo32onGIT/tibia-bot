@@ -159,6 +159,11 @@ object PanelForms {
    *  anything other than "on" as off — so the form does too. */
   def onOffOf(stored: String): String = if (stored == "on") "on" else "off"
 
+  /** The layout is stored as "true" for one channel and "false" for separate —
+   *  never as "combine"/"separate", which is only what the forms speak — and the
+   *  online list reads anything other than "true" as separate. */
+  def layoutOf(stored: String): String = if (stored == "true") "combine" else "separate"
+
   def build(id: String, title: String, parts: List[Label]): Modal =
     Modal.create(id, clamp(title, 45)).addComponents(parts.asJava).build()
 }

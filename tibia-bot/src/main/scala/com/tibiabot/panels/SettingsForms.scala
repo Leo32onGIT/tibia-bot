@@ -55,7 +55,7 @@ object SettingsForms {
       case PanelIds.Layout =>
         Some("Online list", picker ++ List(
           choice(OptionField, "Layout", "One channel for everyone, or a channel per side.",
-            SeparateCombine, only.map(_.onlineCombined).map(v => if (v == "combine") "combine" else "separate")),
+            SeparateCombine, only.map(w => layoutOf(w.onlineCombined))),
           number(EnemiesField, "Enemies list", "Hide enemies below this level; 0 shows everyone.",
             only.map(_.onlineEnemiesMin), "0"),
           number(AlliesField, "Allies list", "Hide allies below this level; 0 shows everyone.",

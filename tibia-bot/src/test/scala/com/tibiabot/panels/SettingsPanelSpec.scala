@@ -25,7 +25,7 @@ class SettingsPanelSpec extends AnyFunSuite with Matchers {
     showAlliesLevels = "true", showAlliesDeaths = "true",
     showEnemiesLevels = "true", showEnemiesDeaths = "true",
     detectHunteds = "true", levelsMin = 8, deathsMin = 8,
-    activityChannel = "0", onlineCombined = "separate")
+    activityChannel = "0", onlineCombined = "false")
 
   private def panel(worlds: List[Worlds] = List(world("Antica"))): Container =
     Panels.settingsPanel(worlds, fullblessEmoji = "<:inq:1>")
