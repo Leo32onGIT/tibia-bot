@@ -6,9 +6,8 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /** One online-list message the bot believes it has posted in a channel, and the
- *  embed descriptions it last put there — several, since a message carries up to
- *  the message-wide embed text budget rather than a single embed's worth (see
- *  `OnlineListEmbeds.packMessages`). `id` is None while the send that creates the
+ *  text blocks it last put there — one per group, each shown between dividers
+ *  (see `OnlineListEmbeds.packMessages`; embed descriptions before 27 Sep 2026). `id` is None while the send that creates the
  *  message is still in flight. */
 final case class OnlineListMessage(id: Option[String], descriptions: List[String])
 
@@ -90,15 +89,15 @@ final class OnlineListState(
   /** Current believed state, for assertions and diagnostics. */
   def posted(channelId: String): Option[List[OnlineListMessage]] = lock.synchronized { state.get(channelId) }
 
-  /** Diff `messages` (each the embed descriptions for one message) against the
+  /** Diff `messages` (each the text blocks for one message) against the
    *  believed state, commit the believed state to what those actions will
    *  produce, and return the actions.
    *
-   *  A message is only re-edited when one of its normalised descriptions actually
+   *  A message is only re-edited when one of its normalised blocks actually
    *  changed: the caller runs this every ~2 minutes per guild whether or not the
    *  online list moved at all, so without the guard it would rewrite every
-   *  message on every check. One changed embed rewrites the whole message, since
-   *  an edit replaces a message's embeds wholesale.
+   *  message on every check. One changed block rewrites the whole message, since
+   *  an edit replaces a message's card wholesale.
    *
    *  A slot whose send is still in flight (`id` empty) is left untouched for
    *  this cycle rather than being posted a second time; the next cycle picks up
@@ -176,7 +175,7 @@ final class OnlineListState(
   /** Extra edits owed purely to the "Last updated" stamp, and the commit of when
    *  it was last written.
    *
-   *  The stamp goes on the final embed of the final message and nowhere else, so
+   *  The stamp goes at the foot of the final message and nowhere else, so
    *  it is only rewritten when that message is. Two ways that leaves it lying:
    *
    *  1. '''Nothing changed for a long time.''' The list really is current and the
