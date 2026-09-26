@@ -4,14 +4,16 @@ import net.dv8tion.jda.api.components.container.{Container, ContainerChildCompon
 import net.dv8tion.jda.api.components.separator.Separator
 import net.dv8tion.jda.api.components.textdisplay.TextDisplay
 
+import java.util.Locale
+
 import scala.jdk.CollectionConverters._
 
 /** The daily statistics post as Components V2 cards (26 Sep 2026; embeds before).
  *
  *  Four cards, one per part of the day: the experience board, the war, the kill
  *  statistics and the bosses due, each edged in its own colour. A card opens on
- *  its `##` title, and every section under it is a small grey label in small
- *  caps over its rows, with a divider before it — the same pieces the
+ *  its `##` title, and every section under it is a small grey label in bold
+ *  capitals over its rows, with a divider before it — the same pieces the
  *  notifications and raids cards are made of.
  *
  *  ==Why a day can take several messages==
@@ -44,12 +46,13 @@ object StatisticsCard {
     def text: String = blocks.mkString("\n")
   }
 
-  /** A section: its label as a small grey line in small caps, then its rows.
-   *  `icon` goes in front of the label and is left as it is — the small caps
-   *  would otherwise reach into an emoji's name. */
+  /** A section: its label as a small grey line in bold capitals, then its
+   *  rows. Discord's grey subtext comes in one size, and bold capitals are the
+   *  largest it reads (small caps until 26 Sep 2026). `icon` goes in front of
+   *  the label and is left as it is. */
   def section(label: String, rows: List[String], icon: String = ""): String = {
     val lead = if (icon.isEmpty) "" else s"$icon "
-    (s"-# $lead${ServerSaveCard.smallCaps(label)}" :: rows).mkString("\n")
+    (s"-# $lead**${label.toUpperCase(Locale.ROOT)}**" :: rows).mkString("\n")
   }
 
   /** The day's cards as the messages that carry them, in order. */

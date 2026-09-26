@@ -77,9 +77,9 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       advance = Some(advance("magiclevel", 131))))
     board.blocks.head should startWith(s"## $news [Friday 11 September 2026](")
     board.blocks.tail.map(_.linesIterator.next()) shouldBe List(
-      "-# ᴛᴏᴘ ᴇxᴘᴇʀɪᴇɴᴄᴇ ɢᴀɪɴᴇᴅ",
-      "-# ᴛᴏᴘ ᴇxᴘᴇʀɪᴇɴᴄᴇ ʟᴏsᴛ",
-      "-# ᴛᴏᴘ sᴋɪʟʟ ᴀᴅᴠᴀɴᴄᴇᴍᴇɴᴛ")
+      "-# **TOP EXPERIENCE GAINED**",
+      "-# **TOP EXPERIENCE LOST**",
+      "-# **TOP SKILL ADVANCEMENT**")
   }
 
   test("the board is green") {
@@ -114,8 +114,8 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
   test("a section with nothing in it is absent rather than an empty label") {
     val board = build(report(gains = List(delta("Arieswar", 900))))
     board.blocks should have size 2
-    board.text should not include "ʟᴏsᴛ"
-    board.text should not include "ᴀᴅᴠᴀɴᴄᴇᴍᴇɴᴛ"
+    board.text should not include "LOST"
+    board.text should not include "ADVANCEMENT"
   }
 
   // --- the other sections --------------------------------------------------
@@ -169,8 +169,8 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
       specials = List(SpecialKills.all.head -> 3))).get
     card.blocks.map(_.linesIterator.next()) shouldBe List(
       s"## $creatureIcon Kill Statistics",
-      "-# ᴄʀᴇᴀᴛᴜʀᴇs",
-      "-# sᴘᴇᴄɪᴀʟ ᴋɪʟʟs")
+      "-# **CREATURES**",
+      "-# **SPECIAL KILLS**")
   }
 
   test("the creatures are listed largest first, count leading") {
@@ -262,12 +262,12 @@ class StatisticsEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("a day none of them died has no Special Kills section") {
     creatureBody(report(kills = Some(summary()), topKills = List(killed("dragon", 900)))) should
-      not include "sᴘᴇᴄɪᴀʟ"
+      not include "SPECIAL"
   }
 
   test("a day of special kills alone still opens on the title") {
     val card = creature(report(kills = Some(summary()), specials = List(SpecialKills.all.head -> 2))).get
-    card.blocks.map(_.linesIterator.next()) shouldBe List(s"## $creatureIcon Kill Statistics", "-# sᴘᴇᴄɪᴀʟ ᴋɪʟʟs")
+    card.blocks.map(_.linesIterator.next()) shouldBe List(s"## $creatureIcon Kill Statistics", "-# **SPECIAL KILLS**")
   }
 
   test("a special boss with no configured emoji renders without one rather than with a gap") {

@@ -8,7 +8,7 @@ import java.time.Instant
 /** The last card: which bosses might be up today.
  *
  *  ==Two groups, by chance==
- *  High chance, then low, each under a small-caps label led by its dot, so the
+ *  High chance, then low, each under a small grey label led by its dot, so the
  *  rows carry no dot of their own (26 Sep 2026; one list with a dot on every row
  *  before). Within a group the order is the predictor's, most overdue first.
  *

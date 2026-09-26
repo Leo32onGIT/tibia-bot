@@ -22,12 +22,12 @@ class StatisticsCardSpec extends AnyFunSuite with Matchers {
     packed.map(_.flatMap(_._2).map(_.length).sum)
 
   test("a section is its label in small caps over its rows") {
-    StatisticsCard.section("Most Kills", List("a", "b")) shouldBe "-# ᴍᴏsᴛ ᴋɪʟʟs\na\nb"
+    StatisticsCard.section("Most Kills", List("a", "b")) shouldBe "-# **MOST KILLS**\na\nb"
   }
 
   test("an icon leads the label and is left out of the small caps") {
     StatisticsCard.section("High chance", List("a"), icon = ":green_circle:") shouldBe
-      "-# :green_circle: ʜɪɢʜ ᴄʜᴀɴᴄᴇ\na"
+      "-# :green_circle: **HIGH CHANCE**\na"
   }
 
   test("a card is its blocks with a divider between every two, edged in its colour") {

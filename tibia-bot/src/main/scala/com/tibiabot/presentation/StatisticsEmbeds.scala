@@ -13,7 +13,7 @@ import java.util.Locale
  *  is where the name comes from — see [[StatisticsCard]] for the shape.
  *
  *  The date is the card's `##` title so it outranks its own sections, which are
- *  small-caps labels under it.
+ *  small grey labels under it.
  *
  *  ==Why the icons are arguments==
  *  Config-free, so a test of this file does not need a database host set — the

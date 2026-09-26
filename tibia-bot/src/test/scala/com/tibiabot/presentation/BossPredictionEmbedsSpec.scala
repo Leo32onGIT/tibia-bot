@@ -52,14 +52,14 @@ class BossPredictionEmbedsSpec extends AnyFunSuite with Matchers {
   test("high chance comes first, then low, each group under its dot and a small-caps label") {
     val built = build(report(List(whitePale, furyosa)))
     built.blocks.tail.map(_.linesIterator.next()) shouldBe List(
-      "-# :green_circle: ʜɪɢʜ ᴄʜᴀɴᴄᴇ",
-      "-# :yellow_circle: ʟᴏᴡ ᴄʜᴀɴᴄᴇ")
+      "-# :green_circle: **HIGH CHANCE**",
+      "-# :yellow_circle: **LOW CHANCE**")
     built.blocks(1) should include("Furyosa")
     built.blocks(2) should include("White Pale")
   }
 
   test("a day with only one chance has only that group") {
-    build(report(List(furyosa))).blocks.tail.map(_.linesIterator.next()) shouldBe List("-# :green_circle: ʜɪɢʜ ᴄʜᴀɴᴄᴇ")
+    build(report(List(furyosa))).blocks.tail.map(_.linesIterator.next()) shouldBe List("-# :green_circle: **HIGH CHANCE**")
   }
 
   test("the rows carry no dot of their own, since the label says the chance") {

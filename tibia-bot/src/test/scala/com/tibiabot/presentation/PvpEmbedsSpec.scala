@@ -108,12 +108,12 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
     val frags = tally(fraggers = List(
       Fragger("Bubble", FragSide.Ally, 4), Fragger("Mateusz", FragSide.Enemy, 2)))
     val embed = build(frags)
-    embed.text should include("-# ᴍᴏsᴛ ᴋɪʟʟs")
+    embed.text should include("-# **MOST KILLS**")
     embed.text should include(
       ":fire: **766** — **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> · **4 kills**")
     embed.text should include("Mateusz")
     // one label over both sides, not one per side
-    embed.text.linesIterator.count(_.startsWith("-# ᴍᴏsᴛ ᴋɪʟʟs")) shouldBe 1
+    embed.text.linesIterator.count(_.startsWith("-# **MOST KILLS**")) shouldBe 1
   }
 
   test("a single kill reads as one kill") {
@@ -124,7 +124,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("most deaths names the enemy and how often they died") {
     val embed = build(tally(mostWanted = List(Repeat("Grimjaw", 271, 4), Repeat("Draven", 355, 1))))
-    embed.text should include("-# ᴍᴏsᴛ ᴅᴇᴀᴛʜs")
+    embed.text should include("-# **MOST DEATHS**")
     embed.text should include("**[Grimjaw](")
     embed.text should include("**271** — **[Grimjaw](https://www.tibia.com/community/?name=Grimjaw)** <:enemy:9> · **4 deaths**")
     embed.text should include("**1 death**")
@@ -132,7 +132,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
 
   test("most exp lost uses the falling icon and no sign") {
     val embed = build(tally(), losses = List(loss("Vestrik", -24180400)))
-    embed.text should include("-# ᴍᴏsᴛ ᴇxᴘ ʟᴏsᴛ")
+    embed.text should include("-# **MOST EXP LOST**")
     embed.text should include(down + " **24,180,400**")
     embed.text should not include "-24,180,400"
   }
@@ -141,8 +141,8 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
     val embed = build(tally(
       topEnemy = Some(TopKill("Vestrik", 402, FragSide.Enemy, "111")),
       topAlly = Some(TopKill("Sarnoxx", 388, FragSide.Ally, "222"))))
-    embed.text should include("-# ᴛᴏᴘ ᴇɴᴇᴍʏ ᴋɪʟʟᴇᴅ")
-    embed.text should include("-# ᴛᴏᴘ ᴀʟʟʏ ᴋɪʟʟᴇᴅ")
+    embed.text should include("-# **TOP ENEMY KILLED**")
+    embed.text should include("-# **TOP ALLY KILLED**")
     embed.text should include("[:link:](https://discord.com/x/111)")
     embed.text should include("[:link:](https://discord.com/x/222)")
   }
@@ -156,7 +156,7 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
       ":fire: **402** — **[Bubble](https://www.tibia.com/community/?name=Bubble)** <:enemy:9> " +
         "· [:link:](https://discord.com/x/111)")
     // the only small grey line is the section's label
-    embed.text.linesIterator.filter(_.startsWith("-# ")).toList shouldBe List("-# ᴛᴏᴘ ᴇɴᴇᴍʏ ᴋɪʟʟᴇᴅ")
+    embed.text.linesIterator.filter(_.startsWith("-# ")).toList shouldBe List("-# **TOP ENEMY KILLED**")
   }
 
   test("a row with no link does not end in a dangling separator") {
@@ -186,8 +186,8 @@ class PvpEmbedsSpec extends AnyFunSuite with Matchers {
       losses = List(loss("Vestrik", -24180400)))
     card.colour shouldBe PvpEmbeds.PvpColor
     card.blocks.map(_.linesIterator.next()) shouldBe List(
-      "## :dagger: PVP", "-# ᴍᴏsᴛ ᴋɪʟʟs", "-# ᴍᴏsᴛ ᴅᴇᴀᴛʜs", "-# ᴍᴏsᴛ ᴇxᴘ ʟᴏsᴛ",
-      "-# ᴛᴏᴘ ᴇɴᴇᴍʏ ᴋɪʟʟᴇᴅ", "-# ᴛᴏᴘ ᴀʟʟʏ ᴋɪʟʟᴇᴅ")
+      "## :dagger: PVP", "-# **MOST KILLS**", "-# **MOST DEATHS**", "-# **MOST EXP LOST**",
+      "-# **TOP ENEMY KILLED**", "-# **TOP ALLY KILLED**")
   }
 
   // --- vocations -----------------------------------------------------------
