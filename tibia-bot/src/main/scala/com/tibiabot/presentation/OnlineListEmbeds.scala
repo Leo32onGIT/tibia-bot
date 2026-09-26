@@ -90,37 +90,25 @@ object OnlineListEmbeds {
   private val MaxEmbedsPerMessage = 10
 
   /** Would this line take the current embed past what it may hold? A guild
-   *  heading breaks `HeaderHeadroom` early rather than being stranded above a
-   *  line or two. */
+   *  header ("### [") breaks `HeaderHeadroom` early rather than being stranded
+   *  above a line or two. */
   private def embedFull(currentField: String, line: String): Boolean =
     currentField.length >= EmbedBudget ||
-      (currentField.length >= EmbedBudget - HeaderHeadroom && isGuildHeader(line))
+      (currentField.length >= EmbedBudget - HeaderHeadroom && line.startsWith("### ["))
 
-  /** A small grey label — the list's headings since 27 Sep 2026, see
-   *  `OnlineListGrouping.label`. Rows never open with it. */
-  private def isLabel(line: String): Boolean = line.startsWith("-# ")
-
-  /** A guild's own heading, which stays with the lines before it: its label
-   *  links the guild's name, or before 27 Sep 2026 its "### [" header did. */
-  private def isGuildHeader(line: String): Boolean = line.startsWith("-# **[") || line.startsWith("### [")
-
-  /** A heading that opens a fresh embed: the allies, enemies and others labels,
-   *  as opposed to a guild's, or the "### " and "## " headings the list used
-   *  before its labels. */
+  /** "### " not followed by "[" — the allies/enemies/others section headings, as
+   *  opposed to a guild's own header — or a "## " world heading.
+   *
+   *  The hunted and allies lists reuse this packer, and head each world with
+   *  "## ". They have no equivalent of a guild header, so every heading they
+   *  emit is a section heading and each one opens a fresh embed. */
   private def isSectionHeader(line: String): Boolean =
-    isHeader(line) && !isGuildHeader(line)
+    (line.startsWith("### ") && !line.startsWith("### [")) || line.startsWith("## ")
 
   /** Any heading, guild or section. A heading only means anything with the rows
    *  it introduces underneath it, so wherever one can be separated from them,
    *  both kinds have to be asked about. */
-  private def isHeader(line: String): Boolean = isLabel(line) || line.startsWith("### ") || line.startsWith("## ")
-
-  /** What goes between `field` and `line` as `line` joins it: a new line, and a
-   *  blank one as well when `line` is a label under rows already in the embed,
-   *  so a guild stands off the group above it. A label that opens an embed
-   *  needs no gap; it sits under the embed's own edge. */
-  private def joiner(field: String, line: String): String =
-    if (isLabel(line) && field.trim.nonEmpty) "\n\n" else "\n"
+  private def isHeader(line: String): Boolean = line.startsWith("### ") || line.startsWith("## ")
 
   /** Pack online-list lines into messages, each holding one or more embed
    *  descriptions.
@@ -188,7 +176,7 @@ object OnlineListEmbeds {
     }
 
     values.zipWithIndex.foreach { case (v, index) =>
-      val currentField = field + joiner(field, v) + v
+      val currentField = field + "\n" + v
       val keepsWith = follows(index)
       if (messageUsed + currentField.length + keepsWith >= MessageBudget || embedFull(currentField, v)) startEmbed(v, keepsWith)
       else if (isSectionHeader(v)) {
@@ -216,7 +204,7 @@ object OnlineListEmbeds {
     var field = ""
     var started = false
     lines.foreach { v =>
-      val currentField = if (started || leadingNewline) field + joiner(field, v) + v else v
+      val currentField = if (started || leadingNewline) field + "\n" + v else v
       if (started && (embedFull(currentField, v) || isSectionHeader(v))) {
         embeds += field
         field = v

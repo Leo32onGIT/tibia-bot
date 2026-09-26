@@ -1,25 +1,9 @@
 package com.tibiabot.presentation
 
-import java.util.Locale
-
 /** Pure layout logic for the online-list channels (allies / neutrals / enemies).
  *  Extracted from TibiaBot, where the same group-and-order block was repeated
- *  for each list with only the row filter differing.
- *
- *  Every group is headed by a label: a small grey line with its name in bold
- *  capitals and how many are online (27 Sep 2026; `###` headers before). Grey
- *  text comes in one size, and bold capitals are the largest it reads. */
+ *  for each list with only the row filter differing. */
 object OnlineListGrouping {
-
-  /** A group's label: `-# **ALLIES** · 12`, after an icon where one is given. */
-  def label(word: String, count: Int, icon: String = ""): String = {
-    val lead = if (icon.isEmpty) "" else s"$icon "
-    s"-# $lead**${word.toUpperCase(Locale.ROOT)}** · $count"
-  }
-
-  /** A guild's label, its name linked to the guild's page. */
-  def guildLabel(guildName: String, count: Int): String =
-    s"-# **[${guildName.toUpperCase(Locale.ROOT)}](${Urls.guildUrl(guildName)})** · $count"
 
   /** Groups online-list rows (each a `guildName -> renderedMessage` pair) by
    *  guild, ordering the guilds by descending member count and placing the
@@ -38,25 +22,26 @@ object OnlineListGrouping {
       }
 
   /** Flattens grouped guild buckets into the final markdown line list: each
-   *  guild bucket is prefixed with its [[guildLabel]]; the guildless bucket ("")
-   *  with `guildlessHeader(count)`. The bucket's message lines follow its label. */
+   *  guild bucket is prefixed with a header linking its name to its guild page
+   *  with the member count; the guildless bucket ("") is prefixed with
+   *  `guildlessHeader(count)`. The bucket's message lines follow its header. */
   def withHeaders(grouped: List[(String, List[String])], guildlessHeader: Int => String): List[String] =
     grouped.flatMap {
       case ("", messages) => guildlessHeader(messages.length) :: messages
-      case (guildName, messages) => guildLabel(guildName, messages.length) :: messages
+      case (guildName, messages) => s"### [$guildName](${Urls.guildUrl(guildName)}) ${messages.length}" :: messages
     }
 
   /** Assembles the body of the single combined online-list channel from the
    *  three already-rendered category lists.
    *
-   *  Allies and enemies each get a label, but only when at least one other
-   *  category is also present — a single-category list needs none. When
-   *  neutrals are the only category present and they carry no guild labels
-   *  (just the Others bucket), that lone label is dropped so the list reads as
-   *  a plain roster rather than a one-section list.
+   *  Allies and enemies each get a section header, but only when at least one
+   *  other category is also present — a single-category list needs no header.
+   *  When neutrals are the only category present and they carry no guild
+   *  sub-headers (just the "### Others" bucket), that lone header is dropped so
+   *  the list reads as a plain roster rather than a one-section list.
    *
    *  @param neutralsList         the raw neutrals roster, consulted only for emptiness
-   *  @param flattenedNeutralsList the neutrals roster already rendered with Others/guild labels
+   *  @param flattenedNeutralsList the neutrals roster already rendered with "### Others"/guild headers
    */
   def combinedChannelBody(
     alliesList: List[String],
@@ -68,15 +53,15 @@ object OnlineListGrouping {
   ): List[String] = {
     val modifiedAllies =
       if (alliesList.nonEmpty && (neutralsList.nonEmpty || enemiesList.nonEmpty))
-        label("Allies", alliesList.size, allyEmoji) :: alliesList
+        s"### $allyEmoji **Allies** $allyEmoji ${alliesList.size}" :: alliesList
       else alliesList
     val modifiedEnemies =
       if (enemiesList.nonEmpty && (alliesList.nonEmpty || neutralsList.nonEmpty))
-        label("Enemies", enemiesList.size, enemyEmoji) :: enemiesList
+        s"### $enemyEmoji **Enemies** $enemyEmoji ${enemiesList.size}" :: enemiesList
       else enemiesList
 
-    val headerToRemove = "-# **OTHERS**"
-    val hasOtherHeaders = flattenedNeutralsList.exists(h => h.startsWith("-# ") && !h.startsWith(headerToRemove))
+    val headerToRemove = "### Others"
+    val hasOtherHeaders = flattenedNeutralsList.exists(h => h.startsWith("### ") && !h.startsWith(headerToRemove))
     if (modifiedAllies.isEmpty && modifiedEnemies.isEmpty && !hasOtherHeaders)
       flattenedNeutralsList.filterNot(_.startsWith(headerToRemove))
     else

@@ -46,54 +46,38 @@ class OnlineListGroupingSpec extends AnyFunSuite with Matchers {
     OnlineListGrouping.groupByGuild(List("" -> "x", "" -> "y")) shouldBe List("" -> List("x", "y"))
   }
 
-  // --- labels ---
-
-  private val others: Int => String = n => OnlineListGrouping.label("Others", n)
-
-  test("a label is a small grey line with its name in bold capitals and the count") {
-    OnlineListGrouping.label("No Guild", 3) shouldBe "-# **NO GUILD** · 3"
-  }
-
-  test("an icon leads the label") {
-    OnlineListGrouping.label("Allies", 12, ":ally:") shouldBe "-# :ally: **ALLIES** · 12"
-  }
-
-  test("a guild's label links its name to the guild's page, keeping the page's own spelling") {
-    OnlineListGrouping.guildLabel("Bona Fide", 2) shouldBe s"-# **[BONA FIDE](${Urls.guildUrl("Bona Fide")})** · 2"
-  }
-
-  test("withHeaders prefixes each guild bucket with its label and count, lines following") {
+  test("withHeaders prefixes each guild bucket with a linked header and count, lines following") {
     val grouped = List("Bona Fide" -> List("m1", "m2"))
-    OnlineListGrouping.withHeaders(grouped, others) shouldBe List(
-      OnlineListGrouping.guildLabel("Bona Fide", 2), "m1", "m2")
+    OnlineListGrouping.withHeaders(grouped, n => s"### Others $n") shouldBe List(
+      s"### [Bona Fide](${Urls.guildUrl("Bona Fide")}) 2", "m1", "m2")
   }
 
-  test("withHeaders applies the caller's guildless label to the empty-name bucket") {
+  test("withHeaders applies the caller's guildless header to the empty-name bucket") {
     val grouped = List("" -> List("n1", "n2", "n3"))
-    OnlineListGrouping.withHeaders(grouped, n => OnlineListGrouping.label("No Guild", n)) shouldBe List(
-      "-# **NO GUILD** · 3", "n1", "n2", "n3")
+    OnlineListGrouping.withHeaders(grouped, n => s"### No Guild  $n") shouldBe List(
+      "### No Guild  3", "n1", "n2", "n3")
   }
 
   test("withHeaders preserves bucket order (guilds first, guildless last) end to end") {
     val grouped = OnlineListGrouping.groupByGuild(
       List("Big" -> "b1", "Big" -> "b2", "" -> "n1"))
-    OnlineListGrouping.withHeaders(grouped, others) shouldBe List(
-      OnlineListGrouping.guildLabel("Big", 2), "b1", "b2", "-# **OTHERS** · 1", "n1")
+    OnlineListGrouping.withHeaders(grouped, n => s"### Others $n") shouldBe List(
+      s"### [Big](${Urls.guildUrl("Big")}) 2", "b1", "b2", "### Others 1", "n1")
   }
 
   // --- combinedChannelBody ---
 
-  test("combinedChannelBody labels allies and enemies when all three categories are present") {
+  test("combinedChannelBody headers allies and enemies when all three categories are present") {
     val out = OnlineListGrouping.combinedChannelBody(
       alliesList = List("a1"),
       enemiesList = List("e1"),
       neutralsList = List("n1"),
-      flattenedNeutralsList = List("-# **OTHERS** · 1", "n1"),
+      flattenedNeutralsList = List("### Others 1", "n1"),
       allyEmoji = ":ally:", enemyEmoji = ":enemy:")
     out shouldBe List(
-      "-# :ally: **ALLIES** · 1", "a1",
-      "-# :enemy: **ENEMIES** · 1", "e1",
-      "-# **OTHERS** · 1", "n1")
+      "### :ally: **Allies** :ally: 1", "a1",
+      "### :enemy: **Enemies** :enemy: 1", "e1",
+      "### Others 1", "n1")
   }
 
   test("combinedChannelBody adds no section header when allies are the only category") {
@@ -103,16 +87,16 @@ class OnlineListGroupingSpec extends AnyFunSuite with Matchers {
       allyEmoji = ":ally:", enemyEmoji = ":enemy:") shouldBe List("a1", "a2")
   }
 
-  test("combinedChannelBody drops a lone Others label when neutrals are the only category") {
+  test("combinedChannelBody drops a lone '### Others' header when neutrals are the only category") {
     OnlineListGrouping.combinedChannelBody(
       alliesList = Nil, enemiesList = Nil,
       neutralsList = List("n1", "n2"),
-      flattenedNeutralsList = List("-# **OTHERS** · 2", "n1", "n2"),
+      flattenedNeutralsList = List("### Others 2", "n1", "n2"),
       allyEmoji = ":ally:", enemyEmoji = ":enemy:") shouldBe List("n1", "n2")
   }
 
-  test("combinedChannelBody keeps neutral guild labels when they are present") {
-    val flattened = List(OnlineListGrouping.guildLabel("GuildX", 1), "g1", "-# **OTHERS** · 1", "n1")
+  test("combinedChannelBody keeps neutral guild sub-headers when they are present") {
+    val flattened = List(s"### [GuildX](${Urls.guildUrl("GuildX")}) 1", "g1", "### Others 1", "n1")
     OnlineListGrouping.combinedChannelBody(
       alliesList = Nil, enemiesList = Nil,
       neutralsList = List("g1", "n1"),
@@ -120,12 +104,12 @@ class OnlineListGroupingSpec extends AnyFunSuite with Matchers {
       allyEmoji = ":ally:", enemyEmoji = ":enemy:") shouldBe flattened
   }
 
-  test("combinedChannelBody labels both allies and enemies when neutrals are absent") {
+  test("combinedChannelBody headers both allies and enemies when neutrals are absent") {
     OnlineListGrouping.combinedChannelBody(
       alliesList = List("a1"), enemiesList = List("e1"),
       neutralsList = Nil, flattenedNeutralsList = Nil,
       allyEmoji = ":ally:", enemyEmoji = ":enemy:") shouldBe List(
-      "-# :ally: **ALLIES** · 1", "a1",
-      "-# :enemy: **ENEMIES** · 1", "e1")
+      "### :ally: **Allies** :ally: 1", "a1",
+      "### :enemy: **Enemies** :enemy: 1", "e1")
   }
 }

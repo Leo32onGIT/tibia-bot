@@ -1625,7 +1625,7 @@ class TibiaBot(
               .map(charSort => charSort.guildName -> charSort.message))
 
           val flattenedNeutralsList: List[String] =
-            presentation.OnlineListGrouping.withHeaders(neutralsGroupedByGuild, n => presentation.OnlineListGrouping.label("Others", n))
+            presentation.OnlineListGrouping.withHeaders(neutralsGroupedByGuild, n => s"### Others $n")
 
           val totalCount = alliesList.size + neutralsList.size + enemiesList.size
 
@@ -1679,7 +1679,7 @@ class TibiaBot(
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedAlliesList: List[String] =
-        presentation.OnlineListGrouping.withHeaders(alliesGroupedByGuild, n => presentation.OnlineListGrouping.label("No Guild", n))
+        presentation.OnlineListGrouping.withHeaders(alliesGroupedByGuild, n => s"### No Guild  $n")
 
       val alliesTextChannel = guild.getTextChannelById(alliesChannel)
       if (alliesTextChannel != null) {
@@ -1702,7 +1702,7 @@ class TibiaBot(
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedNeutralsList: List[String] =
-        presentation.OnlineListGrouping.withHeaders(neutralsGroupedByGuild, n => presentation.OnlineListGrouping.label("No Guild", n))
+        presentation.OnlineListGrouping.withHeaders(neutralsGroupedByGuild, n => s"### No Guild  $n")
 
       val neutralsTextChannel = guild.getTextChannelById(neutralsChannel)
       if (neutralsTextChannel != null) {
@@ -1725,7 +1725,7 @@ class TibiaBot(
           .map(charSort => charSort.guildName -> charSort.message))
 
       val flattenedEnemiesList: List[String] =
-        presentation.OnlineListGrouping.withHeaders(enemiesGroupedByGuild, n => presentation.OnlineListGrouping.label("No Guild", n))
+        presentation.OnlineListGrouping.withHeaders(enemiesGroupedByGuild, n => s"### No Guild  $n")
 
       val enemiesTextChannel = guild.getTextChannelById(enemiesChannel)
       if (enemiesTextChannel != null) {
