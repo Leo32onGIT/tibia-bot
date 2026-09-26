@@ -22,6 +22,27 @@ object LinkResult {
   final case class Failed(reason: String) extends LinkResult
 }
 
+/** What asking for one account's feed came to. */
+sealed trait FeedResult[+A]
+object FeedResult {
+  final case class Fetched[A](value: A) extends FeedResult[A]
+  /** The API refused the credential — expired or revoked, or a hiccup on its side;
+   *  renewing it tells which (see [[RenewResult]]). */
+  case object Unauthorised extends FeedResult[Nothing]
+  /** Anything else: the sidecar or the API failed, and asking again may work. */
+  case object Failed extends FeedResult[Nothing]
+}
+
+/** What renewing a credential came to. */
+sealed trait RenewResult
+object RenewResult {
+  final case class Renewed(credential: String) extends RenewResult
+  /** The API refused to log in with it: the link is dead and needs a fresh token. */
+  case object Rejected extends RenewResult
+  /** The sidecar or the API failed; the credential may still be good. */
+  case object Failed extends RenewResult
+}
+
 /** What setting one kind of rule on an account came to. The API caps how many
  *  rules an account holds, so `applied` can be fewer worlds than were asked for;
  *  `skipped` are the ones left without a rule, and `limit` the cap. `detail` says
@@ -117,7 +138,7 @@ final class ObserverApiClient(
     )))
 
   /** Remove the bot's rules, MWC and raid, from the account: on unlink, and when
-   *  no world is both the account's and set up in the guild it was linked in. */
+   *  no guild tracks any of the account's worlds. */
   def clearRules(credential: String): Boolean =
     post("/clear-rules", JsObject(
       "credential" -> JsString(credential),
@@ -127,31 +148,33 @@ final class ObserverApiClient(
       case Left(_)  => false
     }
 
-  /** The currently-active mini world changes for this credential's enabled rules. */
-  def mwc(credential: String): List[MiniWorldChange] = mwcResult(credential).getOrElse(Nil)
-
-  /** As [[mwc]], but `None` when the fetch failed — so a caller watching for changes
-   *  can tell a failure apart from nothing being active. */
-  def mwcResult(credential: String): Option[List[MiniWorldChange]] =
-    post("/mwc", JsObject("bearerToken" -> JsString(credential))) match {
-      case Left(_) => None
+  /** A feed's answer: its `key` array read by `item`, the credential refused when
+   *  the sidecar says so, and a failure otherwise — so a caller can tell a failure
+   *  apart from nothing being active, and a dead link apart from both. */
+  private def feed[A](answer: Either[String, JsObject], key: String)(item: JsObject => A): FeedResult[List[A]] =
+    answer match {
+      case Left(_) => FeedResult.Failed
+      case Right(o) if str(o, "status").contains("unauthorised") => FeedResult.Unauthorised
       case Right(o) =>
-        o.fields.get("miniWorldChanges").collect { case JsArray(items) =>
-          items.collect { case item: JsObject =>
-            // `world` is what the feed was seen to send; the raids feed calls the
-            // same thing `worldName`, so either is taken.
-            val change = MiniWorldChange(
-              str(item, "world").orElse(str(item, "worldName")).getOrElse(""),
-              str(item, "title").getOrElse(""),
-              str(item, "body").getOrElse(""))
-            if ((change.world.isEmpty || change.title.isEmpty) && !reportedShape) {
-              reportedShape = true
-              logger.warn("A mini world change arrived without a world or title, so it is dropped; " +
-                s"its fields were: ${item.fields.keys.toList.sorted.mkString(", ")}")
-            }
-            change
-          }.toList
-        }
+        o.fields.get(key).collect { case JsArray(items) => items.collect { case i: JsObject => item(i) }.toList }
+          .fold[FeedResult[List[A]]](FeedResult.Failed)(FeedResult.Fetched(_))
+    }
+
+  /** The currently-active mini world changes for this credential's enabled rules. */
+  def mwc(credential: String): FeedResult[List[MiniWorldChange]] =
+    feed(post("/mwc", JsObject("bearerToken" -> JsString(credential))), "miniWorldChanges") { item =>
+      // `world` is what the feed was seen to send; the raids feed calls the
+      // same thing `worldName`, so either is taken.
+      val change = MiniWorldChange(
+        str(item, "world").orElse(str(item, "worldName")).getOrElse(""),
+        str(item, "title").getOrElse(""),
+        str(item, "body").getOrElse(""))
+      if ((change.world.isEmpty || change.title.isEmpty) && !reportedShape) {
+        reportedShape = true
+        logger.warn("A mini world change arrived without a world or title, so it is dropped; " +
+          s"its fields were: ${item.fields.keys.toList.sorted.mkString(", ")}")
+      }
+      change
     }
 
   /** Whether a change the pool cannot use has been reported, so a feed whose shape
@@ -164,20 +187,24 @@ final class ObserverApiClient(
   private def parseInstant(s: String): Option[Instant] =
     try Some(OffsetDateTime.parse(s).toInstant) catch { case _: Throwable => None }
 
-  /** Renew the durable credential (mint a fresh ~90-day JWT). `None` on failure. */
-  def renew(credential: String): Option[String] =
+  /** Renew the durable credential (mint a fresh ~90-day JWT). Only a 401 from the
+   *  API's login counts as rejected: a 403 is the transport gate in front of it,
+   *  not an answer about the credential. */
+  def renew(credential: String): RenewResult =
     post("/renew", JsObject(
       "credential" -> JsString(credential),
       "deviceIdentification" -> JsString(deviceIdentification)
     )) match {
-      case Right(o) if bool(o, "ok") => str(o, "credential")
-      case _                         => None
+      case Right(o) if bool(o, "ok") =>
+        str(o, "credential").fold[RenewResult](RenewResult.Failed)(RenewResult.Renewed(_))
+      case Right(o) if intOf(o, "status_code") == 401 => RenewResult.Rejected
+      case _ => RenewResult.Failed
     }
 
-  /** Ensure enabled raid rules covering every region of these worlds, most wanted
-   *  first while the account has room: the aim is every raid, not only those in
-   *  areas the account has explored. A world the account has explored areas on is
-   *  covered too, after these. */
+  /** Ensure enabled raid rules on these worlds, most wanted first while the account
+   *  has room. Each covers only the areas the account has explored there — a rule
+   *  over every region was stored but never matched a raid (25 Sep 2026) — so the
+   *  sidecar leaves out a world with nothing explored (see `observer-sidecar`). */
   def ensureRaidRules(credential: String, worlds: List[String]): RulesResult =
     rulesResult(post("/ensure-raid-rules", JsObject(
       "credential" -> JsString(credential),
@@ -186,21 +213,15 @@ final class ObserverApiClient(
     )))
 
   /** The currently-announced/active raids for this credential's enabled rules. */
-  def raids(credential: String): List[RaidAnnouncement] =
-    post("/raids", JsObject("bearerToken" -> JsString(credential))) match {
-      case Left(_) => Nil
-      case Right(o) =>
-        o.fields.get("raids").collect { case JsArray(items) =>
-          items.collect { case item: JsObject =>
-            RaidAnnouncement(
-              str(item, "raidId").getOrElse(""),
-              str(item, "worldName").getOrElse(""),
-              str(item, "areaName").getOrElse(""),
-              str(item, "subareaName"),
-              str(item, "category").getOrElse(""),
-              str(item, "startDate").flatMap(parseInstant),
-              intOf(item, "raidTypeId"))
-          }.toList
-        }.getOrElse(Nil)
+  def raids(credential: String): FeedResult[List[RaidAnnouncement]] =
+    feed(post("/raids", JsObject("bearerToken" -> JsString(credential))), "raids") { item =>
+      RaidAnnouncement(
+        str(item, "raidId").getOrElse(""),
+        str(item, "worldName").getOrElse(""),
+        str(item, "areaName").getOrElse(""),
+        str(item, "subareaName"),
+        str(item, "category").getOrElse(""),
+        str(item, "startDate").flatMap(parseInstant),
+        intOf(item, "raidTypeId"))
     }
 }

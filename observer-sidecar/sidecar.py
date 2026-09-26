@@ -284,8 +284,8 @@ def ensure_raid_rules():
     default went back to explored. Each rule carries a real id (see NIL_RULE_ID).
     A world with nothing explored gets no rule and is reported as `unexplored`.
     `worlds` is exactly what gets a rule, most wanted first: the bot sends only worlds the
-    account has characters on that the linking guild has set up, and nothing else
-    is added here. An empty list leaves the account with none of the bot's raid
+    account has characters on that some guild tracks, the linking guild's first, and
+    nothing else is added here. An empty list leaves the account with none of the bot's raid
     rules. All three modes (area/subarea revealed, raid started) are on, so the
     /Raids feed carries every stage; the bot filters by `category`. Like MWC
     rules, raid rules are capped (`maximumRaidNotificationRules`), so worlds are

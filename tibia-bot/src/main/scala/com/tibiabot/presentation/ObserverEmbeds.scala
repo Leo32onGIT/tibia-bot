@@ -225,16 +225,14 @@ object ObserverEmbeds {
   def raidLineMessage(message: String): MessageCreateData =
     MessageCreateData.fromEmbeds(raidLineEmbed(message))
 
-  /** Add is offered when there is no token; Remove when there is one. The other is
-   *  shown disabled so the panel always reads as a pair (as `/boosted` does). The
-   *  world is asked for inside the Add form, not here. */
-  def controls(token: Option[ObserverToken]): ActionRow =
-    if (token.isDefined)
-      ActionRow.of(
-        Button.success("observer add", "Add").asDisabled,
-        Button.danger("observer remove", "Remove"))
-    else
-      ActionRow.of(
-        Button.success("observer add", "Add"),
-        Button.danger("observer remove", "Remove").asDisabled)
+  /** Add is offered when there is no token, or one that needs replacing — the
+   *  panel tells its member to press it; Remove whenever there is one. A button
+   *  not offered is shown disabled so the panel always reads as a pair (as
+   *  `/boosted` does). */
+  def controls(token: Option[ObserverToken]): ActionRow = {
+    val replaceable = token.forall(t => t.status == ObserverStatus.NeedsRelink || t.status == ObserverStatus.Error)
+    ActionRow.of(
+      Button.success("observer add", "Add").withDisabled(!replaceable),
+      Button.danger("observer remove", "Remove").withDisabled(token.isEmpty))
+  }
 }

@@ -42,9 +42,10 @@ import scala.util.Try
  *  Raids change by the minute, so their copy just expires: after
  *  [[ObserverFeed.PublishedFor]], a little over two of the primary's slowest polls.
  *
- *  @param fetchMwc       the pool straight from the API; None when any account's
- *                        fetch failed, since a partial pool would read as changes
- *                        ending
+ *  @param fetchMwc       the pool straight from the API; None when an account's
+ *                        fetch failed with no share of it since the latest server
+ *                        save to fall back on, since a partial pool would read as
+ *                        changes ending (see ObserverService.fetchPooledMwc)
  *  @param fetchRaids     the raid pool straight from the API
  *  @param lastServerSave the latest server save at or before an instant */
 final class ObserverFeed(

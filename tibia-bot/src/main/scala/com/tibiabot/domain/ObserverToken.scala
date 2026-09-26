@@ -24,8 +24,11 @@ final case class ObserverToken(
   def worlds: List[String] = world.toList.flatMap(_.split(",").map(_.trim).filter(_.nonEmpty))
 }
 
-/** Lifecycle of a stored link. Phase 1 (mode off) only ever produces `Pending`;
- *  live verification in a later phase moves it to `Linked` / `NeedsRelink`. */
+/** Lifecycle of a stored link. With the Observer API off a token is only stored,
+ *  `Pending`; linking it live makes it `Linked`. `NeedsRelink` is a link whose
+ *  credential the API refused and would not renew — revoked, or expired — which
+ *  is no longer polled until its member adds a fresh token (or a later renewal
+ *  finds it works after all). */
 sealed trait ObserverStatus { def code: String }
 
 object ObserverStatus {

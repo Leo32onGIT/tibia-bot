@@ -49,8 +49,8 @@ final case class SetupResult(embed: MessageEmbed, buttons: List[Button] = Nil)
  *  @param startBot            BotApp's bootstrap routine (touches nearly every state map); kept as a callback rather than moved/duplicated
  *  @param serverSaveEmbeds    the whole notifications message around the boosted boss and creature for a world (Mini World Changes above them; Rashid, Dream Courts and Drome below); stays in BotApp (Dream Scar/Drome state), passed as a callback
  *  @param syncPatreonBeforeCheck refreshes the Patreon snapshot the `/setup` paywall gate reads; throttled and time-bounded by the caller (BotApp.syncPatreonMembersForSetup), so this may legitimately do nothing
- *  @param worldSetUp          runs once a `/setup` has made a world's channels; BotApp gives the world its raids channel when a Tibia Observer token linked in the guild covers it, and sets the guild's Observer links' rules again
- *  @param worldRemoved        runs once a `/remove` has deleted a world's row; BotApp sets the guild's Observer links' rules again, without that world
+ *  @param worldSetUp          runs once a `/setup` has made a world's channels; BotApp gives the world its raids channel when a Tibia Observer token linked in the guild covers it, and sets the rules again for the guild's Observer links and every account with a character on the world
+ *  @param worldRemoved        runs once a `/remove` has deleted a world's row; BotApp sets the same links' rules again, which drop the world once no guild tracks it
  */
 final class ChannelService(
   streamSupervisor: StreamSupervisor,

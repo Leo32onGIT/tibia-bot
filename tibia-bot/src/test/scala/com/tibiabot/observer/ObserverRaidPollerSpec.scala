@@ -10,10 +10,10 @@ import java.time.{Duration, Instant}
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 
-/** A raid through its three stages, as an account with limited discoveries sees
- *  it: the area and the start an hour ahead, the subarea 15 minutes ahead, and
- *  which raid it is only once it has started. The posts are stand-ins that say
- *  what they are, so these run without Config. */
+/** A raid through its three stages, as every account sees it: the area and the
+ *  start an hour ahead, the subarea 15 minutes ahead, and which raid it is only
+ *  once it has started. The posts are stand-ins that say what they are, so these
+ *  run without Config. */
 class ObserverRaidPollerSpec extends AnyFunSuite with Matchers {
 
   /** Winter Wolves near Krimhorn, Hrodmir: two lines, at the start and 220s in. */

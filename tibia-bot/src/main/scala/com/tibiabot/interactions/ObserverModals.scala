@@ -8,8 +8,8 @@ import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent
 
 /** The form behind the `/observer` **Add** button: takes the 5-char Tibia Observer
  *  token, links it for this member, and ensures a raids channel for every world the
- *  server tracks — the world context comes from the server's own setup, so the
- *  member never names a world.
+ *  server tracks that the account has characters on — the world context comes from
+ *  the server's own setup and the account, so the member never names a world.
  *
  *  Routed apart from [[ModalHandler]] like the notification forms: it answers with an
  *  ephemeral of its own rather than rewriting the panel it was opened from. Already

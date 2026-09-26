@@ -9,7 +9,8 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-/** A secondary handing link and clear-rules requests to the primary over Redis. */
+/** A secondary handing link, clear-rules and re-apply requests to the primary over
+ *  Redis. */
 class ObserverRelaySpec extends AnyFunSuite with Matchers {
 
   private implicit val ec: ExecutionContext = ExecutionContext.global
@@ -65,17 +66,17 @@ class ObserverRelaySpec extends AnyFunSuite with Matchers {
     seen.map(r => (r.op, r.token)) shouldBe List((ObserverRelay.OpClearRules, None))
   }
 
-  test("re-applying a guild's rules names the guild, not a member, and is not waited on") {
+  test("re-applying rules names the guild and the world, not a member, and is not waited on") {
     val redis = new FakeRedis
     val seen = ListBuffer.empty[ObserverRelay.Request]
     serving(redis) { request => seen.synchronized(seen += request); ObserverRelay.Done }
-    relay(redis).reapplyRules("g1") shouldBe true
-    eventually(seen.synchronized(seen.toList)).map(r => (r.op, r.guildId, r.userId, r.token)) shouldBe
-      List((ObserverRelay.OpReapplyRules, "g1", "", None))
+    relay(redis).reapplyRules("g1", Some("Antica")) shouldBe true
+    eventually(seen.synchronized(seen.toList)).map(r => (r.op, r.guildId, r.userId, r.token, r.world)) shouldBe
+      List((ObserverRelay.OpReapplyRules, "g1", "", None, Some("Antica")))
   }
 
   test("re-applying with no primary listening says so") {
-    relay(new FakeRedis).reapplyRules("g1") shouldBe false
+    relay(new FakeRedis).reapplyRules("g1", Some("Antica")) shouldBe false
   }
 
   /** The request is handled after the publish returns, so wait briefly for it. */
@@ -115,6 +116,11 @@ class ObserverRelaySpec extends AnyFunSuite with Matchers {
     val request = ObserverRelay.Request("id-1", ObserverRelay.OpLink, "g1", "u1", Some("ABCDE"))
     ObserverRelay.decodeRequest(ObserverRelay.encode(request)) shouldBe Some(request)
     ObserverRelay.decodeRequest(ObserverRelay.encode(request.copy(token = None))) shouldBe Some(request.copy(token = None))
+    val reapply = ObserverRelay.Request("id-2", ObserverRelay.OpReapplyRules, "g1", "", None, Some("Antica"))
+    ObserverRelay.decodeRequest(ObserverRelay.encode(reapply)) shouldBe Some(reapply)
+    // A request from a bot that did not send the world yet still reads.
+    ObserverRelay.decodeRequest("""{"id": "id-3", "op": "reapply-rules", "guildId": "g1", "userId": ""}""") shouldBe
+      Some(ObserverRelay.Request("id-3", ObserverRelay.OpReapplyRules, "g1", "", None, None))
     List(ObserverRelay.Linked, ObserverRelay.InvalidToken, ObserverRelay.Done, ObserverRelay.Failed("why"))
       .foreach(reply => ObserverRelay.decodeReply(ObserverRelay.encode(reply)) shouldBe Some(reply))
     ObserverRelay.decodeRequest("not json") shouldBe None
