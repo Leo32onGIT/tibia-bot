@@ -35,9 +35,12 @@ Keep it bound to loopback. The bot points at it via `observer-api.sidecar-url`
 | GET | `/health` | — | `{ ok, minimalClientVersion }` |
 | POST | `/link` | `{ accessToken, deviceIdentification, clientVersion? }` | `{ ok, status, credential, expires, accountLabel, accountCount, raw }` |
 | POST | `/renew` | `{ credential, deviceIdentification, clientVersion? }` | `{ ok, credential, expires, raw }` |
-| POST | `/ensure-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds }` |
+| POST | `/ensure-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds, skipped, limit, unchanged }` |
+| POST | `/ensure-raid-rules` | `{ credential, worlds:[…], deviceIdentification? }` | `{ ok, worlds, skipped, limit, unchanged, unexplored?, regions, explored, areaNames, areaFields }` |
+| POST | `/explored-areas` | `{ credential }` | `{ ok, explored: {world: [areaId]}, areaNames: {areaId: name} }` |
 | POST | `/clear-rules` | `{ credential, deviceIdentification? }` | `{ ok }` |
 | POST | `/mwc` | `{ bearerToken }` | `{ ok, miniWorldChanges: [{world,title,body,…}] }` |
+| POST | `/raids` | `{ bearerToken }` | `{ ok, raids: [{raidId,worldName,areaName,…}] }` |
 
 The credential model (confirmed live):
 - The `accessToken` (5-char code) is **case-sensitive and single-use** — sent verbatim.
@@ -53,3 +56,7 @@ The credential model (confirmed live):
   **enabled** rule for. `/ensure-rules` sets enabled all-types rules (named
   "Violent Bot", in-app notifications only) for the given worlds, preserving every
   other world and category; `/clear-rules` removes just those on unlink.
+- Both `ensure-` endpoints store only when the bot's rules would change, and say
+  `unchanged` when they already were as asked. The bot reads `/explored-areas` on
+  every raid check and sets the raid rules again only when an account has explored
+  something new.

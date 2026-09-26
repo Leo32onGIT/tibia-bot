@@ -42,9 +42,18 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
       case Some(JsString("explorer")) => answer(exchange, 200,
         """{"ok": true, "status_code": 200, "worlds": ["Victoris"], "skipped": [], "limit": 15,
           | "regions": {"Victoris": [3, 11, 23]}, "areaNames": {"3": "Carlin", "11": ""},
-          | "areaFields": ["areaId", "areaName"]}""".stripMargin)
+          | "areaFields": ["areaId", "areaName"], "explored": {"Victoris": [3, 11, 23], "Xyla": [7]},
+          | "unchanged": true}""".stripMargin)
       case _ => answer(exchange, 200,
         """{"ok": false, "status_code": 400, "worlds": [], "skipped": [], "limit": 15, "error": "too many rules"}""")
+    }
+  })
+  server.createContext("/explored-areas", exchange => {
+    val body = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8).parseJson.asJsObject
+    body.fields.get("credential") match {
+      case Some(JsString("revoked")) => answer(exchange, 401, """{"ok": false, "status": "unauthorised"}""")
+      case _ => answer(exchange, 200,
+        """{"ok": true, "status_code": 200, "explored": {"Victoris": [3, 7]}, "areaNames": {"3": "Carlin", "7": "Edron"}}""")
     }
   })
   // A renewal answers by the credential it was asked to renew.
@@ -93,6 +102,21 @@ class ObserverRulesSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll
     // A blank name is no name.
     result.areaNames shouldBe Map(3 -> "Carlin")
     result.areaFields shouldBe List("areaId", "areaName")
+    result.explored shouldBe Some(Map("Victoris" -> List(3, 11, 23), "Xyla" -> List(7)))
+    result.unchanged shouldBe true
+  }
+
+  test("a refused store sends no explored areas, and isn't taken for rules already set") {
+    val result = client(new ApiCallMetrics()).ensureRaidRules("jwt", List("Victoris"))
+    result.explored shouldBe None
+    result.unchanged shouldBe false
+  }
+
+  test("an account's explored areas are read with their names, and a refused credential is told apart") {
+    val c = client(new ApiCallMetrics())
+    c.exploredAreas("explorer") shouldBe
+      FeedResult.Fetched(ExploredAreas(Map("Victoris" -> List(3, 7)), Map(3 -> "Carlin", 7 -> "Edron")))
+    c.exploredAreas("revoked") shouldBe FeedResult.Unauthorised
   }
 
   test("asking for no MWC worlds sets nothing and makes no request") {

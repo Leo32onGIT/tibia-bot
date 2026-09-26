@@ -207,9 +207,12 @@ def _rule_limit(key):
 def _stored(r, applied, skipped, limit, unexplored=None, extra=None):
     """The answer to a settings store: which worlds got a rule, which were left out
     for want of room, which (raids only) had nothing explored to cover, and the
-    upstream's own words when it refused. `extra` is added as it is."""
-    ok = r.status_code == 200
-    out = {"ok": ok, "status_code": r.status_code, "worlds": applied, "skipped": skipped, "limit": limit}
+    upstream's own words when it refused. `r` is None when the rules were already
+    as asked and nothing was stored (`unchanged`). `extra` is added as it is."""
+    status = 200 if r is None else r.status_code
+    ok = status == 200
+    out = {"ok": ok, "status_code": status, "worlds": applied, "skipped": skipped, "limit": limit,
+           "unchanged": r is None}
     if unexplored:
         out["unexplored"] = unexplored
     if extra:
@@ -217,6 +220,60 @@ def _stored(r, applied, skipped, limit, unexplored=None, extra=None):
     if not ok:
         out["error"] = (r.text or "")[:300]
     return jsonify(out)
+
+
+def _field(rule, *keys):
+    """A rule's field under whichever spelling the settings came back with."""
+    for key in keys:
+        if key in rule:
+            return rule[key]
+    return None
+
+
+def _same_raid_rules(before, after):
+    """Whether the bot's raid rules on the account are already `after`: the same
+    worlds, regions, modes and a real rule id each. Anything unreadable counts as
+    different, so the worst a changed shape does is store as before."""
+    def shape(r):
+        return ((_field(r, "World", "world") or "").lower(),
+                tuple(sorted(_field(r, "RegionIds", "regionIds") or [])),
+                bool(_field(r, "isEnabled", "IsEnabled")),
+                _field(r, "areaRevealed", "AreaRevealed"), _field(r, "subareaRevealed", "SubareaRevealed"),
+                _field(r, "raidStarted", "RaidStarted"))
+    if any(_field(r, "ruleId", "RuleId") in (None, NIL_RULE_ID) for r in before):
+        return False
+    return sorted(map(shape, before)) == sorted(map(shape, after))
+
+
+def _same_mwc_rules(before, after):
+    """Whether the bot's mini world change rules on the account are already
+    `after`, as [[_same_raid_rules]] does for raids."""
+    def shape(r):
+        return ((_field(r, "World", "world") or "").lower(),
+                tuple(sorted(_field(r, "miniWorldChanges", "MiniWorldChanges") or [])),
+                bool(_field(r, "isEnabled", "IsEnabled")),
+                _field(r, "notifications", "Notifications"))
+    return sorted(map(shape, before)) == sorted(map(shape, after))
+
+
+def _explored_by_world(areas):
+    """`/Area/ExploredAreas` — [{world, exploredAreas: [{areaId, name}]}] — as
+    ({world: sorted ids}, {id: name}, sorted field names of an area). A world with
+    nothing explored is left out."""
+    by_world, names, fields = {}, {}, set()
+    for entry in areas or []:
+        ids = set()
+        for area in entry.get("exploredAreas") or []:
+            fields.update(area.keys())
+            if area.get("areaId") is None:
+                continue
+            ids.add(area["areaId"])
+            name = area.get("areaName") or area.get("name")
+            if name:
+                names[str(area["areaId"])] = name
+        if ids and entry.get("world"):
+            by_world[entry["world"]] = sorted(ids)
+    return by_world, names, sorted(fields)
 
 
 @app.post("/ensure-rules")
@@ -250,8 +307,11 @@ def ensure_rules():
         applied, skipped = worlds[:room], worlds[room:]
         managed = [{"ruleName": RULE_NAME, "World": w, "miniWorldChanges": ids,
                     "isEnabled": True, "notifications": "appNotifications"} for w in applied]
-        settings["miniWorldChangeNotificationRules"] = kept + managed
-        r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
+        # Stored only when they differ from the bot's rules already on the account.
+        before = [r for r in existing if r.get("ruleName") == RULE_NAME]
+        r = None if _same_mwc_rules(before, managed) else \
+            _observer("POST", "/Settings/StoreUserSettings", bearer=credential,
+                      body={**settings, "miniWorldChangeNotificationRules": kept + managed})
         return _stored(r, applied, skipped, limit)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
@@ -310,8 +370,7 @@ def ensure_raid_rules():
         areas = explored.json() if explored.status_code == 200 else []
         # What each world's rule covers; explored worlds don't earn a rule of
         # their own.
-        explored_ids = {e["world"]: [a["areaId"] for a in e["exploredAreas"]]
-                        for e in areas if e.get("exploredAreas")}
+        explored_ids, names, fields = _explored_by_world(areas)
         explored_by_world = {w.lower(): ids for w, ids in explored_ids.items()}
 
         def regions(world):
@@ -341,21 +400,41 @@ def ensure_raid_rules():
             "isEnabled": True, "areaRevealed": "appNotifications",
             "subareaRevealed": "appNotifications", "raidStarted": "appNotifications",
         } for w in applied]
-        settings["raidNotificationRules"] = kept + managed
-        r = _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body=settings)
+        # Stored only when they differ from the bot's rules already on the account:
+        # the bot sets them daily and whenever explored areas change, and most of
+        # those times nothing has.
+        before = [r for r in existing if r.get("ruleName") == RULE_NAME]
+        r = None if _same_raid_rules(before, managed) else \
+            _observer("POST", "/Settings/StoreUserSettings", bearer=credential, body={**settings, "raidNotificationRules": kept + managed})
         # What each rule covers, for the bot's /observer coverage: the region ids per
-        # world that got a rule, and whatever name the explored areas carry for an
-        # id. `areaFields` lists the fields an explored area has, so a missing name
-        # can be traced to the shape rather than guessed at.
-        names, fields = {}, set()
-        for entry in areas:
-            for area in entry.get("exploredAreas") or []:
-                fields.update(area.keys())
-                name = area.get("areaName") or area.get("name")
-                if name and area.get("areaId") is not None:
-                    names[str(area["areaId"])] = name
-        extra = {"regions": {w: regions(w) for w in applied}, "areaNames": names, "areaFields": sorted(fields)}
+        # world that got a rule, every explored area (so the bot can tell when that
+        # changes), and whatever name the explored areas carry for an id.
+        # `areaFields` lists the fields an explored area has, so a missing name can
+        # be traced to the shape rather than guessed at.
+        extra = {"regions": {w: regions(w) for w in applied}, "explored": explored_ids,
+                 "areaNames": names, "areaFields": fields}
         return _stored(r, applied, skipped, limit, unexplored, extra)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.post("/explored-areas")
+def explored_areas():
+    """The areas an account has explored, per world, and their names: one read,
+    which the bot makes on every raid check to see whether a member has explored
+    something new since their raid rules were set. Nothing is stored."""
+    b = _json_body()
+    credential = b.get("credential")
+    if not credential:
+        return jsonify({"ok": False, "error": "credential required"}), 400
+    try:
+        r = _observer("GET", "/Area/ExploredAreas", bearer=credential)
+        if r.status_code == 401:
+            return jsonify({"ok": False, "status": "unauthorised"}), 401
+        if r.status_code != 200:
+            return jsonify({"ok": False, "status_code": r.status_code}), 502
+        explored, names, _ = _explored_by_world(r.json())
+        return jsonify({"ok": True, "status_code": 200, "explored": explored, "areaNames": names})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 502
 

@@ -33,15 +33,29 @@ class ObserverRuleScopeSpec extends AnyFunSuite with Matchers with BeforeAndAfte
       val credential = body.fields.get("credential").collect { case JsString(c) => c }.getOrElse("")
       val worlds = body.fields.get("worlds").collect { case JsArray(ws) => ws.collect { case JsString(w) => w }.toList }
       calls.synchronized(calls += ((path, credential, worlds.getOrElse(Nil))))
-      // Every raid rule covers area 3 (Carlin).
+      // Every raid rule covers area 3 (Carlin); what the account has explored is
+      // whatever `explored` holds for it.
       val regions = JsObject(worlds.getOrElse(Nil).map(w => w -> JsArray(JsNumber(3))).toMap)
-      val answer = s"""{"ok": true, "status_code": 200, "worlds": ${JsArray(worlds.getOrElse(Nil).map(JsString(_)): _*)}, "skipped": [], "limit": 15, "regions": $regions}"""
+      val answer = s"""{"ok": true, "status_code": 200, "worlds": ${JsArray(worlds.getOrElse(Nil).map(JsString(_)): _*)}, "skipped": [], "limit": 15, "regions": $regions, "explored": ${explored.getOrElse(credential, JsObject())}}"""
       val bytes = answer.getBytes(StandardCharsets.UTF_8)
       exchange.sendResponseHeaders(200, bytes.length.toLong)
       exchange.getResponseBody.write(bytes)
       exchange.close()
     })
   }
+
+  /** What each credential's account has explored, as the API would answer. */
+  private val explored = TrieMap.empty[String, JsObject]
+  server.createContext("/explored-areas", exchange => {
+    val credential = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8).parseJson.asJsObject
+      .fields.get("credential").collect { case JsString(c) => c }.getOrElse("")
+    calls.synchronized(calls += (("/explored-areas", credential, Nil)))
+    val bytes = s"""{"ok": true, "status_code": 200, "explored": ${explored.getOrElse(credential, JsObject())}, "areaNames": {}}"""
+      .getBytes(StandardCharsets.UTF_8)
+    exchange.sendResponseHeaders(200, bytes.length.toLong)
+    exchange.getResponseBody.write(bytes)
+    exchange.close()
+  })
 
   override def beforeAll(): Unit = server.start()
   override def afterAll(): Unit = server.stop(0)
@@ -127,6 +141,26 @@ class ObserverRuleScopeSpec extends AnyFunSuite with Matchers with BeforeAndAfte
     val coverage = new Coverage
     recorded(service(List(token("g1", "u1", "Victoris")), _ => List("Antica"), () => List("Antica"), coverage).reapplyRules())
     coverage.cleared.toList shouldBe List("g1" -> "u1")
+  }
+
+  test("an account that explores something new has its rules set again at the next check, and only then") {
+    val svc = service(List(token("g1", "u1", "Victoris")), _ => List("Victoris"), () => List("Victoris"))
+    val cred = credential("g1", "u1")
+    explored.put(cred, JsObject("Victoris" -> JsArray(JsNumber(3))))
+    // Setting the rules notes what the account had explored.
+    recorded(svc.reapplyRules())
+    // Nothing new: one read, and no rules set.
+    recorded(svc.refreshExplored()) shouldBe List(("/explored-areas", cred, Nil))
+    explored.put(cred, JsObject("Victoris" -> JsArray(JsNumber(3), JsNumber(7))))
+    recorded(svc.refreshExplored()).map(_._1) shouldBe List("/explored-areas", "/ensure-rules", "/ensure-raid-rules")
+    // The new area is noted, so the check after sets nothing.
+    recorded(svc.refreshExplored()).map(_._1) shouldBe List("/explored-areas")
+  }
+
+  test("the first check with nothing to compare against only notes the areas") {
+    val svc = service(List(token("g2", "u2", "Victoris")), _ => List("Victoris"), () => List("Victoris"))
+    explored.put(credential("g2", "u2"), JsObject("Victoris" -> JsArray(JsNumber(3))))
+    recorded(svc.refreshExplored()).map(_._1) shouldBe List("/explored-areas")
   }
 
   test("rules are left as they are when the worlds can't be read") {

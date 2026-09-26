@@ -7,6 +7,7 @@ import com.tibiabot.scheduler.ServerSaveSchedule
 import com.typesafe.scalalogging.StrictLogging
 
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future, blocking}
@@ -331,16 +332,65 @@ final class ObserverService(
    *  one per account whose rules cover the raid's area. The raids poller combines
    *  them into one view of each raid (see ObserverRaidPoller.merge). An account
    *  that cannot be fetched just adds nothing this time: its raids are picked up by
-   *  the next poll, and what has been posted stays posted. The API side of
+   *  the next poll, and what has been posted stays posted. Each fetch also starts
+   *  a check of the members' explored areas (see `refreshExplored`). The API side of
    *  [[ObserverFeed]]. */
   def fetchPooledRaids(): Map[String, List[RaidAnnouncement]] =
     if (!enabled) Map.empty
-    else pollEach(linkedTokens(), "raids")(apiClient.raids)
-      .flatMap {
-        case (_, FeedResult.Fetched(raids)) => raids
-        case _                              => Nil
-      }
-      .distinct.groupBy(_.world)
+    else {
+      val raids = pollEach(linkedTokens(), "raids")(apiClient.raids)
+        .flatMap {
+          case (_, FeedResult.Fetched(raids)) => raids
+          case _                              => Nil
+        }
+        .distinct.groupBy(_.world)
+      checkExploredSoon()
+      raids
+    }
+
+  /** What each link had explored, per lower-cased world, when its rules were last
+   *  set or its explored areas last checked. */
+  private val exploredSeen = TrieMap.empty[(String, String), Map[String, Set[Int]]]
+  private val checkingExplored = new AtomicBoolean(false)
+
+  private def normalise(explored: Map[String, List[Int]]): Map[String, Set[Int]] =
+    explored.map { case (world, ids) => world.toLowerCase -> ids.toSet }.filter(_._2.nonEmpty)
+
+  /** [[refreshExplored]] after every raids fetch, in the background so a raid post
+   *  never waits on it, and never two at once. */
+  private def checkExploredSoon(): Unit =
+    if (checkingExplored.compareAndSet(false, true))
+      Future(blocking {
+        try refreshExplored()
+        finally checkingExplored.set(false)
+      })(ExecutionContext.global).failed.foreach { ex =>
+        logger.warn("Checking the Observer explored areas failed", ex)
+      }(ExecutionContext.global)
+
+  /** Read every link's explored areas — one read each, nothing stored — and set the
+   *  rules again for those that have explored something since their rules were set,
+   *  so a member who opens up an area has its raids within a raid check rather
+   *  than at the next daily run. Observer matches the day's raids again when a rule
+   *  changes, so one already announced there shows up too. A link with nothing to
+   *  compare against yet (the first check since boot) only has its areas noted. */
+  private[observer] def refreshExplored(): Unit = {
+    val changed = pollEach(linkedTokens(), "explored areas")(apiClient.exploredAreas).flatMap {
+      case (t, FeedResult.Fetched(now)) =>
+        try coverage.setNames(now.names)
+        catch { case ex: Throwable => logger.warn("Could not keep the Observer area names", ex) }
+        val explored = normalise(now.byWorld)
+        // Noted before the rules are set, so a failure waits for the daily run
+        // rather than retrying on every check.
+        exploredSeen.put(keyOf(t), explored).filter(_ != explored).map { before =>
+          val added = explored.flatMap { case (w, ids) => (ids -- before.getOrElse(w, Set.empty)).map(id => s"$w $id") }
+          logger.info(s"'${t.userId}' in guild '${t.guildId}' has explored more since their Observer rules were set " +
+            s"(${if (added.isEmpty) "areas changed" else added.toList.sorted.mkString(", ")}); setting them again")
+          t
+        }
+      case _ => None
+    }
+    if (changed.nonEmpty) ruleScope().foreach(scope => applyEach(changed, scope))
+  }
 
   /** Renew every link's credential, whichever bot it was linked through. The JWT
    *  lasts ~90 days and `/renew` mints a fresh one from it, so a daily sweep keeps
@@ -431,7 +481,8 @@ final class ObserverService(
         } else {
           val left = if (result.skipped.isEmpty) ""
             else s"; no room (limit ${result.limit.getOrElse("?")}) for ${result.skipped.mkString(", ")}"
-          logger.info(s"Observer $kind rules set for $who on ${result.applied.size} world(s): " +
+          val done = if (result.unchanged) "already set" else "set"
+          logger.info(s"Observer $kind rules $done for $who on ${result.applied.size} world(s): " +
             s"${result.applied.mkString(", ")}$left")
           Some(result)
         }
@@ -471,6 +522,7 @@ final class ObserverService(
    *  it until it has one, and the fields Observer sent say where a name could be. */
   private def recordCoverage(t: ObserverToken, result: RulesResult): Unit =
     try {
+      result.explored.foreach(explored => exploredSeen.put(keyOf(t), normalise(explored)))
       coverage.setAreas(t.guildId, t.userId, result.regions)
       coverage.setNames(result.areaNames)
       val named = ObserverAreas.KnownNames ++ coverage.names()
@@ -494,9 +546,11 @@ final class ObserverService(
   private val reportedUnnamed = TrieMap.empty[Int, Unit]
   private val reportedUnlisted = TrieMap.empty[String, Unit]
 
-  private def forgetCoverage(guildId: String, userId: String): Unit =
+  private def forgetCoverage(guildId: String, userId: String): Unit = {
+    exploredSeen.remove(keyOf(guildId, userId))
     try coverage.clearLink(guildId, userId)
     catch { case ex: Throwable => logger.warn(s"Could not forget what the Observer link for '$userId' in guild '$guildId' covered", ex) }
+  }
 
   /** The worlds an account gets rules for, most wanted first. The bot's rules on
    *  an account are one set, so every link that is probably the same account (see

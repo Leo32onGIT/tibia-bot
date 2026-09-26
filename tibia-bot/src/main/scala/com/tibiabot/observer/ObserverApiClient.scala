@@ -48,14 +48,23 @@ object RenewResult {
  *  `skipped` are the ones left without a rule, and `limit` the cap. `detail` says
  *  why it failed, when it did.
  *
+ *  `unchanged` when the rules were already as asked, so nothing was stored.
+ *
  *  For raid rules it also says what they cover: `regions`, the area ids each
- *  applied world's rule takes in; `areaNames`, the names Observer gave any of
- *  them; and `areaFields`, the fields its explored areas carry. */
+ *  applied world's rule takes in; `explored`, every area the account has explored
+ *  (absent from a sidecar that doesn't send it); `areaNames`, the names Observer
+ *  gave any of them; and `areaFields`, the fields its explored areas carry. */
 final case class RulesResult(ok: Boolean, applied: List[String], skipped: List[String],
                              limit: Option[Int], detail: String,
                              regions: Map[String, List[Int]] = Map.empty,
                              areaNames: Map[Int, String] = Map.empty,
-                             areaFields: List[String] = Nil)
+                             areaFields: List[String] = Nil,
+                             explored: Option[Map[String, List[Int]]] = None,
+                             unchanged: Boolean = false)
+
+/** The areas an account has explored, per world, and the names Observer gave
+ *  them. */
+final case class ExploredAreas(byWorld: Map[String, List[Int]], names: Map[Int, String])
 
 /** Talks to the local Observer sidecar (see `observer-sidecar/`), which owns the
  *  browser-TLS Cloudflare pass and the CipSoft request shapes. Everything here is a
@@ -100,21 +109,40 @@ final class ObserverApiClient(
       RulesResult(bool(o, "ok"), strings(o, "worlds"), strings(o, "skipped"),
         o.fields.get("limit").collect { case JsNumber(n) => n.toInt },
         (code.toList ++ str(o, "error")).mkString(": "),
-        regions = objectOf(o, "regions").map { case (world, ids) =>
-          world -> (ids match {
-            case JsArray(xs) => xs.collect { case JsNumber(n) => n.toInt }.toList
-            case _           => Nil
-          })
-        },
-        areaNames = objectOf(o, "areaNames").flatMap {
-          case (id, JsString(name)) if name.nonEmpty => id.toIntOption.map(_ -> name)
-          case _                                     => None
-        },
-        areaFields = strings(o, "areaFields"))
+        regions = idsByWorld(o, "regions"),
+        areaNames = areaNames(o),
+        areaFields = strings(o, "areaFields"),
+        explored = o.fields.get("explored").map(_ => idsByWorld(o, "explored")),
+        unchanged = bool(o, "unchanged"))
   }
 
   private def objectOf(o: JsObject, key: String): Map[String, JsValue] =
     o.fields.get(key).collect { case JsObject(fields) => fields }.getOrElse(Map.empty)
+
+  /** `{world: [id, …]}` under `key`. */
+  private def idsByWorld(o: JsObject, key: String): Map[String, List[Int]] =
+    objectOf(o, key).map { case (world, ids) =>
+      world -> (ids match {
+        case JsArray(xs) => xs.collect { case JsNumber(n) => n.toInt }.toList
+        case _           => Nil
+      })
+    }
+
+  /** `{id: name}`, leaving out a blank name. */
+  private def areaNames(o: JsObject): Map[Int, String] =
+    objectOf(o, "areaNames").flatMap {
+      case (id, JsString(name)) if name.nonEmpty => id.toIntOption.map(_ -> name)
+      case _                                     => None
+    }
+
+  /** The areas the account has explored now: one read, nothing stored. */
+  def exploredAreas(credential: String): FeedResult[ExploredAreas] =
+    post("/explored-areas", JsObject("credential" -> JsString(credential))) match {
+      case Left(_) => FeedResult.Failed
+      case Right(o) if str(o, "status").contains("unauthorised") => FeedResult.Unauthorised
+      case Right(o) if bool(o, "ok") => FeedResult.Fetched(ExploredAreas(idsByWorld(o, "explored"), areaNames(o)))
+      case Right(_) => FeedResult.Failed
+    }
 
   private def str(o: JsObject, key: String): Option[String] =
     o.fields.get(key).collect { case JsString(s) if s.nonEmpty => s }
