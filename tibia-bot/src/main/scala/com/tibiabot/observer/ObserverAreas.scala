@@ -8,8 +8,10 @@ object ObserverAreas {
   lazy val raidAreas: List[String] =
     RaidTypeCatalog.byId.values.flatMap(_.area).filter(_.nonEmpty).toList.distinct.sortBy(_.toLowerCase)
 
-  /** Area ids whose names were seen before Observer's own could be read: its rules
-   *  store numbers, and these two were matched to the account's explored areas on
-   *  25 Sep 2026. Observer's own names, once they come in with the rules, win. */
-  val KnownNames: Map[Int, String] = Map(3 -> "Carlin", 23 -> "Hrodmir")
+  /** Area ids as Observer named them in a linked account's explored areas (its
+   *  `name` field, read 27 Sep 2026), so the card is right before any rules have
+   *  been set since. The names that come in with the rules win. Quirefang has no
+   *  raids in the catalogue, so it isn't listed. */
+  val KnownNames: Map[Int, String] =
+    Map(3 -> "Carlin", 7 -> "Edron", 11 -> "Quirefang", 23 -> "Hrodmir", 25 -> "Venore")
 }
